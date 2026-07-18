@@ -1,0 +1,11 @@
+{
+  "name": "vtuber-simulator-api",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.826.0",
+    "@aws-sdk/client-dynamodb": "^3.826.0",
+    "@aws-sdk/lib-dynamodb": "^3.826.0",
+    "mustache": "^4.2.0"
+  }
+}

@@ -1,0 +1,6 @@
+# Node関連
+node_modules/
+package-lock.json
+
+# 作業用ディレクトリ
+作業用/
