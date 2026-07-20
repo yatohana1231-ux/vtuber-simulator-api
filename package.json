@@ -2,10 +2,20 @@
   "name": "vtuber-simulator-api",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "build": "esbuild src/handler.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/handler.mjs --external:@aws-sdk/* --loader:.mustache=text",
+    "build:watch": "npm run build -- --watch"
+  },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.826.0",
     "@aws-sdk/client-dynamodb": "^3.826.0",
     "@aws-sdk/lib-dynamodb": "^3.826.0",
     "mustache": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.0",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.4.0"
   }
 }

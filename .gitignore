@@ -4,3 +4,9 @@ package-lock.json
 
 # 作業用ディレクトリ
 作業用/
+
+# ビルド後資材
+dist/
+
+# CDK 出力
+infra/cdk.out/
