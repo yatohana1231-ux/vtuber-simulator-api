@@ -1,9 +1,8 @@
 # ==============================================================================
-# VTuber Simulator API - CI/CD Pipeline
+# VTuber Simulator API - CI/CD Pipeline (STG)
 # ==============================================================================
 # トリガー:
 #   - develop ブランチへの push → stg 環境へデプロイ
-#   - main ブランチへの push    → prod 環境へデプロイ
 #
 # 前提条件 (GitHub リポジトリ側で設定が必要):
 #   1. AWS OIDC Identity Provider を作成済み
@@ -13,21 +12,18 @@
 #      - 信頼ポリシーで対象リポジトリ/ブランチを許可
 #      - CDK デプロイに必要な権限を付与 (CloudFormation, Lambda, IAM, DynamoDB, API Gateway 等)
 #   3. リポジトリの Settings > Secrets and variables > Actions に以下を登録:
-#      - AWS_ROLE_ARN_STG  : stg 用 IAM ロール ARN
-#      - AWS_ROLE_ARN_PROD : prod 用 IAM ロール ARN
+#      - AWS_ROLE_ARN_STG : stg 用 IAM ロール ARN
 # ==============================================================================
 
-name: Deploy VTuber Simulator API
+name: Deploy VTuber Simulator API (STG)
 
 on:
   push:
     branches:
       - develop
-      - main
 
-# 同一ブランチで並行デプロイしないようにグループ化
 concurrency:
-  group: deploy-${{ github.ref_name }}
+  group: deploy-stg
   cancel-in-progress: false
 
 permissions:
@@ -56,30 +52,16 @@ jobs:
           cache: "npm"
 
       # --------------------------------------------------
-      # 3. ステージ名と IAM ロール ARN を決定
-      # --------------------------------------------------
-      - name: Determine stage
-        id: stage
-        run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "name=prod" >> "$GITHUB_OUTPUT"
-            echo "role_arn=${{ secrets.AWS_ROLE_ARN_PROD }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=stg" >> "$GITHUB_OUTPUT"
-            echo "role_arn=${{ secrets.AWS_ROLE_ARN_STG }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      # --------------------------------------------------
-      # 4. AWS 認証 (OIDC)
+      # 3. AWS 認証 (OIDC)
       # --------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ steps.stage.outputs.role_arn }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STG }}
           aws-region: ap-northeast-1
 
       # --------------------------------------------------
-      # 5. アプリケーションのビルド
+      # 4. アプリケーションのビルド
       # --------------------------------------------------
       - name: Install app dependencies
         run: npm ci
@@ -91,7 +73,7 @@ jobs:
         run: npm run build
 
       # --------------------------------------------------
-      # 6. CDK デプロイ
+      # 5. CDK デプロイ
       # --------------------------------------------------
       - name: Install CDK dependencies
         working-directory: infra
@@ -99,4 +81,4 @@ jobs:
 
       - name: CDK deploy
         working-directory: infra
-        run: npx cdk deploy --require-approval never --context stage=${{ steps.stage.outputs.name }}
+        run: npx cdk deploy VtuberSimulatorStack --require-approval never --context stage=stg
