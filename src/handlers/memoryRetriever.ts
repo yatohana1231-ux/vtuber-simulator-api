@@ -4,8 +4,9 @@
 // -------------------------------------------------------
 
 import { runMemoryRetriever } from "../memoryRetriever/index.js";
-import { createResponse, normalizeProfile, parseRequestBody } from "../lib/utils.js";
-import type { Action, CharacterProfile, MemoryRetrieverRequest } from "../types.js";
+import { loadRequestedPackage } from "../lib/packages.js";
+import { createResponse, parseRequestBody } from "../lib/utils.js";
+import type { Action, MemoryRetrieverRequest } from "../types.js";
 
 export const handler = async (event: unknown): Promise<unknown> => {
   console.log("Received event:", JSON.stringify(event));
@@ -23,22 +24,26 @@ export const handler = async (event: unknown): Promise<unknown> => {
       return createResponse(400, { error: "process must be 1 or 2" });
     }
 
-    const characterProfile = normalizeProfile(
-      body.characterProfile as Partial<CharacterProfile> | undefined
-    );
+    const pkg = await loadRequestedPackage(body.packageId);
+    if (!pkg) {
+      return createResponse(400, { error: "unknown packageId" });
+    }
+    const { world, character } = pkg;
 
     const req: MemoryRetrieverRequest =
       process === 1
         ? {
             characterId,
-            characterProfile,
+            world,
+            character,
             process: 1,
             events: Array.isArray(body.events) ? (body.events as string[]) : [],
             actions: Array.isArray(body.actions) ? (body.actions as Action[]) : [],
           }
         : {
             characterId,
-            characterProfile,
+            world,
+            character,
             process: 2,
           };
 

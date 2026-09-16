@@ -13,6 +13,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/memoryRetriever.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
+import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import {
   getRelevantMemories,
   getLogsForMemoryJudge,
@@ -21,10 +22,11 @@ import {
 } from "../lib/dynamo.js";
 import type {
   Action,
-  CharacterProfile,
+  CharacterDefinition,
   MemoryCandidate,
   MemoryRetrieverRequest,
   MemoryRetrieverResult,
+  World,
 } from "../types.js";
 
 const JUDGE_TURNS = 5; // プロセス2で判定する往復数
@@ -38,12 +40,12 @@ export async function runMemoryRetriever(
 ): Promise<void> {
   console.log(`[memoryRetriever] start process=${req.process}`);
 
-  const { characterId, characterProfile: profile } = req;
+  const { characterId, world, character } = req;
 
   if (req.process === 1) {
-    await judgeProcess1(characterId, profile, req.events, req.actions);
+    await judgeProcess1(characterId, world, character, req.events, req.actions);
   } else {
-    await judgeProcess2(characterId, profile);
+    await judgeProcess2(characterId, world, character);
   }
 }
 
@@ -53,7 +55,8 @@ export async function runMemoryRetriever(
 
 async function judgeProcess1(
   characterId: string,
-  profile: CharacterProfile,
+  world: World,
+  character: CharacterDefinition,
   events: string[],
   actions: Action[]
 ): Promise<void> {
@@ -79,7 +82,7 @@ async function judgeProcess1(
 
   const inputText = `【不在中の出来事】\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
 
-  await runJudgement(profile, inputText);
+  await runJudgement(characterId, world, character, inputText);
 }
 
 // -------------------------------------------------------
@@ -88,7 +91,8 @@ async function judgeProcess1(
 
 async function judgeProcess2(
   characterId: string,
-  profile: CharacterProfile
+  world: World,
+  character: CharacterDefinition
 ): Promise<void> {
   const logs = await getLogsForMemoryJudge(characterId, JUDGE_TURNS);
 
@@ -110,14 +114,14 @@ async function judgeProcess2(
   // 会話ログをテキスト化
   const conversationText = logs
     .map((l) => {
-      const speaker = l.role === "user" ? "プレイヤー" : profile.name;
+      const speaker = l.role === "user" ? "プレイヤー" : character.name;
       return `${speaker}: ${l.content}`;
     })
     .join("\n");
 
   const inputText = `【直近の会話（${JUDGE_TURNS}往復）】\n${conversationText}`;
 
-  await runJudgement(profile, inputText);
+  await runJudgement(characterId, world, character, inputText);
 
   // 判定済みフラグを付ける
   const indexes = logs.map((l) => l.index);
@@ -129,11 +133,13 @@ async function judgeProcess2(
 // -------------------------------------------------------
 
 async function runJudgement(
-  profile: CharacterProfile,
+  characterId: string,
+  world: World,
+  character: CharacterDefinition,
   inputText: string
 ): Promise<void> {
   // 既存の重要記憶を取得（重複保存を避けたい用途のため、他の呼び出し元より広めに取得する）
-  const existingMemories = await getRelevantMemories(profile.name, {
+  const existingMemories = await getRelevantMemories(characterId, {
     queryText: inputText,
     topK: 20,
     minImportance: 10,
@@ -148,12 +154,15 @@ async function runJudgement(
           .join("\n")
       : "（なし）";
 
-  const systemPrompt = Mustache.render(PROMPT_TEMPLATE, {
-    name: profile.name,
-    personality: profile.personality,
-    existingMemoriesText,
-    inputText,
-  });
+  const systemPrompt = Mustache.render(
+    PROMPT_TEMPLATE,
+    {
+      ...buildPromptContext(world, character),
+      existingMemoriesText,
+      inputText,
+    },
+    PROMPT_PARTIALS
+  );
 
   const fallback: MemoryRetrieverResult = { candidates: [] };
   const result = await invokeModelJson<MemoryRetrieverResult>(
@@ -178,7 +187,7 @@ async function runJudgement(
   await Promise.all(
     toSave.map((c) =>
       saveMemory({
-        memory_id: profile.name,
+        memory_id: characterId,
         index: new Date().toISOString() + "_" + randomUUID().slice(0, 8),
         eventSummary: c.eventSummary,
         characterInterpretation: c.characterInterpretation,

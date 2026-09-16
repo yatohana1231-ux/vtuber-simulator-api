@@ -17,15 +17,18 @@
  *                          その順序を関数直呼びで再現している。
  *
  * 環境変数（.env or 直接指定）:
- *   BEDROCK_MODEL_ID, CHARACTER_MEMORY_TABLE, CONVERSATION_LOGS_TABLE, EVENTS_TABLE, AWS_REGION
+ *   BEDROCK_MODEL_ID, CHARACTER_MEMORY_TABLE, CONVERSATION_LOGS_TABLE, EVENTS_TABLE, AWS_REGION,
+ *   CONTENT_DIR（パッケージの読み込み先。既定は api/content/）
  *
  * 例:
  *   npx tsx scripts/test-runner.ts eventResolver
  *   npx tsx scripts/test-runner.ts emotionUpdater --process 2 --message "今日は調子どう？"
  *   npx tsx scripts/test-runner.ts dialogueGenerator --longTimeFlag 1
+ *   npx tsx scripts/test-runner.ts dialogueGenerator --package yui-modern-tokyo --message "配信見たよ"
  *   npx tsx scripts/test-runner.ts all
  */
 
+import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // 環境変数のデフォルト（stg 環境）
@@ -34,15 +37,16 @@ process.env.BEDROCK_MODEL_ID ??= "apac.amazon.nova-lite-v1:0";
 process.env.CHARACTER_MEMORY_TABLE ??= "v-simu-characters-memory-stg";
 process.env.CONVERSATION_LOGS_TABLE ??= "vtuber-simu-conversation-log-stg";
 process.env.EVENTS_TABLE ??= "v-simu-events-stg";
+process.env.CONTENT_DIR ??= fileURLToPath(new URL("../content", import.meta.url));
 
 import { runEventResolver } from "../src/eventResolver/index.js";
 import { runActionPlanner } from "../src/actionPlanner/index.js";
 import { runEmotionUpdater } from "../src/emotionUpdater/index.js";
 import { runMemoryRetriever } from "../src/memoryRetriever/index.js";
 import { runDialogueGenerator } from "../src/dialogueGenerator/index.js";
+import { DEFAULT_PACKAGE_ID, loadPackage } from "../src/lib/packages.js";
 import type {
   ActionPlannerRequest,
-  CharacterProfile,
   EventResolverRequest,
 } from "../src/types.js";
 
@@ -54,10 +58,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     characterId: { type: "string", default: "d89c3b4f-9e27-4f5a-b8d1-7c4e2a91f6b3" },
-    name: { type: "string", default: "ゆい" },
-    personality: { type: "string", default: "明るく前向きだが、初対面では少し緊張する" },
-    speechStyle: { type: "string", default: "初対面では丁寧語を使う" },
-    relationship: { type: "string", default: "仲の良い幼馴染" },
+    package: { type: "string", default: DEFAULT_PACKAGE_ID },
     message: { type: "string", default: "" },
     lastLoginAt: { type: "string", default: "" },
     now: { type: "string", default: "" },
@@ -83,10 +84,7 @@ Processes:
 
 Options:
   --characterId <id>       キャラクターID (default: テスト用UUID)
-  --name <name>            キャラクター名 (default: ゆい)
-  --personality <text>     性格
-  --speechStyle <text>     話し方
-  --relationship <text>    関係性
+  --package <id>           キャラクター×世界観パッケージのID (default: ${DEFAULT_PACKAGE_ID})
   --message <text>         プレイヤーメッセージ (default: "" = プロセス1)
   --lastLoginAt <iso>      前回ログイン (default: 6時間前)
   --now <iso>              現在時刻 (default: now)
@@ -107,24 +105,25 @@ const lastLoginAtDate = values.lastLoginAt
   : new Date(nowDate.getTime() - 6 * 60 * 60 * 1000); // デフォルト6時間前
 
 const characterId = values.characterId!;
-const characterProfile: CharacterProfile = {
-  name: values.name!,
-  personality: values.personality!,
-  speechStyle: values.speechStyle!,
-  relationship: values.relationship!,
-};
+const pkg = await loadPackage(values.package!);
+if (!pkg) {
+  console.error(`Unknown package: ${values.package}`);
+  process.exit(1);
+}
+const { world, character } = pkg;
 const nowIso = nowDate.toISOString();
 const lastLoginAtIso = lastLoginAtDate.toISOString();
 const elapsedHours = (nowDate.getTime() - lastLoginAtDate.getTime()) / (1000 * 60 * 60);
 
 function buildEventResolverRequest(): EventResolverRequest {
-  return { characterId, characterProfile, lastLoginAt: lastLoginAtIso, now: nowIso };
+  return { characterId, world, character, lastLoginAt: lastLoginAtIso, now: nowIso };
 }
 
 function buildActionPlannerRequest(events: string[]): ActionPlannerRequest {
   return {
     characterId,
-    characterProfile,
+    world,
+    character,
     lastLoginAt: lastLoginAtIso,
     now: nowIso,
     events,
@@ -139,6 +138,7 @@ async function main() {
   console.log("=".repeat(60));
   console.log(`[test-runner] process: ${processName}`);
   console.log(`[test-runner] characterId: ${characterId}`);
+  console.log(`[test-runner] package: ${values.package}`);
   console.log(`[test-runner] elapsed: ${elapsedHours.toFixed(1)}h`);
   console.log(`[test-runner] message: "${values.message}"`);
   console.log("=".repeat(60));
@@ -169,7 +169,8 @@ async function main() {
         const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
         const result = await runEmotionUpdater({
           characterId,
-          characterProfile,
+          world,
+          character,
           process: 1,
           events: eventResult.events,
           actions: actionResult.actions,
@@ -180,7 +181,8 @@ async function main() {
         const msg = values.message || "今日は調子どう？";
         const result = await runEmotionUpdater({
           characterId,
-          characterProfile,
+          world,
+          character,
           process: 2,
           playerMessage: msg,
         });
@@ -198,14 +200,15 @@ async function main() {
         const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
         await runMemoryRetriever({
           characterId,
-          characterProfile,
+          world,
+          character,
           process: 1,
           events: eventResult.events,
           actions: actionResult.actions,
         });
         console.log("\n[RESULT] memoryRetriever (process1): done (check DynamoDB)");
       } else {
-        await runMemoryRetriever({ characterId, characterProfile, process: 2 });
+        await runMemoryRetriever({ characterId, world, character, process: 2 });
         console.log("\n[RESULT] memoryRetriever (process2): done (check DynamoDB)");
       }
       break;
@@ -215,7 +218,8 @@ async function main() {
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const result = await runDialogueGenerator({
         characterId,
-        characterProfile,
+        world,
+        character,
         now: nowIso,
         message: values.message!,
         events: [],
@@ -239,7 +243,8 @@ async function main() {
       console.log("\n--- [3/5] emotionUpdater ---");
       const { mood, perception } = await runEmotionUpdater({
         characterId,
-        characterProfile,
+        world,
+        character,
         process: 1,
         events: eventResult.events,
         actions: actionResult.actions,
@@ -249,7 +254,8 @@ async function main() {
       console.log("\n--- [4/5] memoryRetriever ---");
       await runMemoryRetriever({
         characterId,
-        characterProfile,
+        world,
+        character,
         process: 1,
         events: eventResult.events,
         actions: actionResult.actions,
@@ -260,7 +266,8 @@ async function main() {
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const reply = await runDialogueGenerator({
         characterId,
-        characterProfile,
+        world,
+        character,
         now: nowIso,
         message: values.message!,
         mood,

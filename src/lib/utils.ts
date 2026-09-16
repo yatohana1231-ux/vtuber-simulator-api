@@ -2,8 +2,6 @@
 // 共通ユーティリティ
 // -------------------------------------------------------
 
-import type { CharacterProfile } from "../types.js";
-
 /** ISO8601 文字列を JST の表示文字列に変換する */
 export function formatDatetimeJST(isoString: string): string {
   if (!isoString) return "（日時不明）";
@@ -28,18 +26,6 @@ export function parseRequestBody(event: unknown): Record<string, unknown> {
     body = Buffer.from(body, "base64").toString("utf8");
   }
   return JSON.parse(body) as Record<string, unknown>;
-}
-
-/** characterProfile を正規化してデフォルト値を埋める */
-export function normalizeProfile(
-  profile: Partial<CharacterProfile> | undefined
-): CharacterProfile {
-  return {
-    name: profile?.name ?? "少女",
-    personality: profile?.personality ?? "明るく前向き",
-    speechStyle: profile?.speechStyle ?? "丁寧語",
-    relationship: profile?.relationship ?? "初対面のプロデューサー候補",
-  };
 }
 
 /** 数値を 1〜100 にクランプする */

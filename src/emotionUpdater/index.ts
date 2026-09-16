@@ -8,6 +8,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/emotionUpdater.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
+import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import {
   getCharacterState,
   saveCharacterState,
@@ -70,7 +71,7 @@ export async function runEmotionUpdater(
 ): Promise<EmotionUpdaterResponse> {
   console.log(`[emotionUpdater] start process=${req.process}`);
 
-  const { characterId, characterProfile: profile } = req;
+  const { characterId, world, character } = req;
   const { mood: currentMood, perception: currentPerception } =
     await getCharacterState(characterId);
 
@@ -107,14 +108,17 @@ export async function runEmotionUpdater(
   const moodText = formatState(currentMood as unknown as Record<string, number>, MOOD_LABELS as Record<string, string>);
   const perceptionText = formatState(currentPerception as unknown as Record<string, number>, PERCEPTION_LABELS as Record<string, string>);
 
-  const systemPrompt = Mustache.render(PROMPT_TEMPLATE, {
-    name: profile.name,
-    personality: profile.personality,
-    moodText,
-    perceptionText,
-    inputText,
-    perceptionRule,
-  });
+  const systemPrompt = Mustache.render(
+    PROMPT_TEMPLATE,
+    {
+      ...buildPromptContext(world, character),
+      moodText,
+      perceptionText,
+      inputText,
+      perceptionRule,
+    },
+    PROMPT_PARTIALS
+  );
 
   const fallback = { moodDelta: {}, perceptionDelta: {} };
   const delta = await invokeModelJson<{

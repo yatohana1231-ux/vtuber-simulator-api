@@ -9,6 +9,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/actionPlanner.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
+import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import { getRelevantMemories } from "../lib/dynamo.js";
 import type {
   Action,
@@ -25,7 +26,7 @@ export async function runActionPlanner(
 ): Promise<ActionPlannerResult> {
   console.log("[actionPlanner] start");
 
-  const { characterProfile: profile, events } = req;
+  const { characterId, world, character, events } = req;
   const lastLoginAt = new Date(req.lastLoginAt);
   const now = new Date(req.now);
 
@@ -48,7 +49,7 @@ export async function runActionPlanner(
       : "（なし）";
 
   // 重要記憶を取得
-  const memories = await getRelevantMemories(profile.name);
+  const memories = await getRelevantMemories(characterId);
   const memoriesText =
     memories.length > 0
       ? memories
@@ -59,15 +60,18 @@ export async function runActionPlanner(
           .join("\n")
       : "（なし）";
 
-  const systemPrompt = Mustache.render(PROMPT_TEMPLATE, {
-    name: profile.name,
-    personality: profile.personality,
-    startDatetime: actionStart,
-    endDatetime: actionEnd,
-    elapsed,
-    eventsText,
-    memoriesText,
-  });
+  const systemPrompt = Mustache.render(
+    PROMPT_TEMPLATE,
+    {
+      ...buildPromptContext(world, character),
+      startDatetime: actionStart,
+      endDatetime: actionEnd,
+      elapsed,
+      eventsText,
+      memoriesText,
+    },
+    PROMPT_PARTIALS
+  );
 
   const fallback: ActionPlannerResult = { actions: [] };
   const result = await invokeModelJson<ActionPlannerResult>(

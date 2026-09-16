@@ -195,16 +195,19 @@ export async function saveCharacterState(
 // -------------------------------------------------------
 
 /** キャラクターの重要記憶一覧を取得する（全件。呼び出し元は基本 getRelevantMemories を使う） */
-async function getMemories(characterName: string): Promise<CharacterMemoryItem[]> {
+async function getMemories(characterId: string): Promise<CharacterMemoryItem[]> {
   const result = await dynamo.send(
     new QueryCommand({
       TableName: CHARACTER_MEMORY_TABLE,
       KeyConditionExpression: "memory_id = :mid",
-      ExpressionAttributeValues: { ":mid": characterName },
+      ExpressionAttributeValues: { ":mid": characterId },
     })
   );
-  const memories = (result.Items ?? []) as CharacterMemoryItem[];
-  console.log(`[getMemories] ${memories.length} memories for character=${characterName}`);
+  // 同じ memory_id に感情状態レコード（index="state"）が同居しているため除外する
+  const memories = ((result.Items ?? []) as CharacterMemoryItem[]).filter(
+    (item) => item.index !== STATE_INDEX_KEY
+  );
+  console.log(`[getMemories] ${memories.length} memories for characterId=${characterId}`);
   return memories;
 }
 
@@ -247,12 +250,12 @@ function scoreMemory(
  * 上位 topK 件だけを返す。プロンプトへの全件埋め込みを避けるための絞り込み用途。
  */
 export async function getRelevantMemories(
-  characterName: string,
+  characterId: string,
   options: GetRelevantMemoriesOptions = {}
 ): Promise<CharacterMemoryItem[]> {
   const { queryText, topK = 8, minImportance = 20 } = options;
 
-  const memories = await getMemories(characterName);
+  const memories = await getMemories(characterId);
   const now = Date.now();
 
   const relevant = memories
@@ -263,7 +266,7 @@ export async function getRelevantMemories(
     .map((r) => r.memory);
 
   console.log(
-    `[getRelevantMemories] ${relevant.length}/${memories.length} memories selected for character=${characterName} (topK=${topK}, minImportance=${minImportance}, hasQuery=${!!queryText})`
+    `[getRelevantMemories] ${relevant.length}/${memories.length} memories selected for characterId=${characterId} (topK=${topK}, minImportance=${minImportance}, hasQuery=${!!queryText})`
   );
   return relevant;
 }

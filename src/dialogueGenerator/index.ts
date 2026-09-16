@@ -16,6 +16,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/conversation.mustache";
 import { invokeModel } from "../lib/bedrock.js";
+import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import {
   getCharacterState,
   getRelevantMemories,
@@ -28,10 +29,11 @@ import { formatDatetimeJST } from "../lib/utils.js";
 import type {
   Action,
   CharacterMemoryItem,
-  CharacterProfile,
+  CharacterDefinition,
   DialogueGeneratorRequest,
   Mood,
   Perception,
+  World,
 } from "../types.js";
 
 const RECENT_LOG_LIMIT = 10;
@@ -84,7 +86,7 @@ export async function runDialogueGenerator(
 ): Promise<string> {
   console.log("[dialogueGenerator] start");
 
-  const { characterId, characterProfile: profile } = req;
+  const { characterId, world, character } = req;
   const now = new Date(req.now);
   const events = req.events ?? [];
   const actions = req.actions ?? [];
@@ -112,13 +114,14 @@ export async function runDialogueGenerator(
 
   // 重要記憶を取得（新形式: eventSummary + characterInterpretation）。
   // プレイヤー発言があればタグ一致でスコアを加味する（空メッセージ時はクエリなし扱い）
-  const memories = await getRelevantMemories(profile.name, {
+  const memories = await getRelevantMemories(characterId, {
     queryText: req.message !== "" ? req.message : undefined,
   });
 
   // システムプロンプトを組み立てる
   const systemPrompt = buildSystemPrompt({
-    profile,
+    world,
+    character,
     mood,
     perception,
     memories,
@@ -151,7 +154,8 @@ export async function runDialogueGenerator(
 // -------------------------------------------------------
 
 interface BuildSystemPromptArgs {
-  profile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   mood: Mood;
   perception: Perception;
   memories: CharacterMemoryItem[];
@@ -164,7 +168,8 @@ interface BuildSystemPromptArgs {
 
 function buildSystemPrompt(args: BuildSystemPromptArgs): string {
   const {
-    profile,
+    world,
+    character,
     mood,
     perception,
     memories,
@@ -194,7 +199,7 @@ function buildSystemPrompt(args: BuildSystemPromptArgs): string {
     historyLogs.length > 0
       ? historyLogs
           .map((log) => {
-            const speaker = log.role === "user" ? "プレイヤー" : profile.name;
+            const speaker = log.role === "user" ? "プレイヤー" : character.name;
             const dt = formatDatetimeJST(log.index);
             return `${dt} （${speaker}）「${log.content}」`;
           })
@@ -218,20 +223,21 @@ function buildSystemPrompt(args: BuildSystemPromptArgs): string {
           .join("\n")
       : "";
 
-  return Mustache.render(PROMPT_TEMPLATE, {
-    name: profile.name,
-    personality: profile.personality,
-    speechStyle: profile.speechStyle,
-    relationship: profile.relationship,
-    moodText: formatState(mood as unknown as Record<string, number>, MOOD_LABELS as unknown as Record<string, string>),
-    perceptionText: formatState(perception as unknown as Record<string, number>, PERCEPTION_LABELS as unknown as Record<string, string>),
-    memoriesText,
-    historyText,
-    eventsText,
-    actionsText,
-    hasEvents: eventsText !== "",
-    hasActions: actionsText !== "",
-    currentDatetime,
-    hasLongTimeFlag: longTimeFlag === 1,
-  });
+  return Mustache.render(
+    PROMPT_TEMPLATE,
+    {
+      ...buildPromptContext(world, character),
+      moodText: formatState(mood as unknown as Record<string, number>, MOOD_LABELS as unknown as Record<string, string>),
+      perceptionText: formatState(perception as unknown as Record<string, number>, PERCEPTION_LABELS as unknown as Record<string, string>),
+      memoriesText,
+      historyText,
+      eventsText,
+      actionsText,
+      hasEvents: eventsText !== "",
+      hasActions: actionsText !== "",
+      currentDatetime,
+      hasLongTimeFlag: longTimeFlag === 1,
+    },
+    PROMPT_PARTIALS
+  );
 }

@@ -9,6 +9,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/eventResolver.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
+import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import { getRelevantMemories, saveEvent } from "../lib/dynamo.js";
 import type {
   EventResolverRequest,
@@ -24,7 +25,7 @@ export async function runEventResolver(
 ): Promise<EventResolverResult> {
   console.log("[eventResolver] start");
 
-  const { characterId, characterProfile: profile } = req;
+  const { characterId, world, character } = req;
   const lastLoginAt = new Date(req.lastLoginAt);
   const now = new Date(req.now);
 
@@ -36,7 +37,7 @@ export async function runEventResolver(
   const elapsed = `${elapsedHours}時間${elapsedMinutes > 0 ? elapsedMinutes + "分" : ""}`;
 
   // 重要記憶を取得してプロンプトに渡す
-  const memories = await getRelevantMemories(profile.name);
+  const memories = await getRelevantMemories(characterId);
   const memoriesText =
     memories.length > 0
       ? memories
@@ -47,14 +48,17 @@ export async function runEventResolver(
           .join("\n")
       : "（なし）";
 
-  const systemPrompt = Mustache.render(PROMPT_TEMPLATE, {
-    name: profile.name,
-    personality: profile.personality,
-    startDatetime,
-    endDatetime,
-    elapsed,
-    memoriesText,
-  });
+  const systemPrompt = Mustache.render(
+    PROMPT_TEMPLATE,
+    {
+      ...buildPromptContext(world, character),
+      startDatetime,
+      endDatetime,
+      elapsed,
+      memoriesText,
+    },
+    PROMPT_PARTIALS
+  );
 
   const fallback = { events: [] };
   const result = await invokeModelJson<{ events: string[] }>(

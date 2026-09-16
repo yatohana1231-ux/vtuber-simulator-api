@@ -4,8 +4,9 @@
 // -------------------------------------------------------
 
 import { runActionPlanner } from "../actionPlanner/index.js";
-import { createResponse, normalizeProfile, parseRequestBody } from "../lib/utils.js";
-import type { ActionPlannerRequest, CharacterProfile } from "../types.js";
+import { loadRequestedPackage } from "../lib/packages.js";
+import { createResponse, parseRequestBody } from "../lib/utils.js";
+import type { ActionPlannerRequest } from "../types.js";
 
 export const handler = async (event: unknown): Promise<unknown> => {
   console.log("Received event:", JSON.stringify(event));
@@ -27,11 +28,15 @@ export const handler = async (event: unknown): Promise<unknown> => {
       return createResponse(400, { error: "invalid lastLoginAt or now format" });
     }
 
+    const pkg = await loadRequestedPackage(body.packageId);
+    if (!pkg) {
+      return createResponse(400, { error: "unknown packageId" });
+    }
+
     const req: ActionPlannerRequest = {
       characterId,
-      characterProfile: normalizeProfile(
-        body.characterProfile as Partial<CharacterProfile> | undefined
-      ),
+      world: pkg.world,
+      character: pkg.character,
       lastLoginAt: lastLoginAtDate.toISOString(),
       now: nowDate.toISOString(),
       events: Array.isArray(body.events) ? (body.events as string[]) : [],

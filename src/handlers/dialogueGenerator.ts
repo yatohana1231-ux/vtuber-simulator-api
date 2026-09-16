@@ -4,10 +4,10 @@
 // -------------------------------------------------------
 
 import { runDialogueGenerator } from "../dialogueGenerator/index.js";
-import { createResponse, normalizeProfile, parseRequestBody } from "../lib/utils.js";
+import { loadRequestedPackage } from "../lib/packages.js";
+import { createResponse, parseRequestBody } from "../lib/utils.js";
 import type {
   Action,
-  CharacterProfile,
   DialogueGeneratorRequest,
   Mood,
   Perception,
@@ -29,11 +29,15 @@ export const handler = async (event: unknown): Promise<unknown> => {
       return createResponse(400, { error: "invalid now format" });
     }
 
+    const pkg = await loadRequestedPackage(body.packageId);
+    if (!pkg) {
+      return createResponse(400, { error: "unknown packageId" });
+    }
+
     const req: DialogueGeneratorRequest = {
       characterId,
-      characterProfile: normalizeProfile(
-        body.characterProfile as Partial<CharacterProfile> | undefined
-      ),
+      world: pkg.world,
+      character: pkg.character,
       now: nowDate.toISOString(),
       message: (body.message as string) ?? "",
       mood: body.mood as Mood | undefined,

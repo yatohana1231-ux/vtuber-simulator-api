@@ -1,12 +1,35 @@
 // -------------------------------------------------------
-// リクエスト / レスポンス型
+// キャラクター×世界観パッケージ（api/content/ 配下の JSON）
 // -------------------------------------------------------
 
-export interface CharacterProfile {
+export interface World {
+  key: string;
+  name: string;
+  description: string;
+  rules: string[];
+  forbiddenElements: string[];
+}
+
+export interface SpeechExample {
+  player: string;
+  reply: string;
+}
+
+export interface CharacterDefinition {
+  key: string;
   name: string;
   personality: string;
   speechStyle: string;
   relationship: string;
+  background: string;
+  speechExamples: SpeechExample[];
+}
+
+export interface CharacterPackage {
+  id: string;
+  displayName: string;
+  world: World;
+  character: CharacterDefinition;
 }
 
 // -------------------------------------------------------
@@ -145,14 +168,16 @@ export interface EventItem {
 
 export interface EventResolverRequest {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   lastLoginAt: string; // ISO8601
   now: string; // ISO8601
 }
 
 export interface ActionPlannerRequest {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   lastLoginAt: string; // ISO8601
   now: string; // ISO8601
   events: string[]; // event-resolver エンドポイントの出力
@@ -160,7 +185,8 @@ export interface ActionPlannerRequest {
 
 export interface EmotionUpdaterRequestProcess1 {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   process: 1;
   events: string[];
   actions: Action[];
@@ -168,7 +194,8 @@ export interface EmotionUpdaterRequestProcess1 {
 
 export interface EmotionUpdaterRequestProcess2 {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   process: 2;
   playerMessage: string;
 }
@@ -184,7 +211,8 @@ export interface EmotionUpdaterResponse {
 
 export interface MemoryRetrieverRequestProcess1 {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   process: 1;
   events: string[];
   actions: Action[];
@@ -192,7 +220,8 @@ export interface MemoryRetrieverRequestProcess1 {
 
 export interface MemoryRetrieverRequestProcess2 {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   process: 2;
 }
 
@@ -202,7 +231,8 @@ export type MemoryRetrieverRequest =
 
 export interface DialogueGeneratorRequest {
   characterId: string;
-  characterProfile: CharacterProfile;
+  world: World;
+  character: CharacterDefinition;
   now: string; // ISO8601
   message: string; // 空文字の場合はプレイヤー不在時の代替テキストを内部で使用
   mood?: Mood; // 未指定時は DynamoDB から取得

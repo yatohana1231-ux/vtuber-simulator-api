@@ -24,7 +24,11 @@ VTuber キャラクターとのチャットインタラクションを提供す�
 ```
 api/
 ├── .github/workflows/deploy-stg.yml   # CI/CD パイプライン（STG）
-├── dist/                               # ビルド成果物（機能ごとに <name>.mjs）
+├── content/                            # キャラクター×世界観パッケージのデータ（JSON）
+│   ├── worlds/                         # 世界観
+│   ├── characters/                     # キャラクター（設定・口調の例文を含む）
+│   └── packages/                       # 世界観×キャラクターの組み合わせ（フロントが選ぶ単位）
+├── dist/                               # ビルド成果物（機能ごとに <name>.mjs ＋ content/ のコピー）
 ├── infra/                              # CDK インフラ定義
 │   ├── bin/                            # CDK エントリーポイント
 │   ├── lib/
@@ -33,6 +37,7 @@ api/
 │   ├── cdk.json / package.json / tsconfig.json
 ├── scripts/
 │   ├── clear-tables.mjs                # テーブルクリアスクリプト
+│   ├── copy-content.mjs                # content/ を dist/content/ にコピー（npm run build から実行）
 │   └── test-runner.ts                  # テスト実行スクリプト
 ├── src/
 │   ├── handlers/                       # Lambda エントリーポイント（機能ごとに1ファイル）
@@ -47,7 +52,8 @@ api/
 │   ├── emotionUpdater/{index.ts, prompts/emotionUpdater.mustache}    # 感情値更新
 │   ├── memoryRetriever/{index.ts, prompts/memoryRetriever.mustache}  # 重要記憶管理
 │   ├── dialogueGenerator/{index.ts, prompts/conversation.mustache}   # セリフ生成
-│   └── lib/{bedrock.ts, dynamo.ts, utils.ts}
+│   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 5テンプレート共有のパーシャル
+│   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts}
 └── package.json
 ```
 
@@ -65,6 +71,18 @@ api/
 | `emotionUpdater` | イベント/プレイヤー発言を元に感情・関係値を LLM で更新 |
 | `memoryRetriever` | 重要な出来事・会話を LLM で判定し長期記憶として保存 |
 | `dialogueGenerator` | 全情報を統合しキャラクターのセリフを LLM で生成 |
+| `lib/packages.ts` | リクエストの `packageId` から、`content/` の世界観とキャラクターを読み込む |
+| `promptPartials` | 世界観・口調の例文を描画する共有パーシャル。5つのテンプレートから読み込む |
+
+### キャラクター×世界観パッケージ
+
+キャラクター固有・世界観固有の文面はテンプレートに直書きせず、`content/` の JSON として持つ。フロントは `packageId`（世界観×キャラクターの組み合わせ）を選んで渡すだけで、キャラクターや世界観を個別に指定することはできない。
+
+1. ハンドラーが `lib/packages.ts` の `loadRequestedPackage(packageId)` でパッケージを読み込み、世界観（`World`）とキャラクター（`CharacterDefinition`）を解決する（コンテナ内でキャッシュ）
+2. 各機能の `run*` は `promptPartials/index.ts` の `buildPromptContext(world, character)` を view に展開し、`PROMPT_PARTIALS` を渡して `Mustache.render` する
+3. 5つのテンプレートは `{{> world}}` で世界観を、`conversation.mustache` はさらに `{{> speechExamples}}` で口調の例文を差し込む。キャラクターの `background`（設定）は5つすべてに入る
+
+世界観やキャラクターを追加するときは JSON を足すだけで、テンプレートとコードの変更は不要（再デプロイは必要）。データの書式は [`content/README.md`](content/README.md)、パーシャルは [`src/promptPartials/README.md`](src/promptPartials/README.md) を参照。
 
 ### フロントが組み立てる呼び出しパターン
 
@@ -141,6 +159,12 @@ graph TB
         BK[bedrock.ts]
         DB[dynamo.ts]
         UT[utils.ts]
+        PK[packages.ts]
+    end
+    subgraph Content["Content (content/*.json)"]
+        CW[worlds]
+        CC[characters]
+        CP[packages]
     end
     subgraph Templates["Prompt Templates (.mustache)"]
         T1[eventResolver.mustache]
@@ -148,6 +172,7 @@ graph TB
         T3[emotionUpdater.mustache]
         T4[memoryRetriever.mustache]
         T5[conversation.mustache]
+        PP[promptPartials<br/>world / speechExamples]
     end
 
     H1 --> ER
@@ -156,6 +181,9 @@ graph TB
     H4 --> MR
     H5 --> DG
     H1 & H2 & H3 & H4 & H5 --> UT
+    H1 & H2 & H3 & H4 & H5 --> PK
+    PK --> CP & CW & CC
+    T1 & T2 & T3 & T4 & T5 --> PP
     ER --> BK & DB & T1
     AP --> BK & DB & T2
     EU --> BK & DB & T3
@@ -224,31 +252,31 @@ sequenceDiagram
 
     Note over Front: elapsedHours >= 3h（フロントが算出済み）
 
-    Front->>ER: POST { characterId, characterProfile, lastLoginAt, now }
-    ER->>DB: getRelevantMemories(characterName)
+    Front->>ER: POST { characterId, packageId, lastLoginAt, now }
+    ER->>DB: getRelevantMemories(characterId)
     ER->>BK: invokeModelJson(prompt, "不在期間中の出来事を生成")
     ER->>DB: saveEvent(eventItem)
     ER-->>Front: { events }
 
-    Front->>AP: POST { characterId, characterProfile, lastLoginAt, now, events }
-    AP->>DB: getRelevantMemories(characterName)
+    Front->>AP: POST { characterId, packageId, lastLoginAt, now, events }
+    AP->>DB: getRelevantMemories(characterId)
     AP->>BK: invokeModelJson(prompt, "行動履歴を生成")
     AP-->>Front: { actions }
 
-    Front->>EU: POST { characterId, characterProfile, process:1, events, actions }
+    Front->>EU: POST { characterId, packageId, process:1, events, actions }
     EU->>DB: getCharacterState(characterId)
     EU->>BK: invokeModelJson(prompt, "感情値の差分を算出")
     EU->>DB: saveCharacterState(updated)
     EU-->>Front: { mood, perception }
 
-    Front->>MR: POST { characterId, characterProfile, process:1, events, actions }
-    MR->>DB: getRelevantMemories(characterName, queryText/topK/minImportance広め)
+    Front->>MR: POST { characterId, packageId, process:1, events, actions }
+    MR->>DB: getRelevantMemories(characterId, queryText/topK/minImportance広め)
     MR->>BK: invokeModelJson(prompt, "重要度を判定")
     MR->>DB: saveMemory(重要記憶) [shouldRemember=true のみ]
     MR-->>Front: { ok: true }
 
-    Front->>DG: POST { characterId, characterProfile, now, message:"", mood, perception, events, actions, longTimeFlag }
-    DG->>DB: getRelevantMemories(characterName, queryText=playerMessage)
+    Front->>DG: POST { characterId, packageId, now, message:"", mood, perception, events, actions, longTimeFlag }
+    DG->>DB: getRelevantMemories(characterId, queryText=playerMessage)
     DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
     DG->>DB: getRecentLogs(characterId, 10)
     DG->>BK: invokeModel(systemPrompt, "（プレイヤーが来た）")
@@ -269,7 +297,7 @@ sequenceDiagram
     participant BK as Bedrock
     participant DB as DynamoDB
 
-    Front->>DG: POST { characterId, characterProfile, now, message }
+    Front->>DG: POST { characterId, packageId, now, message }
     Note over DG: mood/perception 省略時は DynamoDB から取得
     DG->>DB: getCharacterState / getRelevantMemories(queryText=message)
     DG->>DB: saveConversationLog(user, message)
@@ -278,18 +306,18 @@ sequenceDiagram
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
-    Front->>EU: POST { characterId, characterProfile, process:2, playerMessage: message }
+    Front->>EU: POST { characterId, packageId, process:2, playerMessage: message }
     EU->>DB: getCharacterState(characterId)
     EU->>BK: invokeModelJson(prompt, "感情値の差分を算出")
     EU->>DB: saveCharacterState(updated)
     EU-->>Front: { mood, perception }
 
-    Front->>MR: POST { characterId, characterProfile, process:2 }
+    Front->>MR: POST { characterId, packageId, process:2 }
     MR->>DB: getLogsForMemoryJudge(characterId, 5)
     alt 10件未満 or 判定済み
         MR-->>Front: { ok: true }（スキップ）
     else 未判定かつ10件以上
-        MR->>DB: getRelevantMemories(characterName, queryText/topK/minImportance広め)
+        MR->>DB: getRelevantMemories(characterId, queryText/topK/minImportance広め)
         MR->>BK: invokeModelJson(prompt, "重要度を判定")
         MR->>DB: saveMemory(重要記憶)
         MR->>DB: markLogsAsJudged(indexes)
@@ -362,7 +390,7 @@ erDiagram
         number memoryRetrieverJudgedFlag "判定済み: 0 or 1"
     }
     CHARACTER_MEMORY {
-        string memory_id PK "キャラクター名 or ID"
+        string memory_id PK "characterId"
         string index SK "state | タイムスタンプ_UUID"
         object mood "感情値 (state レコードのみ)"
         object perception "関係値 (state レコードのみ)"
@@ -397,22 +425,24 @@ erDiagram
 
 ### キャラクター記憶テーブル
 
-感情状態と重要記憶の2種類を1テーブルで管理するマルチパーパステーブル。PK `memory_id`（キャラクター名 or ID）/ SK `index`。
+感情状態と重要記憶の2種類を1テーブルで管理するマルチパーパステーブル。PK `memory_id`（`characterId`）/ SK `index`。状態レコードと記憶レコードは同じ `memory_id` の下に同居する。
 
 | レコード種別 | `index` の値 | `memory_id` の値 | 用途 |
 |-------------|-------------|-----------------|------|
 | 状態レコード | `"state"` | characterId (UUID) | 感情値・関係値の現在値（`mood`, `perception`, `updatedAt`） |
-| 記憶レコード | `{ISO8601}_{UUID8桁}` | characterName (名前) | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
+| 記憶レコード | `{ISO8601}_{UUID8桁}` | characterId | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
 
-アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterName, { queryText?, topK?, minImportance? })` / `saveMemory(item)`
+アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)`
 
-`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得したうえで、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
+`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得し（`index = "state"` の状態レコードは除外）、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
 
 | 呼び出し元 | `queryText` | `topK` | `minImportance` |
 |---|---|---|---|
 | `eventResolver` / `actionPlanner` | なし | 8（既定） | 20（既定） |
 | `dialogueGenerator` | プレイヤー発言（空文字時はなし） | 8（既定） | 20（既定） |
 | `memoryRetriever`（重複記憶チェック用） | 判定対象テキスト | 20 | 10 |
+
+2026-09-16 のパッケージ導入以前は、記憶レコードの `memory_id` にキャラクター名（例: `ゆい`）を使っていた。その時期のレコードは stg に残っているが、どこからも参照されない。
 
 ### イベントテーブル
 
@@ -455,7 +485,16 @@ erDiagram
 | 認証 | なし（CORS で制御、`Access-Control-Allow-Origin: *`） |
 | タイムアウト | API Gateway: 29秒 / Lambda: 120秒 |
 
-5つの独立したエンドポイントを提供する。すべて `POST`、リクエスト/レスポンスは JSON。**`characterId` は全エンドポイントで必須**（自動生成は行わない。新規キャラクターの UUID 発行はフロント側の責務）。呼び出し順序は「リクエスト処理フロー」を参照。
+5つの独立したエンドポイントを提供する。すべて `POST`、リクエスト/レスポンスは JSON。呼び出し順序は「リクエスト処理フロー」を参照。
+
+全エンドポイント共通のフィールド:
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `characterId` | string | Yes | キャラクターの識別子。**「ユーザー×パッケージ」で一意**。発番はフロントの責務で、別のパッケージに切り替えるときは新しい `characterId` を発番する（重要記憶・感情状態・会話ログはすべて `characterId` 単位で保存されるため）。サーバーは `characterId` と `packageId` の対応を検証しない |
+| `packageId` | string | No | キャラクター×世界観パッケージの ID（`content/packages/` 参照）。省略時は `yui-modern-tokyo`。形式が不正または存在しない場合は 400（`{"error": "unknown packageId"}`） |
+
+キャラクターの性格・話し方・設定や世界観はパッケージ側で定義されており、リクエストで個別に指定することはできない（旧 `characterProfile` は廃止）。
 
 ### `POST /event-resolver`
 
@@ -466,7 +505,7 @@ erDiagram
 ```json
 {
   "characterId": "550e8400-e29b-41d4-a716-446655440000",
-  "characterProfile": { "name": "桜庭あおい", "personality": "明るく前向きだが、少し臆病な一面もある" },
+  "packageId": "yui-modern-tokyo",
   "lastLoginAt": "2026-08-10T10:00:00",
   "now": "2026-08-11T14:30:00"
 }
@@ -475,7 +514,7 @@ erDiagram
 | フィールド | 型 | 必須 | 説明 |
 |-----------|------|------|------|
 | `characterId` | string | Yes | キャラクター識別子 |
-| `characterProfile.{name,personality,...}` | object | No | 省略項目はデフォルト値で補完 |
+| `packageId` | string | No | 共通フィールド参照 |
 | `lastLoginAt` | string (ISO8601) | No | 前回ログイン日時。省略時は `now` と同値 |
 | `now` | string (ISO8601) | No | 現在日時。省略時はサーバー現在時刻 |
 
@@ -495,7 +534,7 @@ erDiagram
 
 `event-resolver` の出力（`events`）を受け取り、不在期間分（上限12時間）の行動履歴を生成する。
 
-**リクエスト**: `event-resolver` と同じ4フィールド + `events: string[]`（`event-resolver` のレスポンスの `events` をそのまま渡す）
+**リクエスト**: `event-resolver` と同じ4フィールド（`characterId` / `packageId` / `lastLoginAt` / `now`） + `events: string[]`（`event-resolver` のレスポンスの `events` をそのまま渡す）
 
 **レスポンス**（`ActionPlannerResult`）
 
@@ -513,10 +552,10 @@ erDiagram
 
 ```json
 // process = 1
-{ "characterId": "...", "characterProfile": {...}, "process": 1, "events": [...], "actions": [...] }
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1, "events": [...], "actions": [...] }
 
 // process = 2
-{ "characterId": "...", "characterProfile": {...}, "process": 2, "playerMessage": "今日の配信、すごく良かったよ！" }
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 2, "playerMessage": "今日の配信、すごく良かったよ！" }
 ```
 
 **レスポンス**
@@ -536,10 +575,10 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 ```json
 // process = 1
-{ "characterId": "...", "characterProfile": { "name": "..." }, "process": 1, "events": [...], "actions": [...] }
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1, "events": [...], "actions": [...] }
 
 // process = 2（内部で直近5往復のログを見て、10件未満または判定済みならスキップする）
-{ "characterId": "...", "characterProfile": { "name": "..." }, "process": 2 }
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 2 }
 ```
 
 **レスポンス**: `{ "ok": true }`（判定結果は返さない。保存有無は DynamoDB の状態としてのみ反映される）
@@ -553,12 +592,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ```json
 {
   "characterId": "550e8400-e29b-41d4-a716-446655440000",
-  "characterProfile": {
-    "name": "桜庭あおい",
-    "personality": "明るく前向きだが、少し臆病な一面もある",
-    "speechStyle": "丁寧語まじりのカジュアルな話し方",
-    "relationship": "デビューしたての新人VTuber。プレイヤーはプロデューサー候補"
-  },
+  "packageId": "yui-modern-tokyo",
   "now": "2026-08-11T14:30:00",
   "message": "今日の配信、すごく良かったよ！",
   "mood": { "...": "..." },
@@ -588,7 +622,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 呼び出し順序の詳細は「リクエスト処理フロー」を参照。実装上の注意点:
 
 1. `event-resolver` の `events` は `action-planner`・`emotion-updater`(process1)・`memory-retriever`(process1)・`dialogue-generator` に、`action-planner` の `actions` は後続の3エンドポイントに、それぞれそのまま渡す（バックエンドはステップ間の状態を保持しない）
-2. `characterId` はフロントが最初のセッションで生成し、以降すべてのリクエストで使い回す
+2. `characterId` はフロントが「ユーザー×パッケージ」ごとに発番し、そのパッケージで遊ぶ間はすべてのリクエストで使い回す。パッケージを切り替えるときは新しい `characterId` を発番する。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない
 3. アプリ終了時の時刻を `lastLoginAt` としてローカル保存し、次回起動時に送信する
 4. ログイン時（不在3時間以上）は最大5回のAPI呼び出しが直列に発生するため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
 5. 不在3時間未満の場合はどのエンドポイントも呼ばず、直前に表示していた mood/perception をそのまま維持する（固定デフォルト値を返す挙動は廃止）
@@ -596,7 +630,11 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ## ビルド・デプロイ
 
 ```bash
-npm run build
+npm run build          # = npm run build:bundle && npm run build:content
+npm run build:bundle   # esbuild でバンドル（下記）
+npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-content.mjs）
+
+# build:bundle の中身
 # esbuild src/handlers/eventResolver.ts src/handlers/actionPlanner.ts src/handlers/emotionUpdater.ts \
 #   src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts \
 #   --bundle --platform=node --target=node20 --format=esm \
@@ -605,6 +643,7 @@ npm run build
 
 - `.mustache` テンプレートはテキストとしてバンドルに含まれる
 - `@aws-sdk/*` は Lambda ランタイムに含まれるため外部化
+- `content/` は `dist/content/` にコピーされ、Lambda アセット（`dist/` 全体）に同梱される。実行時は `LAMBDA_TASK_ROOT/content` から読み込む（ソースから直接実行する場合は環境変数 `CONTENT_DIR` で指定）。パッケージを追加・変更したら再デプロイが必要
 
 `develop` ブランチへの push で stg へ自動デプロイ: `npm ci` → `npx tsc --noEmit` → `npm run build` → `npx cdk deploy`（詳細は [CLAUDE.md](../CLAUDE.md) のコマンド節を参照）。
 
