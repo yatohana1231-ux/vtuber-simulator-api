@@ -27,4 +27,7 @@ new GithubOidcStack(app, "GithubOidcStack", {
     region: "ap-northeast-1",
   },
   githubRepo: "yatohana1231-ux/vtuber-simulator-api",
+  // "Use immutable subject" が有効なため owner/repo の数値IDを含む形式が必要
+  // (詳細は GithubOidcStackProps.githubOidcSubjectPrefix のコメント参照)
+  githubOidcSubjectPrefix: "yatohana1231-ux@250690137/vtuber-simulator-api@1306115303",
 });
