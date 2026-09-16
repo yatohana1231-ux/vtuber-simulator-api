@@ -9,7 +9,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/eventResolver.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
-import { getMemories, saveEvent } from "../lib/dynamo.js";
+import { getRelevantMemories, saveEvent } from "../lib/dynamo.js";
 import type {
   EventResolverRequest,
   EventResolverResult,
@@ -36,7 +36,7 @@ export async function runEventResolver(
   const elapsed = `${elapsedHours}時間${elapsedMinutes > 0 ? elapsedMinutes + "分" : ""}`;
 
   // 重要記憶を取得してプロンプトに渡す
-  const memories = await getMemories(profile.name);
+  const memories = await getRelevantMemories(profile.name);
   const memoriesText =
     memories.length > 0
       ? memories

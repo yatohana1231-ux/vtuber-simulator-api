@@ -14,7 +14,7 @@ import Mustache from "mustache";
 import PROMPT_TEMPLATE from "./prompts/memoryRetriever.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
 import {
-  getMemories,
+  getRelevantMemories,
   getLogsForMemoryJudge,
   markLogsAsJudged,
   saveMemory,
@@ -132,8 +132,12 @@ async function runJudgement(
   profile: CharacterProfile,
   inputText: string
 ): Promise<void> {
-  // 既存の重要記憶を取得
-  const existingMemories = await getMemories(profile.name);
+  // 既存の重要記憶を取得（重複保存を避けたい用途のため、他の呼び出し元より広めに取得する）
+  const existingMemories = await getRelevantMemories(profile.name, {
+    queryText: inputText,
+    topK: 20,
+    minImportance: 10,
+  });
   const existingMemoriesText =
     existingMemories.length > 0
       ? existingMemories

@@ -225,13 +225,13 @@ sequenceDiagram
     Note over Front: elapsedHours >= 3h（フロントが算出済み）
 
     Front->>ER: POST { characterId, characterProfile, lastLoginAt, now }
-    ER->>DB: getMemories(characterName)
+    ER->>DB: getRelevantMemories(characterName)
     ER->>BK: invokeModelJson(prompt, "不在期間中の出来事を生成")
     ER->>DB: saveEvent(eventItem)
     ER-->>Front: { events }
 
     Front->>AP: POST { characterId, characterProfile, lastLoginAt, now, events }
-    AP->>DB: getMemories(characterName)
+    AP->>DB: getRelevantMemories(characterName)
     AP->>BK: invokeModelJson(prompt, "行動履歴を生成")
     AP-->>Front: { actions }
 
@@ -242,13 +242,13 @@ sequenceDiagram
     EU-->>Front: { mood, perception }
 
     Front->>MR: POST { characterId, characterProfile, process:1, events, actions }
-    MR->>DB: getMemories(characterName)
+    MR->>DB: getRelevantMemories(characterName, queryText/topK/minImportance広め)
     MR->>BK: invokeModelJson(prompt, "重要度を判定")
     MR->>DB: saveMemory(重要記憶) [shouldRemember=true のみ]
     MR-->>Front: { ok: true }
 
     Front->>DG: POST { characterId, characterProfile, now, message:"", mood, perception, events, actions, longTimeFlag }
-    DG->>DB: getMemories(characterName)
+    DG->>DB: getRelevantMemories(characterName, queryText=playerMessage)
     DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
     DG->>DB: getRecentLogs(characterId, 10)
     DG->>BK: invokeModel(systemPrompt, "（プレイヤーが来た）")
@@ -271,7 +271,7 @@ sequenceDiagram
 
     Front->>DG: POST { characterId, characterProfile, now, message }
     Note over DG: mood/perception 省略時は DynamoDB から取得
-    DG->>DB: getCharacterState / getMemories
+    DG->>DB: getCharacterState / getRelevantMemories(queryText=message)
     DG->>DB: saveConversationLog(user, message)
     DG->>DB: getRecentLogs(characterId, 10)
     DG->>BK: invokeModel(systemPrompt, message)
@@ -289,7 +289,7 @@ sequenceDiagram
     alt 10件未満 or 判定済み
         MR-->>Front: { ok: true }（スキップ）
     else 未判定かつ10件以上
-        MR->>DB: getMemories(characterName)
+        MR->>DB: getRelevantMemories(characterName, queryText/topK/minImportance広め)
         MR->>BK: invokeModelJson(prompt, "重要度を判定")
         MR->>DB: saveMemory(重要記憶)
         MR->>DB: markLogsAsJudged(indexes)
@@ -404,7 +404,15 @@ erDiagram
 | 状態レコード | `"state"` | characterId (UUID) | 感情値・関係値の現在値（`mood`, `perception`, `updatedAt`） |
 | 記憶レコード | `{ISO8601}_{UUID8桁}` | characterName (名前) | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
 
-アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getMemories(characterName)` / `saveMemory(item)`
+アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterName, { queryText?, topK?, minImportance? })` / `saveMemory(item)`
+
+`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得したうえで、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
+
+| 呼び出し元 | `queryText` | `topK` | `minImportance` |
+|---|---|---|---|
+| `eventResolver` / `actionPlanner` | なし | 8（既定） | 20（既定） |
+| `dialogueGenerator` | プレイヤー発言（空文字時はなし） | 8（既定） | 20（既定） |
+| `memoryRetriever`（重複記憶チェック用） | 判定対象テキスト | 20 | 10 |
 
 ### イベントテーブル
 
@@ -615,4 +623,3 @@ npm run build
 企画当初のドキュメントには書かれていたが、現在のコードには反映されていない設計意図。詳細と優先度は [`.notes/_followup.md`](../.notes/_followup.md) を参照。
 
 - **AI障害時のフォールバック**: 「Bedrock 呼び出し失敗時はデフォルトのテキストを返す」という設計意図があったが、実装は各 `handlers/*.ts` が例外を捕捉して 500 エラーを返すのみで、固定文言へのフォールバックは無い。
-- **記憶の重要度減衰**: 「最近の出来事ほど強く、時系列が遠くなるほど影響度を弱め、閾値を超えたら参照しない」という設計意図があったが、`lib/dynamo.ts` の `getMemories()` は減衰計算や件数・重要度による足切りをせず、該当キャラクターの記憶を全件返すのみ。

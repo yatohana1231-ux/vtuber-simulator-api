@@ -9,7 +9,7 @@ import Mustache from "mustache";
 
 import PROMPT_TEMPLATE from "./prompts/actionPlanner.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
-import { getMemories } from "../lib/dynamo.js";
+import { getRelevantMemories } from "../lib/dynamo.js";
 import type {
   Action,
   ActionPlannerRequest,
@@ -48,7 +48,7 @@ export async function runActionPlanner(
       : "（なし）";
 
   // 重要記憶を取得
-  const memories = await getMemories(profile.name);
+  const memories = await getRelevantMemories(profile.name);
   const memoriesText =
     memories.length > 0
       ? memories

@@ -7,7 +7,7 @@
 // 変更点（既存比）:
 // - state_update 機構を削除（emotionUpdater に移譲）
 // - buildSystemPrompt に events / actions / currentDatetime / longTimeFlag を追加
-// - getMemories の読み出しを新保存形式（eventSummary + characterInterpretation）に対応
+// - getRelevantMemories の読み出しを新保存形式（eventSummary + characterInterpretation）に対応
 // - message="" 時は "（プレイヤーが来た）" を代替テキストとして Bedrock へ渡す
 // - 会話ログ保存時に memoryRetrieverJudgedFlag=0 を付与
 // -------------------------------------------------------
@@ -18,7 +18,7 @@ import PROMPT_TEMPLATE from "./prompts/conversation.mustache";
 import { invokeModel } from "../lib/bedrock.js";
 import {
   getCharacterState,
-  getMemories,
+  getRelevantMemories,
   getRecentLogs,
   saveConversationLog,
   DEFAULT_MOOD,
@@ -110,8 +110,11 @@ export async function runDialogueGenerator(
   const recentLogs = await getRecentLogs(characterId, RECENT_LOG_LIMIT);
   const historyLogs = recentLogs.slice(0, -1);
 
-  // 重要記憶を取得（新形式: eventSummary + characterInterpretation）
-  const memories = await getMemories(profile.name);
+  // 重要記憶を取得（新形式: eventSummary + characterInterpretation）。
+  // プレイヤー発言があればタグ一致でスコアを加味する（空メッセージ時はクエリなし扱い）
+  const memories = await getRelevantMemories(profile.name, {
+    queryText: req.message !== "" ? req.message : undefined,
+  });
 
   // システムプロンプトを組み立てる
   const systemPrompt = buildSystemPrompt({

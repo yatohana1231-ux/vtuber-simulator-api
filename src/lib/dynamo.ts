@@ -194,8 +194,8 @@ export async function saveCharacterState(
 // キャラクター重要記憶
 // -------------------------------------------------------
 
-/** キャラクターの重要記憶一覧を取得する */
-export async function getMemories(characterName: string): Promise<CharacterMemoryItem[]> {
+/** キャラクターの重要記憶一覧を取得する（全件。呼び出し元は基本 getRelevantMemories を使う） */
+async function getMemories(characterName: string): Promise<CharacterMemoryItem[]> {
   const result = await dynamo.send(
     new QueryCommand({
       TableName: CHARACTER_MEMORY_TABLE,
@@ -206,6 +206,66 @@ export async function getMemories(characterName: string): Promise<CharacterMemor
   const memories = (result.Items ?? []) as CharacterMemoryItem[];
   console.log(`[getMemories] ${memories.length} memories for character=${characterName}`);
   return memories;
+}
+
+// 新しさ減衰の半減期（日数）: 重要度が高い記憶ほど、この減衰の影響を受けにくい
+const MEMORY_RECENCY_HALF_LIFE_DAYS = 14;
+// クエリ文の tags 一致1件あたりのスコア倍率ボーナス
+const MEMORY_KEYWORD_MATCH_BONUS = 0.5;
+
+export interface GetRelevantMemoriesOptions {
+  /** 指定するとタグ一致によるスコアボーナスを加味する（プレイヤー発言など） */
+  queryText?: string;
+  /** 上位何件を返すか */
+  topK?: number;
+  /** この重要度未満の記憶は新しさに関係なく除外する */
+  minImportance?: number;
+}
+
+function scoreMemory(
+  memory: CharacterMemoryItem,
+  queryText: string | undefined,
+  now: number
+): number {
+  const importance = memory.importance ?? 0;
+  const updatedAt = memory.updatedAt ? new Date(memory.updatedAt).getTime() : now;
+  const daysSinceUpdated = Math.max(0, (now - updatedAt) / (1000 * 60 * 60 * 24));
+  const recencyDecay = Math.pow(2, -daysSinceUpdated / MEMORY_RECENCY_HALF_LIFE_DAYS);
+
+  let matchedTagCount = 0;
+  if (queryText) {
+    matchedTagCount = (memory.tags ?? []).filter(
+      (tag) => tag && queryText.includes(tag)
+    ).length;
+  }
+
+  return importance * recencyDecay * (1 + MEMORY_KEYWORD_MATCH_BONUS * matchedTagCount);
+}
+
+/**
+ * キャラクターの重要記憶を「重要度 × 新しさ（＋クエリ文とのタグ一致）」でスコアリングし、
+ * 上位 topK 件だけを返す。プロンプトへの全件埋め込みを避けるための絞り込み用途。
+ */
+export async function getRelevantMemories(
+  characterName: string,
+  options: GetRelevantMemoriesOptions = {}
+): Promise<CharacterMemoryItem[]> {
+  const { queryText, topK = 8, minImportance = 20 } = options;
+
+  const memories = await getMemories(characterName);
+  const now = Date.now();
+
+  const relevant = memories
+    .filter((m) => (m.importance ?? 0) >= minImportance)
+    .map((m) => ({ memory: m, score: scoreMemory(m, queryText, now) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .map((r) => r.memory);
+
+  console.log(
+    `[getRelevantMemories] ${relevant.length}/${memories.length} memories selected for character=${characterName} (topK=${topK}, minImportance=${minImportance}, hasQuery=${!!queryText})`
+  );
+  return relevant;
 }
 
 /** 重要記憶を 1 件保存する */
