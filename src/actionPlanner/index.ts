@@ -12,9 +12,8 @@ import { invokeModelJson } from "../lib/bedrock.js";
 import { getMemories } from "../lib/dynamo.js";
 import type {
   Action,
+  ActionPlannerRequest,
   ActionPlannerResult,
-  EventResolverResult,
-  NormalizedRequest,
 } from "../types.js";
 
 // -------------------------------------------------------
@@ -22,12 +21,13 @@ import type {
 // -------------------------------------------------------
 
 export async function runActionPlanner(
-  req: NormalizedRequest,
-  eventResult: EventResolverResult
+  req: ActionPlannerRequest
 ): Promise<ActionPlannerResult> {
   console.log("[actionPlanner] start");
 
-  const { profile, lastLoginAt, now } = req;
+  const { characterProfile: profile, events } = req;
+  const lastLoginAt = new Date(req.lastLoginAt);
+  const now = new Date(req.now);
 
   // 不在時間（上限12時間）
   const elapsedMs = Math.min(
@@ -43,8 +43,8 @@ export async function runActionPlanner(
 
   // 発生イベントをプロンプト用テキストに変換
   const eventsText =
-    eventResult.events.length > 0
-      ? eventResult.events.map((e, i) => `${i + 1}. ${e}`).join("\n")
+    events.length > 0
+      ? events.map((e, i) => `${i + 1}. ${e}`).join("\n")
       : "（なし）";
 
   // 重要記憶を取得

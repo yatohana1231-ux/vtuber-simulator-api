@@ -11,8 +11,8 @@ import PROMPT_TEMPLATE from "./prompts/eventResolver.mustache";
 import { invokeModelJson } from "../lib/bedrock.js";
 import { getMemories, saveEvent } from "../lib/dynamo.js";
 import type {
+  EventResolverRequest,
   EventResolverResult,
-  NormalizedRequest,
 } from "../types.js";
 
 // -------------------------------------------------------
@@ -20,11 +20,13 @@ import type {
 // -------------------------------------------------------
 
 export async function runEventResolver(
-  req: NormalizedRequest
+  req: EventResolverRequest
 ): Promise<EventResolverResult> {
   console.log("[eventResolver] start");
 
-  const { profile, lastLoginAt, now } = req;
+  const { characterId, characterProfile: profile } = req;
+  const lastLoginAt = new Date(req.lastLoginAt);
+  const now = new Date(req.now);
 
   const startDatetime = lastLoginAt.toISOString();
   const endDatetime = now.toISOString();
@@ -72,7 +74,7 @@ export async function runEventResolver(
   // events テーブルに保存
   await saveEvent({
     event_id: eventResult.UUID,
-    characterId: req.characterId,
+    characterId,
     startDatetime: eventResult.startDatetime,
     endDatetime: eventResult.endDatetime,
     elapsed: eventResult.elapsed,

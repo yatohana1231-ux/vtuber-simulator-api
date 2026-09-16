@@ -6,11 +6,15 @@
  *
  * プロセス:
  *   eventResolver      - イベント生成
- *   actionPlanner      - アクション生成
+ *   actionPlanner      - アクション生成（eventResolver の結果を内部で生成）
  *   emotionUpdater     - 感情更新（プロセス1 or 2）
  *   memoryRetriever    - 重要記憶判定（プロセス1 or 2）
  *   dialogueGenerator  - 会話生成
- *   all                - プロセス1全体（eventResolver→actionPlanner→emotionUpdater→memoryRetriever→dialogueGenerator）
+ *   all                - プロセス1相当の全パイプライン
+ *                        （eventResolver→actionPlanner→emotionUpdater→memoryRetriever→dialogueGenerator）
+ *                        ※エンドポイント分割後、この呼び出し順序を決めるのはフロント側の責務になる。
+ *                          このコマンドは各エンドポイント間で受け渡すデータの流れをテストするために、
+ *                          その順序を関数直呼びで再現している。
  *
  * 環境変数（.env or 直接指定）:
  *   BEDROCK_MODEL_ID, CHARACTER_MEMORY_TABLE, CONVERSATION_LOGS_TABLE, EVENTS_TABLE, AWS_REGION
@@ -36,7 +40,11 @@ import { runActionPlanner } from "../src/actionPlanner/index.js";
 import { runEmotionUpdater } from "../src/emotionUpdater/index.js";
 import { runMemoryRetriever } from "../src/memoryRetriever/index.js";
 import { runDialogueGenerator } from "../src/dialogueGenerator/index.js";
-import type { NormalizedRequest, EventResolverResult, ActionPlannerResult } from "../src/types.js";
+import type {
+  ActionPlannerRequest,
+  CharacterProfile,
+  EventResolverRequest,
+} from "../src/types.js";
 
 // -------------------------------------------------------
 // CLI 引数パース
@@ -71,7 +79,7 @@ Processes:
   emotionUpdater     感情更新
   memoryRetriever    重要記憶判定
   dialogueGenerator  会話生成
-  all                プロセス1 全体パイプライン
+  all                プロセス1相当の全パイプライン（フロント側オーケストレーションの再現）
 
 Options:
   --characterId <id>       キャラクターID (default: テスト用UUID)
@@ -90,7 +98,7 @@ Options:
 }
 
 // -------------------------------------------------------
-// リクエスト構築
+// 共通データ組み立て
 // -------------------------------------------------------
 
 const nowDate = values.now ? new Date(values.now) : new Date();
@@ -98,19 +106,30 @@ const lastLoginAtDate = values.lastLoginAt
   ? new Date(values.lastLoginAt)
   : new Date(nowDate.getTime() - 6 * 60 * 60 * 1000); // デフォルト6時間前
 
-const req: NormalizedRequest = {
-  characterId: values.characterId!,
-  message: values.message!,
-  profile: {
-    name: values.name!,
-    personality: values.personality!,
-    speechStyle: values.speechStyle!,
-    relationship: values.relationship!,
-  },
-  lastLoginAt: lastLoginAtDate,
-  now: nowDate,
-  elapsedHours: (nowDate.getTime() - lastLoginAtDate.getTime()) / (1000 * 60 * 60),
+const characterId = values.characterId!;
+const characterProfile: CharacterProfile = {
+  name: values.name!,
+  personality: values.personality!,
+  speechStyle: values.speechStyle!,
+  relationship: values.relationship!,
 };
+const nowIso = nowDate.toISOString();
+const lastLoginAtIso = lastLoginAtDate.toISOString();
+const elapsedHours = (nowDate.getTime() - lastLoginAtDate.getTime()) / (1000 * 60 * 60);
+
+function buildEventResolverRequest(): EventResolverRequest {
+  return { characterId, characterProfile, lastLoginAt: lastLoginAtIso, now: nowIso };
+}
+
+function buildActionPlannerRequest(events: string[]): ActionPlannerRequest {
+  return {
+    characterId,
+    characterProfile,
+    lastLoginAt: lastLoginAtIso,
+    now: nowIso,
+    events,
+  };
+}
 
 // -------------------------------------------------------
 // 実行
@@ -119,14 +138,14 @@ const req: NormalizedRequest = {
 async function main() {
   console.log("=".repeat(60));
   console.log(`[test-runner] process: ${processName}`);
-  console.log(`[test-runner] characterId: ${req.characterId}`);
-  console.log(`[test-runner] elapsed: ${req.elapsedHours.toFixed(1)}h`);
-  console.log(`[test-runner] message: "${req.message}"`);
+  console.log(`[test-runner] characterId: ${characterId}`);
+  console.log(`[test-runner] elapsed: ${elapsedHours.toFixed(1)}h`);
+  console.log(`[test-runner] message: "${values.message}"`);
   console.log("=".repeat(60));
 
   switch (processName) {
     case "eventResolver": {
-      const result = await runEventResolver(req);
+      const result = await runEventResolver(buildEventResolverRequest());
       console.log("\n[RESULT] eventResolver:");
       console.log(JSON.stringify(result, null, 2));
       break;
@@ -134,9 +153,9 @@ async function main() {
 
     case "actionPlanner": {
       console.log("[test-runner] running eventResolver first...");
-      const eventResult = await runEventResolver(req);
+      const eventResult = await runEventResolver(buildEventResolverRequest());
       console.log("[test-runner] eventResolver done, running actionPlanner...");
-      const result = await runActionPlanner(req, eventResult);
+      const result = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
       console.log("\n[RESULT] actionPlanner:");
       console.log(JSON.stringify(result, null, 2));
       break;
@@ -146,10 +165,11 @@ async function main() {
       const proc = parseInt(values.process!, 10) as 1 | 2;
       if (proc === 1) {
         console.log("[test-runner] running eventResolver + actionPlanner first...");
-        const eventResult = await runEventResolver(req);
-        const actionResult = await runActionPlanner(req, eventResult);
+        const eventResult = await runEventResolver(buildEventResolverRequest());
+        const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
         const result = await runEmotionUpdater({
-          req,
+          characterId,
+          characterProfile,
           process: 1,
           events: eventResult.events,
           actions: actionResult.actions,
@@ -159,7 +179,8 @@ async function main() {
       } else {
         const msg = values.message || "今日は調子どう？";
         const result = await runEmotionUpdater({
-          req: { ...req, message: msg },
+          characterId,
+          characterProfile,
           process: 2,
           playerMessage: msg,
         });
@@ -173,17 +194,18 @@ async function main() {
       const proc = parseInt(values.process!, 10) as 1 | 2;
       if (proc === 1) {
         console.log("[test-runner] running eventResolver + actionPlanner first...");
-        const eventResult = await runEventResolver(req);
-        const actionResult = await runActionPlanner(req, eventResult);
+        const eventResult = await runEventResolver(buildEventResolverRequest());
+        const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
         await runMemoryRetriever({
-          req,
+          characterId,
+          characterProfile,
           process: 1,
           events: eventResult.events,
           actions: actionResult.actions,
         });
         console.log("\n[RESULT] memoryRetriever (process1): done (check DynamoDB)");
       } else {
-        await runMemoryRetriever({ req, process: 2 });
+        await runMemoryRetriever({ characterId, characterProfile, process: 2 });
         console.log("\n[RESULT] memoryRetriever (process2): done (check DynamoDB)");
       }
       break;
@@ -192,9 +214,10 @@ async function main() {
     case "dialogueGenerator": {
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const result = await runDialogueGenerator({
-        req,
-        mood: undefined,
-        perception: undefined,
+        characterId,
+        characterProfile,
+        now: nowIso,
+        message: values.message!,
         events: [],
         actions: [],
         longTimeFlag,
@@ -206,16 +229,17 @@ async function main() {
 
     case "all": {
       console.log("\n--- [1/5] eventResolver ---");
-      const eventResult = await runEventResolver(req);
+      const eventResult = await runEventResolver(buildEventResolverRequest());
       console.log(JSON.stringify(eventResult, null, 2));
 
       console.log("\n--- [2/5] actionPlanner ---");
-      const actionResult = await runActionPlanner(req, eventResult);
+      const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
       console.log(JSON.stringify(actionResult, null, 2));
 
       console.log("\n--- [3/5] emotionUpdater ---");
       const { mood, perception } = await runEmotionUpdater({
-        req,
+        characterId,
+        characterProfile,
         process: 1,
         events: eventResult.events,
         actions: actionResult.actions,
@@ -224,7 +248,8 @@ async function main() {
 
       console.log("\n--- [4/5] memoryRetriever ---");
       await runMemoryRetriever({
-        req,
+        characterId,
+        characterProfile,
         process: 1,
         events: eventResult.events,
         actions: actionResult.actions,
@@ -234,7 +259,10 @@ async function main() {
       console.log("\n--- [5/5] dialogueGenerator ---");
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const reply = await runDialogueGenerator({
-        req,
+        characterId,
+        characterProfile,
+        now: nowIso,
+        message: values.message!,
         mood,
         perception,
         events: eventResult.events,
@@ -245,7 +273,7 @@ async function main() {
 
       console.log("\n" + "=".repeat(60));
       console.log("[FINAL RESPONSE]");
-      console.log(JSON.stringify({ characterId: req.characterId, reply, mood, perception }, null, 2));
+      console.log(JSON.stringify({ characterId, reply, mood, perception }, null, 2));
       break;
     }
 

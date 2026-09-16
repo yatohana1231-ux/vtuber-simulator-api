@@ -21,48 +21,29 @@ import {
 } from "../lib/dynamo.js";
 import type {
   Action,
+  CharacterProfile,
   MemoryCandidate,
+  MemoryRetrieverRequest,
   MemoryRetrieverResult,
-  NormalizedRequest,
 } from "../types.js";
 
 const JUDGE_TURNS = 5; // プロセス2で判定する往復数
-
-// -------------------------------------------------------
-// 引数型
-// -------------------------------------------------------
-
-interface MemoryRetrieverProcess1Args {
-  req: NormalizedRequest;
-  process: 1;
-  events: string[];
-  actions: Action[];
-}
-
-interface MemoryRetrieverProcess2Args {
-  req: NormalizedRequest;
-  process: 2;
-}
-
-type MemoryRetrieverArgs =
-  | MemoryRetrieverProcess1Args
-  | MemoryRetrieverProcess2Args;
 
 // -------------------------------------------------------
 // 公開関数
 // -------------------------------------------------------
 
 export async function runMemoryRetriever(
-  args: MemoryRetrieverArgs
+  req: MemoryRetrieverRequest
 ): Promise<void> {
-  console.log(`[memoryRetriever] start process=${args.process}`);
+  console.log(`[memoryRetriever] start process=${req.process}`);
 
-  const { req } = args;
+  const { characterId, characterProfile: profile } = req;
 
-  if (args.process === 1) {
-    await judgeProcess1(req, args.events, args.actions);
+  if (req.process === 1) {
+    await judgeProcess1(characterId, profile, req.events, req.actions);
   } else {
-    await judgeProcess2(req);
+    await judgeProcess2(characterId, profile);
   }
 }
 
@@ -71,7 +52,8 @@ export async function runMemoryRetriever(
 // -------------------------------------------------------
 
 async function judgeProcess1(
-  req: NormalizedRequest,
+  characterId: string,
+  profile: CharacterProfile,
   events: string[],
   actions: Action[]
 ): Promise<void> {
@@ -97,15 +79,18 @@ async function judgeProcess1(
 
   const inputText = `【不在中の出来事】\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
 
-  await runJudgement(req, inputText);
+  await runJudgement(profile, inputText);
 }
 
 // -------------------------------------------------------
 // プロセス2: 直近5往復の会話ログを判定
 // -------------------------------------------------------
 
-async function judgeProcess2(req: NormalizedRequest): Promise<void> {
-  const logs = await getLogsForMemoryJudge(req.characterId, JUDGE_TURNS);
+async function judgeProcess2(
+  characterId: string,
+  profile: CharacterProfile
+): Promise<void> {
+  const logs = await getLogsForMemoryJudge(characterId, JUDGE_TURNS);
 
   // 5往復 = 10件未満の場合はスキップ
   if (logs.length < JUDGE_TURNS * 2) {
@@ -125,18 +110,18 @@ async function judgeProcess2(req: NormalizedRequest): Promise<void> {
   // 会話ログをテキスト化
   const conversationText = logs
     .map((l) => {
-      const speaker = l.role === "user" ? "プレイヤー" : req.profile.name;
+      const speaker = l.role === "user" ? "プレイヤー" : profile.name;
       return `${speaker}: ${l.content}`;
     })
     .join("\n");
 
   const inputText = `【直近の会話（${JUDGE_TURNS}往復）】\n${conversationText}`;
 
-  await runJudgement(req, inputText);
+  await runJudgement(profile, inputText);
 
   // 判定済みフラグを付ける
   const indexes = logs.map((l) => l.index);
-  await markLogsAsJudged(req.characterId, indexes);
+  await markLogsAsJudged(characterId, indexes);
 }
 
 // -------------------------------------------------------
@@ -144,11 +129,9 @@ async function judgeProcess2(req: NormalizedRequest): Promise<void> {
 // -------------------------------------------------------
 
 async function runJudgement(
-  req: NormalizedRequest,
+  profile: CharacterProfile,
   inputText: string
 ): Promise<void> {
-  const { profile } = req;
-
   // 既存の重要記憶を取得
   const existingMemories = await getMemories(profile.name);
   const existingMemoriesText =

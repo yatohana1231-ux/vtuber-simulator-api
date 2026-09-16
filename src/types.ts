@@ -9,23 +9,6 @@ export interface CharacterProfile {
   relationship: string;
 }
 
-export interface ChatRequest {
-  characterId?: string;
-  message: string;
-  characterProfile?: Partial<CharacterProfile>;
-  lastLoginAt?: string; // ISO8601 例: "2026-07-18T10:00:00"
-  now?: string;         // ISO8601 例: "2026-07-18T13:00:00"
-  actions?: Action[];   // フロントが保持したアクション履歴（プロセス2で送信）
-}
-
-export interface ChatResponse {
-  characterId: string;
-  reply: string;
-  mood: Mood;
-  perception: Perception;
-  actions?: Action[];   // プロセス1で生成されたアクション履歴（フロントで保持）
-}
-
 // -------------------------------------------------------
 // 感情 / 関係値
 // -------------------------------------------------------
@@ -152,15 +135,83 @@ export interface EventItem {
 }
 
 // -------------------------------------------------------
-// processChat 内部の引数型
+// エンドポイントリクエスト/レスポンス型
+//
+// 機能ごとに独立した API エンドポイントとして公開するため、
+// これまで NormalizedRequest にまとめていた入力を
+// エンドポイントごとにフラットな型として定義する。
+// オーケストレーション（どの順で呼ぶか）はフロント側の責務になる。
 // -------------------------------------------------------
 
-export interface NormalizedRequest {
+export interface EventResolverRequest {
   characterId: string;
-  message: string;
-  profile: CharacterProfile;
-  lastLoginAt: Date;
-  now: Date;
-  elapsedHours: number;
-  actions: Action[]; // フロントから受け取ったアクション履歴（プロセス2用）
+  characterProfile: CharacterProfile;
+  lastLoginAt: string; // ISO8601
+  now: string; // ISO8601
+}
+
+export interface ActionPlannerRequest {
+  characterId: string;
+  characterProfile: CharacterProfile;
+  lastLoginAt: string; // ISO8601
+  now: string; // ISO8601
+  events: string[]; // event-resolver エンドポイントの出力
+}
+
+export interface EmotionUpdaterRequestProcess1 {
+  characterId: string;
+  characterProfile: CharacterProfile;
+  process: 1;
+  events: string[];
+  actions: Action[];
+}
+
+export interface EmotionUpdaterRequestProcess2 {
+  characterId: string;
+  characterProfile: CharacterProfile;
+  process: 2;
+  playerMessage: string;
+}
+
+export type EmotionUpdaterRequest =
+  | EmotionUpdaterRequestProcess1
+  | EmotionUpdaterRequestProcess2;
+
+export interface EmotionUpdaterResponse {
+  mood: Mood;
+  perception: Perception;
+}
+
+export interface MemoryRetrieverRequestProcess1 {
+  characterId: string;
+  characterProfile: CharacterProfile;
+  process: 1;
+  events: string[];
+  actions: Action[];
+}
+
+export interface MemoryRetrieverRequestProcess2 {
+  characterId: string;
+  characterProfile: CharacterProfile;
+  process: 2;
+}
+
+export type MemoryRetrieverRequest =
+  | MemoryRetrieverRequestProcess1
+  | MemoryRetrieverRequestProcess2;
+
+export interface DialogueGeneratorRequest {
+  characterId: string;
+  characterProfile: CharacterProfile;
+  now: string; // ISO8601
+  message: string; // 空文字の場合はプレイヤー不在時の代替テキストを内部で使用
+  mood?: Mood; // 未指定時は DynamoDB から取得
+  perception?: Perception; // 未指定時は DynamoDB から取得
+  events?: string[];
+  actions?: Action[];
+  longTimeFlag?: 0 | 1;
+}
+
+export interface DialogueGeneratorResponse {
+  reply: string;
 }

@@ -16,6 +16,73 @@ export interface VtuberSimulatorStackProps extends cdk.StackProps {
 }
 
 // -------------------------------------------------------
+// エンドポイント定義
+//
+// 機能（eventResolver/actionPlanner/emotionUpdater/memoryRetriever/
+// dialogueGenerator）ごとに独立した Lambda + API Gateway リソースを持つ。
+// オーケストレーション（どの順で呼ぶか）はフロント側の責務になったため、
+// バックエンドは各機能を単独で呼び出せる薄いエンドポイント群になる。
+// 5関数とも esbuild が dist/ に出力する同一アセットを共有し、
+// handler プロパティだけを関数ごとに変える。
+// -------------------------------------------------------
+
+type TableAccess = "read" | "write" | "readwrite";
+
+interface EndpointDef {
+  id: string; // CDK construct id の接頭辞
+  fileBaseName: string; // dist/<fileBaseName>.mjs（esbuild のエントリポイント名と一致）
+  resourcePath: string; // API Gateway のパス（kebab-case）
+  tables: {
+    characterMemory?: TableAccess;
+    conversationLogs?: TableAccess;
+    events?: TableAccess;
+  };
+}
+
+const ENDPOINTS: EndpointDef[] = [
+  {
+    id: "EventResolver",
+    fileBaseName: "eventResolver",
+    resourcePath: "event-resolver",
+    tables: { characterMemory: "read", events: "write" },
+  },
+  {
+    id: "ActionPlanner",
+    fileBaseName: "actionPlanner",
+    resourcePath: "action-planner",
+    tables: { characterMemory: "read" },
+  },
+  {
+    id: "EmotionUpdater",
+    fileBaseName: "emotionUpdater",
+    resourcePath: "emotion-updater",
+    tables: { characterMemory: "readwrite" },
+  },
+  {
+    id: "MemoryRetriever",
+    fileBaseName: "memoryRetriever",
+    resourcePath: "memory-retriever",
+    tables: { characterMemory: "readwrite", conversationLogs: "readwrite" },
+  },
+  {
+    id: "DialogueGenerator",
+    fileBaseName: "dialogueGenerator",
+    resourcePath: "dialogue-generator",
+    tables: { characterMemory: "read", conversationLogs: "readwrite" },
+  },
+];
+
+function grantTableAccess(
+  table: dynamodb.ITable,
+  access: TableAccess | undefined,
+  fn: lambda.Function
+): void {
+  if (access === "read") table.grantReadData(fn);
+  else if (access === "write") table.grantWriteData(fn);
+  else if (access === "readwrite") table.grantReadWriteData(fn);
+}
+
+// -------------------------------------------------------
 // スタック
 // -------------------------------------------------------
 
@@ -74,55 +141,20 @@ export class VtuberSimulatorStack extends cdk.Stack {
     });
 
     // -------------------------------------------------------
-    // Lambda 関数
+    // 共有アセット（esbuild が dist/ に機能ごとの .mjs を出力する）
     // -------------------------------------------------------
 
-    const chatLambda = new lambda.Function(this, "ChatLambda", {
-      functionName: `vtuber-simu-chat-${stageName}`,
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: "handler.handler",
-      // esbuild でバンドルしたファイルを dist/ に出力してからデプロイする
-      code: lambda.Code.fromAsset(
-        path.join(__dirname, "..", "..", "dist")
-      ),
-      timeout: cdk.Duration.seconds(120),
-      memorySize: 512,
-      environment: {
-        BEDROCK_MODEL_ID: "apac.amazon.nova-lite-v1:0",
-        CHARACTER_MEMORY_TABLE: characterMemoryTable.tableArn,
-        CONVERSATION_LOGS_TABLE: conversationLogsTable.tableArn,
-        EVENTS_TABLE: eventsTable.tableName,
-        AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
-      },
-    });
-
-    // -------------------------------------------------------
-    // IAM ポリシー
-    // -------------------------------------------------------
-
-    // DynamoDB アクセス権限
-    conversationLogsTable.grantReadWriteData(chatLambda);
-    characterMemoryTable.grantReadWriteData(chatLambda);
-    eventsTable.grantReadWriteData(chatLambda);
-
-    // Bedrock 呼び出し権限
-    chatLambda.addToRolePolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-        resources: ["*"],
-      })
+    const lambdaCode = lambda.Code.fromAsset(
+      path.join(__dirname, "..", "..", "dist")
     );
 
     // -------------------------------------------------------
-    // API Gateway（既存をインポートして Lambda 統合を追加）
+    // API Gateway（機能ごとのリソースをまとめる REST API）
     // -------------------------------------------------------
 
-    // 既存の REST API を参照する場合は fromRestApiId を使う。
-    // ここでは新規作成として定義する（既存 API への統合はコンソールまたは別途設定）。
-    const api = new apigateway.RestApi(this, "ChatApi", {
+    const api = new apigateway.RestApi(this, "VtuberSimulatorApi", {
       restApiName: `vtuber-simu-api-${stageName}`,
-      description: "VTuber Simulator Chat API",
+      description: "VTuber Simulator API（機能別エンドポイント）",
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
@@ -133,27 +165,56 @@ export class VtuberSimulatorStack extends cdk.Stack {
       },
     });
 
-    const chatIntegration = new apigateway.LambdaIntegration(chatLambda, {
-      timeout: cdk.Duration.seconds(29),
-    });
+    // -------------------------------------------------------
+    // Lambda 関数 + API リソース（機能ごと）
+    // -------------------------------------------------------
 
-    // POST /chat
-    const chatResource = api.root.addResource("chat");
-    chatResource.addMethod("POST", chatIntegration);
+    for (const endpoint of ENDPOINTS) {
+      const fn = new lambda.Function(this, `${endpoint.id}Lambda`, {
+        functionName: `vtuber-simu-${endpoint.resourcePath}-${stageName}`,
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: `${endpoint.fileBaseName}.handler`,
+        code: lambdaCode,
+        timeout: cdk.Duration.seconds(120),
+        memorySize: 512,
+        environment: {
+          BEDROCK_MODEL_ID: "apac.amazon.nova-lite-v1:0",
+          CHARACTER_MEMORY_TABLE: characterMemoryTable.tableArn,
+          CONVERSATION_LOGS_TABLE: conversationLogsTable.tableArn,
+          EVENTS_TABLE: eventsTable.tableName,
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
+        },
+      });
+
+      // DynamoDB アクセス権限（実際に使うテーブルのみ最小権限で付与）
+      grantTableAccess(characterMemoryTable, endpoint.tables.characterMemory, fn);
+      grantTableAccess(conversationLogsTable, endpoint.tables.conversationLogs, fn);
+      grantTableAccess(eventsTable, endpoint.tables.events, fn);
+
+      // Bedrock 呼び出し権限（全関数共通）
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+          resources: ["*"],
+        })
+      );
+
+      const integration = new apigateway.LambdaIntegration(fn, {
+        timeout: cdk.Duration.seconds(29),
+      });
+      const resource = api.root.addResource(endpoint.resourcePath);
+      resource.addMethod("POST", integration);
+
+      new cdk.CfnOutput(this, `${endpoint.id}Endpoint`, {
+        value: `${api.url}${endpoint.resourcePath}`,
+        description: `${endpoint.id} API Endpoint`,
+      });
+    }
 
     // -------------------------------------------------------
     // Outputs
     // -------------------------------------------------------
-
-    new cdk.CfnOutput(this, "ApiEndpoint", {
-      value: `${api.url}chat`,
-      description: "Chat API Endpoint",
-    });
-
-    new cdk.CfnOutput(this, "LambdaFunctionName", {
-      value: chatLambda.functionName,
-      description: "Chat Lambda Function Name",
-    });
 
     new cdk.CfnOutput(this, "EventsTableName", {
       value: eventsTable.tableName,

@@ -16,38 +16,11 @@ import {
 } from "../lib/dynamo.js";
 import { clamp } from "../lib/utils.js";
 import type {
-  Action,
+  EmotionUpdaterRequest,
+  EmotionUpdaterResponse,
   Mood,
-  NormalizedRequest,
   Perception,
 } from "../types.js";
-
-// -------------------------------------------------------
-// 引数型
-// -------------------------------------------------------
-
-interface EmotionUpdaterProcess1Args {
-  req: NormalizedRequest;
-  process: 1;
-  events: string[];
-  actions: Action[];
-  playerMessage?: never;
-}
-
-interface EmotionUpdaterProcess2Args {
-  req: NormalizedRequest;
-  process: 2;
-  playerMessage: string;
-  events?: never;
-  actions?: never;
-}
-
-type EmotionUpdaterArgs = EmotionUpdaterProcess1Args | EmotionUpdaterProcess2Args;
-
-interface EmotionUpdaterResult {
-  mood: Mood;
-  perception: Perception;
-}
 
 // -------------------------------------------------------
 // ラベルマップ
@@ -93,27 +66,27 @@ function formatState(
 // -------------------------------------------------------
 
 export async function runEmotionUpdater(
-  args: EmotionUpdaterArgs
-): Promise<EmotionUpdaterResult> {
-  console.log(`[emotionUpdater] start process=${args.process}`);
+  req: EmotionUpdaterRequest
+): Promise<EmotionUpdaterResponse> {
+  console.log(`[emotionUpdater] start process=${req.process}`);
 
-  const { req } = args;
+  const { characterId, characterProfile: profile } = req;
   const { mood: currentMood, perception: currentPerception } =
-    await getCharacterState(req.characterId);
+    await getCharacterState(characterId);
 
   // インプットテキストを組み立てる
   let inputText: string;
   let perceptionRule: string;
 
-  if (args.process === 1) {
+  if (req.process === 1) {
     // プロセス1: イベント・アクションがインプット
     const eventsText =
-      args.events.length > 0
-        ? args.events.map((e, i) => `${i + 1}. ${e}`).join("\n")
+      req.events.length > 0
+        ? req.events.map((e, i) => `${i + 1}. ${e}`).join("\n")
         : "（なし）";
     const actionsText =
-      args.actions.length > 0
-        ? args.actions
+      req.actions.length > 0
+        ? req.actions
             .map(
               (a) =>
                 `・${a.startDatetime.slice(0, 16)} 〜 ${a.endDatetime.slice(0, 16)}: ${a.action}（${a.memo}）`
@@ -126,7 +99,7 @@ export async function runEmotionUpdater(
       "- 関係値（perception）はプレイヤー不在中の出来事なので、大きく変化しないよう差分を小さく抑えること（目安: ±0〜3）";
   } else {
     // プロセス2: プレイヤー発言がインプット
-    inputText = `【プレイヤーの発言】\n${args.playerMessage}`;
+    inputText = `【プレイヤーの発言】\n${req.playerMessage}`;
     perceptionRule =
       "- 関係値（perception）もプレイヤーの発言に応じて適切に更新する（目安: ±1〜5）";
   }
@@ -135,8 +108,8 @@ export async function runEmotionUpdater(
   const perceptionText = formatState(currentPerception as unknown as Record<string, number>, PERCEPTION_LABELS as Record<string, string>);
 
   const systemPrompt = Mustache.render(PROMPT_TEMPLATE, {
-    name: req.profile.name,
-    personality: req.profile.personality,
+    name: profile.name,
+    personality: profile.personality,
     moodText,
     perceptionText,
     inputText,
@@ -154,7 +127,7 @@ export async function runEmotionUpdater(
   const updatedPerception = applyPerceptionDelta(currentPerception, delta.perceptionDelta ?? {});
 
   // DynamoDB に保存
-  await saveCharacterState(req.characterId, updatedMood, updatedPerception);
+  await saveCharacterState(characterId, updatedMood, updatedPerception);
 
   console.log("[emotionUpdater] updated mood:", JSON.stringify(updatedMood));
   console.log("[emotionUpdater] updated perception:", JSON.stringify(updatedPerception));

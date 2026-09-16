@@ -28,25 +28,13 @@ import { formatDatetimeJST } from "../lib/utils.js";
 import type {
   Action,
   CharacterMemoryItem,
+  CharacterProfile,
+  DialogueGeneratorRequest,
   Mood,
-  NormalizedRequest,
   Perception,
 } from "../types.js";
 
 const RECENT_LOG_LIMIT = 10;
-
-// -------------------------------------------------------
-// 引数型
-// -------------------------------------------------------
-
-export interface DialogueGeneratorArgs {
-  req: NormalizedRequest;
-  mood: Mood | undefined;       // undefined のとき DynamoDB から取得
-  perception: Perception | undefined;
-  events: string[];
-  actions: Action[];
-  longTimeFlag: 0 | 1;
-}
 
 // -------------------------------------------------------
 // ラベルマップ
@@ -92,16 +80,19 @@ function formatState(
 // -------------------------------------------------------
 
 export async function runDialogueGenerator(
-  args: DialogueGeneratorArgs
+  req: DialogueGeneratorRequest
 ): Promise<string> {
   console.log("[dialogueGenerator] start");
 
-  const { req, events, actions, longTimeFlag } = args;
-  const { characterId, profile, now } = req;
+  const { characterId, characterProfile: profile } = req;
+  const now = new Date(req.now);
+  const events = req.events ?? [];
+  const actions = req.actions ?? [];
+  const longTimeFlag = req.longTimeFlag ?? 0;
 
   // 感情・関係値を取得（引数未指定の場合は DynamoDB から）
-  let mood = args.mood;
-  let perception = args.perception;
+  let mood = req.mood;
+  let perception = req.perception;
   if (!mood || !perception) {
     const state = await getCharacterState(characterId);
     mood = state.mood ?? { ...DEFAULT_MOOD };
@@ -157,7 +148,7 @@ export async function runDialogueGenerator(
 // -------------------------------------------------------
 
 interface BuildSystemPromptArgs {
-  profile: NormalizedRequest["profile"];
+  profile: CharacterProfile;
   mood: Mood;
   perception: Perception;
   memories: CharacterMemoryItem[];
