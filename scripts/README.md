@@ -10,5 +10,5 @@
 
 ## 注意
 
-- `test-runner.ts` は `npx tsx` で `.mustache` のインポートに失敗する既知の問題がある（`.notes/_followup.md` 参照）。
+- `test-runner.ts` は `npx tsx` で `.mustache` のインポートに失敗する既知の問題がある（`.notes/_followup.md` の F-006 参照）。
 - `test-runner.ts` は `tsconfig.json` の対象外（`include` は `src/**/*` のみ）のため、`npx tsc --noEmit` では型チェックされない。

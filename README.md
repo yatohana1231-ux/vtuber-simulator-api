@@ -8,7 +8,7 @@ VTuber キャラクターとのチャットインタラクションを提供す�
 
 | カテゴリ | 技術 |
 |---------|------|
-| ランタイム | Node.js 20.x (AWS Lambda) |
+| ランタイム | Node.js 24.x (AWS Lambda) |
 | 言語 | TypeScript (ESM) |
 | ビルドツール | esbuild |
 | LLM | Amazon Bedrock (Converse API) / `apac.amazon.nova-lite-v1:0` |
@@ -200,7 +200,7 @@ graph LR
         GHA[GitHub Actions]
     end
     subgraph BuildSteps["ビルドステップ"]
-        CHECKOUT[Checkout] --> SETUP[Node.js 20 Setup] --> OIDC[AWS OIDC 認証] --> INSTALL[npm ci] --> TYPECHECK[tsc --noEmit] --> BUILD[esbuild バンドル<br/>機能ごとに dist/*.mjs] --> CDK[CDK Deploy]
+        CHECKOUT[Checkout] --> SETUP[Node.js 24 Setup] --> OIDC[AWS OIDC 認証] --> INSTALL[npm ci] --> TYPECHECK[tsc --noEmit] --> BUILD[esbuild バンドル<br/>機能ごとに dist/*.mjs] --> CDK[CDK Deploy]
     end
     subgraph AWS_Deploy["AWS (STG)"]
         CFN[CloudFormation] --> LAMBDA_D[Lambda 更新]
@@ -637,7 +637,7 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 # build:bundle の中身
 # esbuild src/handlers/eventResolver.ts src/handlers/actionPlanner.ts src/handlers/emotionUpdater.ts \
 #   src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts \
-#   --bundle --platform=node --target=node20 --format=esm \
+#   --bundle --platform=node --target=node24 --format=esm \
 #   --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text
 ```
 
@@ -661,4 +661,4 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 
 企画当初のドキュメントには書かれていたが、現在のコードには反映されていない設計意図。詳細と優先度は [`.notes/_followup.md`](../.notes/_followup.md) を参照。
 
-- **AI障害時のフォールバック**: 「Bedrock 呼び出し失敗時はデフォルトのテキストを返す」という設計意図があったが、実装は各 `handlers/*.ts` が例外を捕捉して 500 エラーを返すのみで、固定文言へのフォールバックは無い。
+- **AI障害時のフォールバック**（F-001）: 「Bedrock 呼び出し失敗時はデフォルトのテキストを返す」という設計意図があったが、実装は各 `handlers/*.ts` が例外を捕捉して 500 エラーを返すのみで、固定文言へのフォールバックは無い。

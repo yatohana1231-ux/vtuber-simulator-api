@@ -172,7 +172,7 @@ export class VtuberSimulatorStack extends cdk.Stack {
     for (const endpoint of ENDPOINTS) {
       const fn = new lambda.Function(this, `${endpoint.id}Lambda`, {
         functionName: `vtuber-simu-${endpoint.resourcePath}-${stageName}`,
-        runtime: lambda.Runtime.NODEJS_20_X,
+        runtime: lambda.Runtime.NODEJS_24_X,
         handler: `${endpoint.fileBaseName}.handler`,
         code: lambdaCode,
         timeout: cdk.Duration.seconds(120),
