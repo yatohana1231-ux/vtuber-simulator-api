@@ -63,6 +63,21 @@ export interface Lifestyle {
   eventKinds: EventKind[];
 }
 
+/** 不在期間の行動の枠（骨格）。時刻は ISO8601（UTC、Date#toISOString の形式） */
+export interface ActionSlot {
+  startDatetime: string;
+  endDatetime: string;
+  activity: string;
+}
+
+/** 不在期間の骨格。サーバーが決め、内容は LLM が肉付けする */
+export interface AbsenceSkeleton {
+  startDatetime: string; // 不在期間の開始（前回ログイン。ISO8601 UTC）
+  endDatetime: string;   // 不在期間の終了（今回ログイン。ISO8601 UTC）
+  actionSlots: ActionSlot[];
+  eventKinds: EventKind[]; // 抽選された出来事の種類（件数 = 出来事の件数）
+}
+
 // -------------------------------------------------------
 // 感情 / 関係値
 // -------------------------------------------------------

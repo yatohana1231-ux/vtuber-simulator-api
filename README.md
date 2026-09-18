@@ -55,7 +55,8 @@ api/
 │   ├── memoryRetriever/{index.ts, prompts/memoryRetriever.mustache}  # 重要記憶管理
 │   ├── dialogueGenerator/{index.ts, prompts/conversation.mustache}   # セリフ生成
 │   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 5テンプレート共有のパーシャル
-│   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts}
+│   ├── absenceSimulator/{skeleton.ts, actionSlots.ts, eventKindSelection.ts}  # 不在期間のシミュレーション（実装途中。まだエンドポイントなし）
+│   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts}
 ├── test/
 │   ├── events/                         # Lambda コンソール用のテストイベント（廃止済み `/chat` 前提のまま古い）
 │   └── unit/                           # Vitest の単体テストコード（src/ と同じフォルダ構成）

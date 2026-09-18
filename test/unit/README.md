@@ -8,8 +8,9 @@ Vitest で実行する単体テストコード。テストの考え方・方針�
 
 | フォルダ | 対応する `src/` | 内容 |
 |---|---|---|
-| [`lib/`](lib/README.md) | `src/lib/` | `bedrock.ts` / `dynamo.ts` / `packages.ts` / `utils.ts` の単体テスト |
+| [`lib/`](lib/README.md) | `src/lib/` | `bedrock.ts` / `dynamo.ts` / `packages.ts` / `utils.ts` / `timezone.ts` / `random.ts` の単体テスト |
 | [`promptPartials/`](promptPartials/README.md) | `src/promptPartials/` | 共有パーシャル（`world.mustache` / `speechExamples.mustache`）と `buildPromptContext` の単体テスト |
+| [`absenceSimulator/`](absenceSimulator/README.md) | `src/absenceSimulator/` | 不在期間の骨格（行動の枠の展開、出来事の件数と種類の抽選、組み立て）の単体テスト |
 | [`handlers/`](handlers/README.md) | `src/handlers/` | `eventResolver` / `actionPlanner` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator` の5ハンドラーの単体テスト（`run*` はスタブ） |
 | [`eventResolver/`](eventResolver/README.md) | `src/eventResolver/` | `runEventResolver` の単体テスト（Bedrock / DynamoDB はスタブ） |
 | [`actionPlanner/`](actionPlanner/README.md) | `src/actionPlanner/` | `runActionPlanner` の単体テスト（Bedrock / DynamoDB はスタブ） |
@@ -26,7 +27,7 @@ npm test          # vitest run（1回実行。CI もこれを実行する）
 npm run test:watch   # vitest（ウォッチモード）
 ```
 
-CI（[`../../.github/workflows/deploy-stg.yml`](../../.github/workflows/deploy-stg.yml)）は `develop` ブランチへの push 時、型チェックの直後・ビルドの前に `npm test` を実行し、デプロイ前のゲートになっている（失敗するとビルド・`cdk deploy` は実行されない）。2026-09-18 時点で 15 ファイル・220 件成功 ＋ todo 1 件（`memoryRetriever`）。
+CI（[`../../.github/workflows/deploy-stg.yml`](../../.github/workflows/deploy-stg.yml)）は `develop` ブランチへの push 時、型チェックの直後・ビルドの前に `npm test` を実行し、デプロイ前のゲートになっている（失敗するとビルド・`cdk deploy` は実行されない）。2026-09-18 時点で 20 ファイル・268 件成功 ＋ todo 1 件（`memoryRetriever`）。
 
 ## `.mustache` の扱い
 

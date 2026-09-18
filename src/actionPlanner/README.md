@@ -6,4 +6,3 @@
 |---|---|
 | `index.ts` | `runActionPlanner`。重要記憶（クエリなし、上位8件）を取得してプロンプトを組み立てる |
 | [`prompts/`](prompts/README.md) | システムプロンプトのテンプレート |
-| `template/` | 旧 `enhance-v1` 計画の実験用ファイル（未コミット・ランタイム未使用。`CLAUDE.md` 参照） |
