@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { QueryCommand, UpdateCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  QueryCommand,
+  UpdateCommand,
+  PutCommand,
+  GetCommand,
+  TransactWriteCommand,
+} from "@aws-sdk/lib-dynamodb";
 import {
   dynamo,
   getRelevantMemories,
@@ -9,8 +15,20 @@ import {
   saveConversationLog,
   getRecentLogs,
   markLogsAsJudged,
+  saveAbsenceRecord,
+  getLatestAbsenceRecord,
+  getRecentAbsenceRecords,
+  LATEST_ABSENCE_RECORD_INDEX_KEY,
+  CHARACTER_MEMORY_TABLE,
+  EVENTS_TABLE,
 } from "../../../src/lib/dynamo.js";
-import type { CharacterMemoryItem, CharacterStateItem, ConversationLogItem } from "../../../src/types.js";
+import type {
+  AbsenceRecord,
+  CharacterMemoryItem,
+  CharacterStateItem,
+  ConversationLogItem,
+  LatestAbsenceRecordItem,
+} from "../../../src/types.js";
 
 function memory(overrides: Partial<CharacterMemoryItem>): CharacterMemoryItem {
   return {
@@ -19,6 +37,27 @@ function memory(overrides: Partial<CharacterMemoryItem>): CharacterMemoryItem {
     importance: 50,
     updatedAt: "2026-01-01T00:00:00.000Z",
     tags: [],
+    ...overrides,
+  };
+}
+
+function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
+  return {
+    event_id: "event-1",
+    characterId: "char-1",
+    createdAt: "2026-01-15T00:00:00.000Z",
+    startDatetime: "2026-01-14T21:00:00.000Z",
+    endDatetime: "2026-01-15T00:00:00.000Z",
+    events: [{ kind: "daily", summary: "学校に行った", detail: "友達と昼ご飯を食べた" }],
+    actions: [
+      {
+        startDatetime: "2026-01-14T21:00:00.000Z",
+        endDatetime: "2026-01-14T23:00:00.000Z",
+        action: "登校・授業",
+        memo: "",
+      },
+    ],
+    threads: [{ id: "thread-1", topic: "来週テストがある", status: "open", openedAt: "2026-01-14T21:00:00.000Z" }],
     ...overrides,
   };
 }
@@ -44,6 +83,20 @@ describe("getRelevantMemories", () => {
     vi.spyOn(dynamo, "send").mockResolvedValue({
       Items: [
         memory({ index: "state", importance: 100 }),
+        memory({ index: "mem-1", importance: 50 }),
+      ],
+    } as never);
+
+    const result = await getRelevantMemories("char-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].index).toBe("mem-1");
+  });
+
+  it("index: 'absence-latest' のレコードは除外される", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({
+      Items: [
+        memory({ index: LATEST_ABSENCE_RECORD_INDEX_KEY, importance: 100 }),
         memory({ index: "mem-1", importance: 50 }),
       ],
     } as never);
@@ -311,5 +364,205 @@ describe("markLogsAsJudged", () => {
       { conversation_id: "char-1", index: "idx-1" },
       { conversation_id: "char-1", index: "idx-2" },
     ]);
+  });
+});
+
+describe("saveAbsenceRecord", () => {
+  it("呼び出す → TransactWriteCommandでイベントテーブルと最新の記録を同時に保存する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({} as never);
+    const record = absenceRecord();
+
+    await saveAbsenceRecord(record);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as TransactWriteCommand;
+    const items = command.input.TransactItems ?? [];
+    expect(items).toHaveLength(2);
+
+    expect(items[0].Put?.TableName).toBe(EVENTS_TABLE);
+    expect(items[0].Put?.Item).toEqual(record);
+
+    expect(items[1].Put?.TableName).toBe(CHARACTER_MEMORY_TABLE);
+    const latestItem = items[1].Put?.Item as LatestAbsenceRecordItem;
+    expect(latestItem.memory_id).toBe(record.characterId);
+    expect(latestItem.index).toBe(LATEST_ABSENCE_RECORD_INDEX_KEY);
+    expect(latestItem.record).toEqual(record);
+    expect(typeof latestItem.updatedAt).toBe("string");
+  });
+});
+
+describe("getLatestAbsenceRecord", () => {
+  it("呼び出す → ConsistentRead:trueとKeyでGetCommandを送信する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    await getLatestAbsenceRecord("char-1");
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as GetCommand;
+    expect(command.input.TableName).toBe(CHARACTER_MEMORY_TABLE);
+    expect(command.input.Key).toEqual({
+      memory_id: "char-1",
+      index: LATEST_ABSENCE_RECORD_INDEX_KEY,
+    });
+    expect(command.input.ConsistentRead).toBe(true);
+  });
+
+  it("項目あり（現行形式） → recordを返す", async () => {
+    const record = absenceRecord();
+    const item: LatestAbsenceRecordItem = {
+      memory_id: "char-1",
+      index: LATEST_ABSENCE_RECORD_INDEX_KEY,
+      record,
+      updatedAt: "2026-01-15T00:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+
+    const result = await getLatestAbsenceRecord("char-1");
+
+    expect(result).toEqual(record);
+  });
+
+  it("項目なし → null", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    const result = await getLatestAbsenceRecord("char-1");
+
+    expect(result).toBeNull();
+  });
+
+  it("項目はあるが形式が不正（旧形式のevents） → null", async () => {
+    const item = {
+      memory_id: "char-1",
+      index: LATEST_ABSENCE_RECORD_INDEX_KEY,
+      record: {
+        event_id: "event-1",
+        characterId: "char-1",
+        startDatetime: "2026-01-14T21:00:00.000Z",
+        endDatetime: "2026-01-15T00:00:00.000Z",
+        elapsed: "3時間",
+        events: ["学校に行った"],
+        createdAt: "2026-01-15T00:00:00.000Z",
+      },
+      updatedAt: "2026-01-15T00:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+
+    const result = await getLatestAbsenceRecord("char-1");
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("getRecentAbsenceRecords", () => {
+  it("呼び出す → GSI名・KeyConditionExpression・ScanIndexForward:falseでQueryCommandを送信する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [] } as never);
+
+    await getRecentAbsenceRecords("char-1", 3);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as QueryCommand;
+    expect(command.input.TableName).toBe(EVENTS_TABLE);
+    expect(command.input.IndexName).toBe("characterId-index");
+    expect(command.input.KeyConditionExpression).toBe("characterId = :cid");
+    expect(command.input.ExpressionAttributeValues).toEqual({ ":cid": "char-1" });
+    expect(command.input.ScanIndexForward).toBe(false);
+    expect(command.input.Limit).toBe(3);
+  });
+
+  it("旧形式の項目を読み飛ばして新形式だけ返す", async () => {
+    const valid = absenceRecord({ event_id: "event-valid" });
+    const legacy = {
+      event_id: "event-legacy",
+      characterId: "char-1",
+      startDatetime: "2026-01-13T00:00:00.000Z",
+      endDatetime: "2026-01-13T03:00:00.000Z",
+      elapsed: "3時間",
+      events: ["旧形式の出来事"],
+      createdAt: "2026-01-13T03:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [valid, legacy] } as never);
+
+    const result = await getRecentAbsenceRecords("char-1", 5);
+
+    expect(result).toEqual([valid]);
+  });
+
+  it("1ページ目で読み飛ばして足りないとき → ExclusiveStartKeyで次のページを読む", async () => {
+    const legacy = {
+      event_id: "event-legacy",
+      characterId: "char-1",
+      startDatetime: "2026-01-13T00:00:00.000Z",
+      endDatetime: "2026-01-13T03:00:00.000Z",
+      elapsed: "3時間",
+      events: ["旧形式の出来事"],
+      createdAt: "2026-01-13T03:00:00.000Z",
+    };
+    const valid = absenceRecord({ event_id: "event-valid" });
+    const lastEvaluatedKey = { event_id: "event-legacy" };
+
+    const sendSpy = vi
+      .spyOn(dynamo, "send")
+      .mockResolvedValueOnce({ Items: [legacy], LastEvaluatedKey: lastEvaluatedKey } as never)
+      .mockResolvedValueOnce({ Items: [valid] } as never);
+
+    const result = await getRecentAbsenceRecords("char-1", 1);
+
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+    const secondCommand = sendSpy.mock.calls[1][0] as QueryCommand;
+    expect(secondCommand.input.ExclusiveStartKey).toEqual(lastEvaluatedKey);
+    expect(result).toEqual([valid]);
+  });
+
+  it("limit件集まったら以降のページは読まない", async () => {
+    const first = absenceRecord({ event_id: "event-1" });
+    const second = absenceRecord({ event_id: "event-2" });
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({
+      Items: [first, second],
+      LastEvaluatedKey: { event_id: "event-2" },
+    } as never);
+
+    const result = await getRecentAbsenceRecords("char-1", 2);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([first, second]);
+  });
+
+  it("LastEvaluatedKeyが無ければ次のページを読まずに終える", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [] } as never);
+
+    const result = await getRecentAbsenceRecords("char-1", 5);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([]);
+  });
+
+  it("読み飛ばしが続いて足りない場合でも最大ページ数で打ち切る", async () => {
+    const legacy = {
+      event_id: "event-legacy",
+      characterId: "char-1",
+      startDatetime: "2026-01-13T00:00:00.000Z",
+      endDatetime: "2026-01-13T03:00:00.000Z",
+      elapsed: "3時間",
+      events: ["旧形式の出来事"],
+      createdAt: "2026-01-13T03:00:00.000Z",
+    };
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({
+      Items: [legacy],
+      LastEvaluatedKey: { event_id: "event-legacy" },
+    } as never);
+
+    const result = await getRecentAbsenceRecords("char-1", 5);
+
+    expect(sendSpy).toHaveBeenCalledTimes(5);
+    expect(result).toEqual([]);
+  });
+
+  it("limitが0以下 → DynamoDBを呼ばずに空配列を返す", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [] } as never);
+
+    const result = await getRecentAbsenceRecords("char-1", 0);
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
   });
 });

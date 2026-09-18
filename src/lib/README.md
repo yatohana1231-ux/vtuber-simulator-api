@@ -5,7 +5,7 @@
 | ファイル | 内容 |
 |---|---|
 | `bedrock.ts` | Bedrock Converse API のラッパー。`invokeModel`（テキスト）と `invokeModelJson`（応答から JSON を抽出し、失敗時は既定値） |
-| `dynamo.ts` | DynamoDB（会話ログ／キャラクター記憶・状態／イベント）へのアクセスを集約。重要記憶は `getRelevantMemories(characterId, ...)` で重要度・新しさ・タグ一致により上位件数だけを返す |
+| `dynamo.ts` | DynamoDB（会話ログ／キャラクター記憶・状態／イベント）へのアクセスを集約。重要記憶は `getRelevantMemories(characterId, ...)` で重要度・新しさ・タグ一致により上位件数だけを返す。不在期間の記録は `saveAbsenceRecord`（イベントテーブルの履歴とキャラクター記憶テーブルの `absence-latest` をトランザクションで同時に保存）・`getLatestAbsenceRecord`（強い整合性で最新1件）・`getRecentAbsenceRecords`（GSI から直近 N 件、旧形式は読み飛ばす）。不在期間の記録の関数は、まだどのエンドポイントからも使っていない |
 | `packages.ts` | `packageId` からキャラクター×世界観×生活様式パッケージ（`api/content/`）を読み込む。ID 検証、コンテナ内キャッシュ、口調の例文の件数制限（最大5件）、`world.timezone`・`lifestyle`（生活リズム・出来事の種類）の形式検証を行う |
 | `utils.ts` | リクエストボディのパース、レスポンス生成、JST 日時整形、値のクランプ |
 | `timezone.ts` | IANA タイムゾーンでの壁時計と瞬間の相互変換（`getLocalParts` / `localTimeToInstant`）。`Intl.DateTimeFormat` だけで実装し、DST のあるタイムゾーンにも対応する。`localTimeToInstant` の `day` は範囲外（0 や 32）でも暦を繰り上げ/繰り下げて扱う |

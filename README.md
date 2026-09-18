@@ -438,10 +438,11 @@ erDiagram
 |-------------|-------------|-----------------|------|
 | 状態レコード | `"state"` | characterId (UUID) | 感情値・関係値の現在値（`mood`, `perception`, `updatedAt`） |
 | 記憶レコード | `{ISO8601}_{UUID8桁}` | characterId | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
+| 最新の不在期間の記録 | `"absence-latest"` | characterId | 最新の不在期間の記録（`record`: イベントテーブルに保存した `AbsenceRecord` と同じ内容、`updatedAt`）。書き込み直後でも確実に読めるよう、強い整合性の GetItem で読む（`.notes/decision-history.md` の D-019）。**2026-09-18 時点では書き込み・読み出しの関数（`lib/dynamo.ts`）だけがあり、まだどのエンドポイントからも使っていない** |
 
-アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)`
+アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)` / `getLatestAbsenceRecord(characterId)`（`saveAbsenceRecord` はイベントテーブルとこのテーブルにトランザクションで同時に書き込む）
 
-`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得し（`index = "state"` の状態レコードは除外）、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
+`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得し（`index = "state"` の状態レコードと `index = "absence-latest"` の最新の不在期間の記録は除外）、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
 
 | 呼び出し元 | `queryText` | `topK` | `minImportance` |
 |---|---|---|---|
@@ -453,9 +454,9 @@ erDiagram
 
 ### イベントテーブル
 
-- キー: PK `event_id`（UUID）。GSI `characterId-index`: PK `characterId` / SK `createdAt`
-- 属性: `startDatetime`, `endDatetime`, `elapsed`, `events`（3〜7件のテキスト配列）, `createdAt`
-- アクセスパターン: `saveEvent(item)`
+- キー: PK `event_id`（UUID）。GSI `characterId-index`: PK `characterId` / SK `createdAt`（射影は ALL）
+- 旧形式（現行の `/event-resolver` が書き込む）: `startDatetime`, `endDatetime`, `elapsed`, `events`（3〜7件のテキスト配列）, `createdAt`。アクセスパターン: `saveEvent(item)`（書き込みのみ）
+- 新形式（不在期間の記録 `AbsenceRecord`。`absence-simulation-roadmap.md` で導入中）: `characterId`, `createdAt`, `startDatetime`, `endDatetime`, `events`（`{ kind, summary, detail, threadId? }` の配列）, `actions`（`{ startDatetime, endDatetime, action, memo }` の配列）, `threads`（続きの話題 `{ id, topic, status: "open" | "closed", openedAt }` の配列）。アクセスパターン: `saveAbsenceRecord(record)`（キャラクター記憶テーブルの `absence-latest` と同時に書き込む）/ `getRecentAbsenceRecords(characterId, limit)`（GSI を新しい順に読み、旧形式は読み飛ばす。足りなければ最大5ページまで続けて読む）。**2026-09-18 時点では関数だけがあり、まだどのエンドポイントからも使っていない**
 - 容量: PAY_PER_REQUEST、削除ポリシーは stg=DESTROY / prod=RETAIN
 
 ### Mood（内面感情・6次元、1〜100）

@@ -4,13 +4,19 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type {
+  AbsenceEvent,
+  AbsenceRecord,
+  AbsenceThread,
+  Action,
   CharacterMemoryItem,
   CharacterStateItem,
   ConversationLogItem,
   EventItem,
+  LatestAbsenceRecordItem,
   Mood,
   Perception,
 } from "../types.js";
@@ -42,6 +48,8 @@ export const EVENTS_TABLE = extractTableName(process.env.EVENTS_TABLE ?? "events
 
 // STATE レコードの固定ソートキー
 export const STATE_INDEX_KEY = "state";
+// 最新の不在期間の記録の固定ソートキー（D-019）
+export const LATEST_ABSENCE_RECORD_INDEX_KEY = "absence-latest";
 
 // -------------------------------------------------------
 // デフォルト値
@@ -203,9 +211,10 @@ async function getMemories(characterId: string): Promise<CharacterMemoryItem[]> 
       ExpressionAttributeValues: { ":mid": characterId },
     })
   );
-  // 同じ memory_id に感情状態レコード（index="state"）が同居しているため除外する
+  // 同じ memory_id に感情状態レコード（index="state"）・最新の不在期間の記録
+  // （index="absence-latest"）が同居しているため除外する
   const memories = ((result.Items ?? []) as CharacterMemoryItem[]).filter(
-    (item) => item.index !== STATE_INDEX_KEY
+    (item) => item.index !== STATE_INDEX_KEY && item.index !== LATEST_ABSENCE_RECORD_INDEX_KEY
   );
   console.log(`[getMemories] ${memories.length} memories for characterId=${characterId}`);
   return memories;
@@ -285,4 +294,168 @@ export async function saveMemory(item: CharacterMemoryItem): Promise<void> {
 export async function saveEvent(item: EventItem): Promise<void> {
   await dynamo.send(new PutCommand({ TableName: EVENTS_TABLE, Item: item }));
   console.log(`[saveEvent] saved event_id=${item.event_id}`);
+}
+
+// -------------------------------------------------------
+// 不在期間の記録（D-015・D-019）
+//
+// 履歴はイベントテーブルに保存し、最新の1件はキャラクター記憶テーブルにも
+// index="absence-latest" で保存する（感情状態の index="state" と同じ形）。
+// 最新の記録は強い整合性の GetItem で読み、直近 N 件の履歴は GSI
+// （characterId-index）の結果整合性のクエリで読む。
+// -------------------------------------------------------
+
+// events テーブルの GSI（characterId + createdAt の降順）の名前
+const EVENTS_BY_CHARACTER_INDEX_NAME = "characterId-index";
+// 直近の履歴を読むときにページを続ける最大回数（無限ループ防止）
+const MAX_ABSENCE_RECORD_QUERY_PAGES = 5;
+
+function isAbsenceEvent(value: unknown): value is AbsenceEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.kind !== "string" || typeof v.summary !== "string" || typeof v.detail !== "string") {
+    return false;
+  }
+  if (v.threadId !== undefined && typeof v.threadId !== "string") return false;
+  return true;
+}
+
+function isAbsenceAction(value: unknown): value is Action {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.startDatetime === "string" &&
+    typeof v.endDatetime === "string" &&
+    typeof v.action === "string" &&
+    typeof v.memo === "string"
+  );
+}
+
+function isAbsenceThread(value: unknown): value is AbsenceThread {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.topic === "string" &&
+    typeof v.openedAt === "string" &&
+    (v.status === "open" || v.status === "closed")
+  );
+}
+
+/**
+ * 値が現行形式の AbsenceRecord かどうかを判定する。
+ * 旧形式（events が文字列配列、threads が無い等）は false になる。
+ */
+function isAbsenceRecord(value: unknown): value is AbsenceRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.event_id === "string" &&
+    typeof v.characterId === "string" &&
+    typeof v.createdAt === "string" &&
+    typeof v.startDatetime === "string" &&
+    typeof v.endDatetime === "string" &&
+    Array.isArray(v.events) &&
+    v.events.every(isAbsenceEvent) &&
+    Array.isArray(v.actions) &&
+    v.actions.every(isAbsenceAction) &&
+    Array.isArray(v.threads) &&
+    v.threads.every(isAbsenceThread)
+  );
+}
+
+/**
+ * 不在期間の記録を保存する。イベントテーブルへの履歴の保存と、
+ * キャラクター記憶テーブルへの最新の記録の保存を、トランザクションで同時に行う。
+ */
+export async function saveAbsenceRecord(record: AbsenceRecord): Promise<void> {
+  const latestItem: LatestAbsenceRecordItem = {
+    memory_id: record.characterId,
+    index: LATEST_ABSENCE_RECORD_INDEX_KEY,
+    record,
+    updatedAt: new Date().toISOString(),
+  };
+  await dynamo.send(
+    new TransactWriteCommand({
+      TransactItems: [
+        { Put: { TableName: EVENTS_TABLE, Item: record } },
+        { Put: { TableName: CHARACTER_MEMORY_TABLE, Item: latestItem } },
+      ],
+    })
+  );
+  console.log(
+    `[saveAbsenceRecord] saved event_id=${record.event_id} characterId=${record.characterId}`
+  );
+}
+
+/**
+ * キャラクター記憶テーブルから、最新の不在期間の記録を強い整合性で取得する。
+ * 項目が無い、または形式が現行の AbsenceRecord と合わない場合は null を返す。
+ */
+export async function getLatestAbsenceRecord(
+  characterId: string
+): Promise<AbsenceRecord | null> {
+  const result = await dynamo.send(
+    new GetCommand({
+      TableName: CHARACTER_MEMORY_TABLE,
+      Key: { memory_id: characterId, index: LATEST_ABSENCE_RECORD_INDEX_KEY },
+      ConsistentRead: true,
+    })
+  );
+  if (!result.Item) {
+    console.log(`[getLatestAbsenceRecord] not found characterId=${characterId}`);
+    return null;
+  }
+  const record = (result.Item as LatestAbsenceRecordItem).record;
+  if (!isAbsenceRecord(record)) {
+    console.warn(`[getLatestAbsenceRecord] invalid record shape characterId=${characterId}`);
+    return null;
+  }
+  return record;
+}
+
+/**
+ * イベントテーブルの GSI（characterId-index）から、直近 limit 件の不在期間の記録を
+ * 新しい順に取得する。旧形式の記録は読み飛ばす。読み飛ばしで件数が足りない場合は
+ * 次のページを読み、limit 件集まるか、データが尽きるか、最大ページ数に達したら終える。
+ */
+export async function getRecentAbsenceRecords(
+  characterId: string,
+  limit: number
+): Promise<AbsenceRecord[]> {
+  if (limit <= 0) return [];
+
+  const records: AbsenceRecord[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+
+  for (let page = 0; page < MAX_ABSENCE_RECORD_QUERY_PAGES; page++) {
+    const result = await dynamo.send(
+      new QueryCommand({
+        TableName: EVENTS_TABLE,
+        IndexName: EVENTS_BY_CHARACTER_INDEX_NAME,
+        KeyConditionExpression: "characterId = :cid",
+        ExpressionAttributeValues: { ":cid": characterId },
+        ScanIndexForward: false,
+        Limit: limit,
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+      })
+    );
+
+    for (const item of result.Items ?? []) {
+      if (isAbsenceRecord(item)) {
+        records.push(item);
+        if (records.length >= limit) break;
+      }
+    }
+
+    if (records.length >= limit) break;
+
+    exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    if (!exclusiveStartKey) break;
+  }
+
+  console.log(
+    `[getRecentAbsenceRecords] ${records.length} records for characterId=${characterId}`
+  );
+  return records;
 }

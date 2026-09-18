@@ -193,6 +193,14 @@ export interface CharacterStateItem {
   updatedAt: string;
 }
 
+/** キャラクター記憶テーブルに置く、最新の不在期間の記録（D-019） */
+export interface LatestAbsenceRecordItem {
+  memory_id: string; // characterId
+  index: "absence-latest";
+  record: AbsenceRecord; // 最新の不在期間の記録（イベントテーブルの履歴と同じ内容）
+  updatedAt: string;
+}
+
 export interface EventItem {
   event_id: string;
   characterId: string;
