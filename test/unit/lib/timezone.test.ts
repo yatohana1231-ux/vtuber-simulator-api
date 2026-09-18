@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getLocalParts, localTimeToInstant } from "../../../src/lib/timezone.js";
+import { formatLocalDateTime, getLocalParts, localTimeToInstant } from "../../../src/lib/timezone.js";
 
 describe("getLocalParts", () => {
   it("Asia/TokyoでUTC 2026-09-18T15:00Zを渡す → JSTで翌日0:00・土曜になる", () => {
@@ -85,5 +85,35 @@ describe("localTimeToInstant", () => {
     const instant = localTimeToInstant(2026, 7, 15, 7, 0, "America/New_York");
 
     expect(instant.toISOString()).toBe("2026-07-15T11:00:00.000Z");
+  });
+});
+
+describe("formatLocalDateTime", () => {
+  it("Asia/Tokyoで金曜の日時を渡す → 「YYYY/MM/DD(曜) HH:MM」形式になる（2026-09-18は金曜）", () => {
+    // 2026-09-18 07:00 JST = 2026-09-17 22:00 UTC
+    const text = formatLocalDateTime(new Date("2026-09-17T22:00:00.000Z"), "Asia/Tokyo");
+
+    expect(text).toBe("2026/09/18(金) 07:00");
+  });
+
+  it("月・日・時・分がすべて1桁になる値 → ゼロ埋めされる", () => {
+    // 2026-01-02 03:04 JST = 2026-01-01 18:04 UTC
+    const text = formatLocalDateTime(new Date("2026-01-01T18:04:00.000Z"), "Asia/Tokyo");
+
+    expect(text).toBe("2026/01/02(金) 03:04");
+  });
+
+  it("UTCでは前日でも、JSTでは日付が繰り上がる（日跨ぎ）", () => {
+    // 2026-09-18T15:00Z は JST で 2026-09-19 00:00（土曜）
+    const text = formatLocalDateTime(new Date("2026-09-18T15:00:00.000Z"), "Asia/Tokyo");
+
+    expect(text).toBe("2026/09/19(土) 00:00");
+  });
+
+  it("曜日ラベルは日本語1文字（日曜）", () => {
+    // 2026-09-20 00:00 JST = 2026-09-19 15:00 UTC
+    const text = formatLocalDateTime(new Date("2026-09-19T15:00:00.000Z"), "Asia/Tokyo");
+
+    expect(text).toBe("2026/09/20(日) 00:00");
   });
 });

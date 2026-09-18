@@ -112,3 +112,143 @@ describe("invokeModelJson", () => {
     expect(result).toBe(fallback);
   });
 });
+
+describe("invokeModel（systemPromptを配列で渡す場合のプロンプトキャッシュ）", () => {
+  it("2層の配列 → 層の間にcachePointが入り、最後の層の後ろには入らない", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel(["固定部", "可変部"], "user message");
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.system).toEqual([
+      { text: "固定部" },
+      { cachePoint: { type: "default" } },
+      { text: "可変部" },
+    ]);
+  });
+
+  it("3層の配列 → 層の間2箇所にcachePointが入り、最後の層の後ろには入らない", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel(["固定部", "セッション部", "可変部"], "user message");
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.system).toEqual([
+      { text: "固定部" },
+      { cachePoint: { type: "default" } },
+      { text: "セッション部" },
+      { cachePoint: { type: "default" } },
+      { text: "可変部" },
+    ]);
+  });
+
+  it("空文字列の層を含む配列 → 空の層は捨てられ、cachePointが重ならない", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel(["固定部", "", "可変部"], "user message");
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.system).toEqual([
+      { text: "固定部" },
+      { cachePoint: { type: "default" } },
+      { text: "可変部" },
+    ]);
+  });
+
+  it("PROMPT_CACHE_ENABLED=false → cachePointが入らずtextだけ並ぶ", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "false");
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel(["固定部", "セッション部", "可変部"], "user message");
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.system).toEqual([
+      { text: "固定部" },
+      { text: "セッション部" },
+      { text: "可変部" },
+    ]);
+  });
+
+  it("5層以上の配列 → cachePointは最大4つまで", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel(["層1", "層2", "層3", "層4", "層5"], "user message");
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    const cachePointCount = (command.input.system ?? []).filter(
+      (block) => "cachePoint" in block
+    ).length;
+    expect(cachePointCount).toBe(4);
+    expect(command.input.system).toEqual([
+      { text: "層1" },
+      { cachePoint: { type: "default" } },
+      { text: "層2" },
+      { cachePoint: { type: "default" } },
+      { text: "層3" },
+      { cachePoint: { type: "default" } },
+      { text: "層4" },
+      { cachePoint: { type: "default" } },
+      { text: "層5" },
+    ]);
+  });
+
+  it("invokeModelJsonに配列を渡しても同じsystemになる", async () => {
+    const sendSpy = vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue(
+      mockSendResult(['{"ok": true}']) as never
+    );
+
+    await invokeModelJson(["固定部", "可変部"], "user message", { ok: false });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.system).toEqual([
+      { text: "固定部" },
+      { cachePoint: { type: "default" } },
+      { text: "可変部" },
+    ]);
+  });
+});
+
+describe("invokeModel（usageのログ出力）", () => {
+  it("usageがある応答 → inputTokens・outputTokens・cacheReadInputTokens・cacheWriteInputTokensをログに出す", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue({
+      ...mockSendResult(["ok"]),
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+        cacheReadInputTokens: 80,
+        cacheWriteInputTokens: 15,
+      },
+    } as never);
+
+    await invokeModel("system", "user");
+
+    expect(logSpy).toHaveBeenCalledWith(
+      "[bedrock] usage input=100 output=20 cacheRead=80 cacheWrite=15"
+    );
+  });
+
+  it("usageが無い応答 → cacheRead・cacheWriteを0としてログに出し、例外を投げない", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue(
+      mockSendResult(["ok"]) as never
+    );
+
+    await expect(invokeModel("system", "user")).resolves.toBe("ok");
+
+    expect(logSpy).toHaveBeenCalledWith(
+      "[bedrock] usage input=0 output=0 cacheRead=0 cacheWrite=0"
+    );
+  });
+});

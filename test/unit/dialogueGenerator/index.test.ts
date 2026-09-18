@@ -339,5 +339,7 @@ describe("invokeModelの呼び出し", () => {
 async function runDialogueGeneratorAndGetPrompt(req: DialogueGeneratorRequest): Promise<string> {
   mockedInvokeModel.mockClear();
   await runDialogueGenerator(req);
-  return mockedInvokeModel.mock.calls[0][0];
+  // invokeModel の systemPrompt は string | string[] だが、dialogueGenerator は現状文字列で渡している
+  // （層の配列にするのは absence-simulation-roadmap.md のフェーズ6）
+  return mockedInvokeModel.mock.calls[0][0] as string;
 }

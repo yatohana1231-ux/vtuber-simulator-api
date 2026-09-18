@@ -101,3 +101,21 @@ export function localTimeToInstant(
 
   return new Date(instant);
 }
+
+// 日本語の曜日1文字（getLocalParts の weekday: 0=日曜〜6=土曜 に対応）
+const WEEKDAY_LABELS_JA = ["日", "月", "火", "水", "木", "金", "土"];
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * 瞬間を、指定タイムゾーンでの表示用の文字列にする。例: "2026/09/18(金) 07:00"
+ *
+ * 不在期間のシミュレーション（absenceSimulator）のプロンプトで、LLM に渡す日時を
+ * 世界観のタイムゾーンでの表記にするために使う。
+ */
+export function formatLocalDateTime(instant: Date, timeZone: string): string {
+  const { year, month, day, hour, minute, weekday } = getLocalParts(instant, timeZone);
+  return `${year}/${pad2(month)}/${pad2(day)}(${WEEKDAY_LABELS_JA[weekday]}) ${pad2(hour)}:${pad2(minute)}`;
+}
