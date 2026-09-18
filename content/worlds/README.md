@@ -17,3 +17,4 @@
 | `description` | string | 舞台の説明文 |
 | `rules` | string[] | 世界のルール（生成内容が守るべき制約） |
 | `forbiddenElements` | string[] | 生成してはいけない要素。ファンタジーの世界観では魔法などを外し、代わりに現代的な要素を入れる、といった使い方を想定 |
+| `timezone` | string | IANA タイムゾーン名（例: `"Asia/Tokyo"`）。`packages/` から参照する `lifestyles/` の時刻は、この世界観の時刻として扱う |

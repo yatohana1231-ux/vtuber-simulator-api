@@ -1,12 +1,12 @@
 # packages
 
-世界観とキャラクターの組み合わせ（パッケージ）。フロントはここにある `id` の中から1つを選び、各エンドポイントに `packageId` として渡す。`packageId` を省略した場合は `yui-modern-tokyo` を使う。
+世界観・キャラクター・生活様式の組み合わせ（パッケージ）。フロントはここにある `id` の中から1つを選び、各エンドポイントに `packageId` として渡す。`packageId` を省略した場合は `yui-modern-tokyo` を使う。
 
 ## ファイル一覧
 
-| ファイル | 世界観 | キャラクター |
-|---|---|---|
-| `yui-modern-tokyo.json` | `modern-tokyo` | `yui` |
+| ファイル | 世界観 | キャラクター | 生活様式 |
+|---|---|---|---|
+| `yui-modern-tokyo.json` | `modern-tokyo` | `yui` | `tokyo-highschool-vtuber` |
 
 ## フィールド
 
@@ -16,3 +16,4 @@
 | `displayName` | string | 表示名（フロントの選択画面向け） |
 | `world` | string | `worlds/` の `key` |
 | `character` | string | `characters/` の `key` |
+| `lifestyle` | string | `lifestyles/` の `key` |

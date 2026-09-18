@@ -31,6 +31,7 @@ const world: World = {
   description: "eventResolverテスト用の世界観マーカー",
   rules: [],
   forbiddenElements: [],
+  timezone: "Asia/Tokyo",
 };
 
 const character: CharacterDefinition = {

@@ -26,6 +26,7 @@ const world: World = {
   description: "actionPlannerテスト用の世界観マーカー",
   rules: [],
   forbiddenElements: [],
+  timezone: "Asia/Tokyo",
 };
 
 const character: CharacterDefinition = {

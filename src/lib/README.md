@@ -6,7 +6,7 @@
 |---|---|
 | `bedrock.ts` | Bedrock Converse API のラッパー。`invokeModel`（テキスト）と `invokeModelJson`（応答から JSON を抽出し、失敗時は既定値） |
 | `dynamo.ts` | DynamoDB（会話ログ／キャラクター記憶・状態／イベント）へのアクセスを集約。重要記憶は `getRelevantMemories(characterId, ...)` で重要度・新しさ・タグ一致により上位件数だけを返す |
-| `packages.ts` | `packageId` からキャラクター×世界観パッケージ（`api/content/`）を読み込む。ID 検証、コンテナ内キャッシュ、口調の例文の件数制限（最大5件）を行う |
+| `packages.ts` | `packageId` からキャラクター×世界観×生活様式パッケージ（`api/content/`）を読み込む。ID 検証、コンテナ内キャッシュ、口調の例文の件数制限（最大5件）、`world.timezone`・`lifestyle`（生活リズム・出来事の種類）の形式検証を行う |
 | `utils.ts` | リクエストボディのパース、レスポンス生成、JST 日時整形、値のクランプ |
 
 ## 注意

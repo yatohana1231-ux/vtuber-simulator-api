@@ -8,6 +8,7 @@ export interface World {
   description: string;
   rules: string[];
   forbiddenElements: string[];
+  timezone: string; // IANA タイムゾーン名（例: "Asia/Tokyo"）。生活様式の時刻をこの世界観の時刻として扱う
 }
 
 export interface SpeechExample {
@@ -30,6 +31,36 @@ export interface CharacterPackage {
   displayName: string;
   world: World;
   character: CharacterDefinition;
+  lifestyle: Lifestyle;
+}
+
+// -------------------------------------------------------
+// 生活様式（api/content/lifestyles/ 配下の JSON）
+//
+// 不在期間のシミュレーション（フェーズ2以降）で、行動の枠（時刻と
+// 大まかな過ごし方）と出来事の抽選に使う。時刻は世界観（World.timezone）
+// のタイムゾーンでの時刻として扱う。
+// -------------------------------------------------------
+
+export interface ScheduleSlot {
+  start: string; // "HH:MM"（世界観のタイムゾーンでの時刻）
+  end: string; // "HH:MM"。end <= start の場合は日をまたぐ枠（翌日の end まで）
+  activity: string;
+}
+
+export interface EventKind {
+  key: string;
+  label: string;
+  weight: number; // 正の数。抽選時の重み
+}
+
+export interface Lifestyle {
+  key: string;
+  schedules: {
+    weekday: ScheduleSlot[];
+    holiday: ScheduleSlot[];
+  };
+  eventKinds: EventKind[];
 }
 
 // -------------------------------------------------------
@@ -155,6 +186,40 @@ export interface EventItem {
   elapsed: string;
   events: string[];
   createdAt: string;
+}
+
+// -------------------------------------------------------
+// 不在期間の記録（フェーズ1では型のみ。まだどこからも使わない）
+//
+// eventResolver/actionPlanner を統合する absenceSimulator（フェーズ2以降）が
+// 既存のイベントテーブルに保存する記録の形。旧形式（EventItem、events: string[]）
+// の既存データは読み飛ばす想定。詳細は
+// .notes/absence-simulation-roadmap.md の「データ構造案」を参照。
+// -------------------------------------------------------
+
+export interface AbsenceEvent {
+  kind: string; // Lifestyle.eventKinds の key
+  summary: string; // 1文の要約
+  detail: string; // 聞かれたときに話せる具体的な内容
+  threadId?: string; // 続いている話題（AbsenceThread.id）への参照
+}
+
+export interface AbsenceThread {
+  id: string;
+  topic: string;
+  status: "open" | "closed";
+  openedAt: string;
+}
+
+export interface AbsenceRecord {
+  event_id: string; // UUID（テーブルのパーティションキー）
+  characterId: string; // GSI characterId-index のパーティションキー
+  createdAt: string; // GSI のソートキー
+  startDatetime: string;
+  endDatetime: string;
+  events: AbsenceEvent[];
+  actions: Action[];
+  threads: AbsenceThread[]; // その時点の「続きの話題」の一覧（最新の記録が現在の状態）
 }
 
 // -------------------------------------------------------

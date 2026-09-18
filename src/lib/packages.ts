@@ -8,6 +8,8 @@ import path from "path";
 import type {
   CharacterDefinition,
   CharacterPackage,
+  Lifestyle,
+  ScheduleSlot,
   World,
 } from "../types.js";
 
@@ -17,6 +19,9 @@ const MAX_SPEECH_EXAMPLES = 5;
 
 // ファイル名に使うため、パストラバーサルを防ぐ目的で文字種を限定する
 const ID_PATTERN = /^[a-z0-9-]+$/;
+
+// "HH:MM" 形式（世界観のタイムゾーンでの時刻）
+const HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const cache = new Map<string, CharacterPackage>();
 
@@ -54,9 +59,69 @@ async function readContentJson<T>(folder: string, key: string): Promise<T | null
   }
 }
 
+/** world.timezone が文字列かつ有効なIANAタイムゾーンであることを検証する。不正なら例外 */
+function validateWorldTimezone(world: World, packageId: string): void {
+  if (typeof world.timezone !== "string" || world.timezone.length === 0) {
+    throw new Error(`package ${packageId} has invalid world.timezone: ${JSON.stringify(world.timezone)}`);
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: world.timezone });
+  } catch {
+    throw new Error(`package ${packageId} has invalid world.timezone: ${world.timezone}`);
+  }
+}
+
+/** 生活様式のスケジュール枠1件の形式を検証する。不正なら例外 */
+function validateScheduleSlot(slot: ScheduleSlot, packageId: string, context: string): void {
+  if (
+    typeof slot.start !== "string" ||
+    typeof slot.end !== "string" ||
+    !HHMM_PATTERN.test(slot.start) ||
+    !HHMM_PATTERN.test(slot.end)
+  ) {
+    throw new Error(`package ${packageId} has invalid ${context}: start/end must be "HH:MM" (${JSON.stringify(slot)})`);
+  }
+  if (slot.start === slot.end) {
+    throw new Error(`package ${packageId} has invalid ${context}: start and end must differ (${JSON.stringify(slot)})`);
+  }
+  if (typeof slot.activity !== "string" || slot.activity.length === 0) {
+    throw new Error(`package ${packageId} has invalid ${context}: activity must be a non-empty string (${JSON.stringify(slot)})`);
+  }
+}
+
+/** 生活様式（schedules / eventKinds）の形式を検証する。不正なら例外 */
+function validateLifestyle(lifestyle: Lifestyle, packageId: string): void {
+  const { schedules, eventKinds } = lifestyle;
+  if (!schedules || !Array.isArray(schedules.weekday) || !Array.isArray(schedules.holiday)) {
+    throw new Error(`package ${packageId} has invalid lifestyle.schedules: weekday/holiday must be arrays`);
+  }
+  for (const slot of schedules.weekday) {
+    validateScheduleSlot(slot, packageId, "lifestyle.schedules.weekday");
+  }
+  for (const slot of schedules.holiday) {
+    validateScheduleSlot(slot, packageId, "lifestyle.schedules.holiday");
+  }
+
+  if (!Array.isArray(eventKinds) || eventKinds.length === 0) {
+    throw new Error(`package ${packageId} has invalid lifestyle.eventKinds: must be a non-empty array`);
+  }
+  for (const kind of eventKinds) {
+    if (typeof kind.key !== "string" || kind.key.length === 0) {
+      throw new Error(`package ${packageId} has invalid lifestyle.eventKinds: key must be a non-empty string (${JSON.stringify(kind)})`);
+    }
+    if (typeof kind.label !== "string" || kind.label.length === 0) {
+      throw new Error(`package ${packageId} has invalid lifestyle.eventKinds: label must be a non-empty string (${JSON.stringify(kind)})`);
+    }
+    if (typeof kind.weight !== "number" || !Number.isFinite(kind.weight) || kind.weight <= 0) {
+      throw new Error(`package ${packageId} has invalid lifestyle.eventKinds: weight must be a positive finite number (${JSON.stringify(kind)})`);
+    }
+  }
+}
+
 /**
- * パッケージを読み込み、世界観とキャラクターを解決して返す。
- * パッケージが存在しない場合は null。パッケージが参照する世界観・キャラクターが無い場合は設定ミスとして例外。
+ * パッケージを読み込み、世界観・キャラクター・生活様式を解決して返す。
+ * パッケージが存在しない場合は null。パッケージが参照する世界観・キャラクター・生活様式が無い場合、
+ * または形式が不正な場合は設定ミスとして例外。
  */
 export async function loadPackage(packageId: string): Promise<CharacterPackage | null> {
   if (!isValidPackageId(packageId)) return null;
@@ -69,6 +134,7 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
     displayName: string;
     world: string;
     character: string;
+    lifestyle: string;
   }>("packages", packageId);
   if (!manifest) return null;
 
@@ -80,6 +146,13 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
   if (!character) {
     throw new Error(`package ${packageId} references missing character: ${manifest.character}`);
   }
+  const lifestyle = await readContentJson<Lifestyle>("lifestyles", manifest.lifestyle);
+  if (!lifestyle) {
+    throw new Error(`package ${packageId} references missing lifestyle: ${manifest.lifestyle}`);
+  }
+
+  validateWorldTimezone(world, packageId);
+  validateLifestyle(lifestyle, packageId);
 
   const pkg: CharacterPackage = {
     id: manifest.id,
@@ -89,8 +162,11 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
       ...character,
       speechExamples: (character.speechExamples ?? []).slice(0, MAX_SPEECH_EXAMPLES),
     },
+    lifestyle,
   };
   cache.set(packageId, pkg);
-  console.log(`[loadPackage] loaded package=${packageId} world=${world.key} character=${character.key}`);
+  console.log(
+    `[loadPackage] loaded package=${packageId} world=${world.key} character=${character.key} lifestyle=${lifestyle.key}`
+  );
   return pkg;
 }

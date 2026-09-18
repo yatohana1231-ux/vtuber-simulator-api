@@ -26,7 +26,7 @@ npm test          # vitest run（1回実行。CI もこれを実行する）
 npm run test:watch   # vitest（ウォッチモード）
 ```
 
-CI（[`../../.github/workflows/deploy-stg.yml`](../../.github/workflows/deploy-stg.yml)）は `develop` ブランチへの push 時、型チェックの直後・ビルドの前に `npm test` を実行し、デプロイ前のゲートになっている（失敗するとビルド・`cdk deploy` は実行されない）。2026-09-18 時点で 15 ファイル・209 件成功 ＋ todo 1 件（`memoryRetriever`）。
+CI（[`../../.github/workflows/deploy-stg.yml`](../../.github/workflows/deploy-stg.yml)）は `develop` ブランチへの push 時、型チェックの直後・ビルドの前に `npm test` を実行し、デプロイ前のゲートになっている（失敗するとビルド・`cdk deploy` は実行されない）。2026-09-18 時点で 15 ファイル・220 件成功 ＋ todo 1 件（`memoryRetriever`）。
 
 ## `.mustache` の扱い
 

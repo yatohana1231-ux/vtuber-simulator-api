@@ -21,6 +21,7 @@ describe("buildPromptContext", () => {
     description: "テスト用の世界観",
     rules: ["ルール1"],
     forbiddenElements: [],
+    timezone: "Asia/Tokyo",
   };
 
   const baseCharacter: CharacterDefinition = {
