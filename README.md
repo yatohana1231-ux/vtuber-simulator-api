@@ -11,6 +11,7 @@ VTuber キャラクターとのチャットインタラクションを提供す�
 | ランタイム | Node.js 24.x (AWS Lambda) |
 | 言語 | TypeScript (ESM) |
 | ビルドツール | esbuild |
+| テスト | Vitest（単体テスト。`test/unit/`） |
 | LLM | Amazon Bedrock (Converse API) / `apac.amazon.nova-lite-v1:0` |
 | データベース | Amazon DynamoDB |
 | API ゲートウェイ | Amazon API Gateway (REST API) |
@@ -38,7 +39,7 @@ api/
 ├── scripts/
 │   ├── clear-tables.mjs                # テーブルクリアスクリプト
 │   ├── copy-content.mjs                # content/ を dist/content/ にコピー（npm run build から実行）
-│   └── test-runner.ts                  # テスト実行スクリプト
+│   └── test-runner.ts                  # 実AWS向けの手動実行スクリプト
 ├── src/
 │   ├── handlers/                       # Lambda エントリーポイント（機能ごとに1ファイル）
 │   │   ├── eventResolver.ts
@@ -54,6 +55,10 @@ api/
 │   ├── dialogueGenerator/{index.ts, prompts/conversation.mustache}   # セリフ生成
 │   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 5テンプレート共有のパーシャル
 │   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts}
+├── test/
+│   ├── events/                         # Lambda コンソール用のテストイベント（廃止済み `/chat` 前提のまま古い）
+│   └── unit/                           # Vitest の単体テストコード（src/ と同じフォルダ構成）
+├── vitest.config.ts                    # Vitest 設定（.mustache 変換プラグイン、CONTENT_DIR 等）
 └── package.json
 ```
 
@@ -200,7 +205,7 @@ graph LR
         GHA[GitHub Actions]
     end
     subgraph BuildSteps["ビルドステップ"]
-        CHECKOUT[Checkout] --> SETUP[Node.js 24 Setup] --> OIDC[AWS OIDC 認証] --> INSTALL[npm ci] --> TYPECHECK[tsc --noEmit] --> BUILD[esbuild バンドル<br/>機能ごとに dist/*.mjs] --> CDK[CDK Deploy]
+        CHECKOUT[Checkout] --> SETUP[Node.js 24 Setup] --> OIDC[AWS OIDC 認証] --> INSTALL[npm ci] --> TYPECHECK[tsc --noEmit] --> TEST[単体テスト<br/>npm test - Vitest] --> BUILD[esbuild バンドル<br/>機能ごとに dist/*.mjs] --> CDK[CDK Deploy]
     end
     subgraph AWS_Deploy["AWS (STG)"]
         CFN[CloudFormation] --> LAMBDA_D[Lambda 更新]
@@ -630,6 +635,9 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ## ビルド・デプロイ
 
 ```bash
+npm test                # vitest run（単体テストを1回実行）
+npm run test:watch      # vitest（ウォッチモード）
+
 npm run build          # = npm run build:bundle && npm run build:content
 npm run build:bundle   # esbuild でバンドル（下記）
 npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-content.mjs）
@@ -645,7 +653,7 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 - `@aws-sdk/*` は Lambda ランタイムに含まれるため外部化
 - `content/` は `dist/content/` にコピーされ、Lambda アセット（`dist/` 全体）に同梱される。実行時は `LAMBDA_TASK_ROOT/content` から読み込む（ソースから直接実行する場合は環境変数 `CONTENT_DIR` で指定）。パッケージを追加・変更したら再デプロイが必要
 
-`develop` ブランチへの push で stg へ自動デプロイ: `npm ci` → `npx tsc --noEmit` → `npm run build` → `npx cdk deploy`（詳細は [CLAUDE.md](../CLAUDE.md) のコマンド節を参照）。
+`develop` ブランチへの push で stg へ自動デプロイ: `npm ci` → `npx tsc --noEmit` → `npm test` → `npm run build` → `npx cdk deploy`（詳細は [CLAUDE.md](../CLAUDE.md) のコマンド節を参照）。単体テストが失敗すると、以降のビルド・デプロイは実行されない。
 
 ## 依存パッケージ
 
@@ -655,7 +663,7 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 | `@aws-sdk/client-dynamodb` | DynamoDB 低レベルクライアント |
 | `@aws-sdk/lib-dynamodb` | DynamoDB ドキュメントクライアント |
 | `mustache` | プロンプトテンプレートエンジン |
-| `@types/mustache`, `@types/node`, `esbuild`, `typescript`（開発依存） | 型定義・ビルドツール |
+| `@types/mustache`, `@types/node`, `esbuild`, `typescript`, `vitest`（開発依存） | 型定義・ビルドツール・単体テスト |
 
 ## 設計意図と現状のギャップ（未実装）
 

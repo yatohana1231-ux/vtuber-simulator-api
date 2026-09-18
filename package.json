@@ -6,7 +6,9 @@
     "build": "npm run build:bundle && npm run build:content",
     "build:bundle": "esbuild src/handlers/eventResolver.ts src/handlers/actionPlanner.ts src/handlers/emotionUpdater.ts src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts --bundle --platform=node --target=node24 --format=esm --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text",
     "build:content": "node scripts/copy-content.mjs",
-    "build:watch": "npm run build:content && npm run build:bundle -- --watch"
+    "build:watch": "npm run build:content && npm run build:bundle -- --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=24"
@@ -20,7 +22,8 @@
   "devDependencies": {
     "@types/mustache": "^4.2.0",
     "@types/node": "^24.0.0",
-    "esbuild": "^0.24.0",
-    "typescript": "^5.4.0"
+    "esbuild": "^0.28.2",
+    "typescript": "^5.4.0",
+    "vitest": "^5.0.1"
   }
 }
