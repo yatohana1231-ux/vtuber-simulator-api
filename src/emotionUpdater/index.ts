@@ -62,15 +62,27 @@ export async function runEmotionUpdater(
     inputText,
   });
 
-  const fallback = { moodDelta: {}, perceptionDelta: {} };
-  const delta = await invokeModelJson<{
-    moodDelta: Partial<Record<keyof Mood, number>>;
-    perceptionDelta: Partial<Record<keyof Perception, number>>;
-  }>(systemPrompt, "感情値・関係値の差分を算出してください。", fallback);
+  // invokeModelJson は Bedrock の JSON 出力をそのまま返すだけで実行時の型チェックは行わないため、
+  // ここでは unknown として受け取り、applyDelta 側で1項目ずつ検証する（F-019）。
+  const fallback: unknown = { moodDelta: {}, perceptionDelta: {} };
+  const delta = await invokeModelJson<unknown>(
+    systemPrompt,
+    "感情値・関係値の差分を算出してください。",
+    fallback
+  );
+
+  // delta 自体、または moodDelta/perceptionDelta がプレーンなオブジェクトでない場合は
+  // 差分なし（{}）として扱う（モデルの応答全体が null・配列・文字列などのケースに対応）
+  const deltaObj = isPlainObject(delta) ? delta : {};
 
   // 差分を適用して 1〜100 にクランプ
-  const updatedMood = applyMoodDelta(currentMood, delta.moodDelta ?? {});
-  const updatedPerception = applyPerceptionDelta(currentPerception, delta.perceptionDelta ?? {});
+  const updatedMood = applyDelta(currentMood, deltaObj.moodDelta, DEFAULT_MOOD, "moodDelta");
+  const updatedPerception = applyDelta(
+    currentPerception,
+    deltaObj.perceptionDelta,
+    DEFAULT_PERCEPTION,
+    "perceptionDelta"
+  );
 
   // DynamoDB に保存
   await saveCharacterState(characterId, updatedMood, updatedPerception);
@@ -85,30 +97,45 @@ export async function runEmotionUpdater(
 // ヘルパー
 // -------------------------------------------------------
 
-function applyMoodDelta(
-  current: Mood,
-  delta: Partial<Record<keyof Mood, number>>
-): Mood {
-  return {
-    joy:        clamp((current.joy        ?? DEFAULT_MOOD.joy)        + (delta.joy        ?? 0)),
-    anxiety:    clamp((current.anxiety    ?? DEFAULT_MOOD.anxiety)    + (delta.anxiety    ?? 0)),
-    angry:      clamp((current.angry      ?? DEFAULT_MOOD.angry)      + (delta.angry      ?? 0)),
-    fatigue:    clamp((current.fatigue    ?? DEFAULT_MOOD.fatigue)    + (delta.fatigue    ?? 0)),
-    confidence: clamp((current.confidence ?? DEFAULT_MOOD.confidence) + (delta.confidence ?? 0)),
-    loneliness: clamp((current.loneliness ?? DEFAULT_MOOD.loneliness) + (delta.loneliness ?? 0)),
-  };
+/** value がプレーンなオブジェクト（null・配列・プリミティブではない）かどうか */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function applyPerceptionDelta(
-  current: Perception,
-  delta: Partial<Record<keyof Perception, number>>
-): Perception {
-  return {
-    trust:      clamp((current.trust      ?? DEFAULT_PERCEPTION.trust)      + (delta.trust      ?? 0)),
-    affection:  clamp((current.affection  ?? DEFAULT_PERCEPTION.affection)  + (delta.affection  ?? 0)),
-    respect:    clamp((current.respect    ?? DEFAULT_PERCEPTION.respect)    + (delta.respect    ?? 0)),
-    fear:       clamp((current.fear       ?? DEFAULT_PERCEPTION.fear)       + (delta.fear       ?? 0)),
-    dependence: clamp((current.dependence ?? DEFAULT_PERCEPTION.dependence) + (delta.dependence ?? 0)),
-    familiarity:clamp((current.familiarity ?? DEFAULT_PERCEPTION.familiarity) + (delta.familiarity ?? 0)),
-  };
+/**
+ * moodDelta/perceptionDelta を current に適用して 1〜100 にクランプする（F-019）。
+ * delta はモデルの応答をそのまま渡すため、実行時に型の保証が無い（unknown）。
+ * - キーごとに `typeof v === "number" && Number.isFinite(v)` を満たす値だけを差分として採用する。
+ *   数字の文字列（"5"）・null・NaN・Infinity・オブジェクト等はすべて 0（変化なし）として扱う。
+ * - delta 自体がプレーンなオブジェクトでない場合（null・配列・文字列など）は {} と同じ扱いにする。
+ * - キーが無い（undefined）はモデルが「変化なし」として省略した正常なケースなので警告しないが、
+ *   それ以外の不正な値はログに残す（項目名と値）。
+ * - キーの集合・順序は defaults（DEFAULT_MOOD/DEFAULT_PERCEPTION）から取り、Mood/Perception と揃える。
+ * - current 側の `?? DEFAULT` のフォールバック（値が欠けているときの既定値）は従来どおり維持する。
+ */
+function applyDelta<T extends Mood | Perception>(
+  current: T,
+  delta: unknown,
+  defaults: T,
+  label: string
+): T {
+  const deltaObj = isPlainObject(delta) ? delta : {};
+  const currentRecord = current as unknown as Record<string, number>;
+  const defaultsRecord = defaults as unknown as Record<string, number>;
+  const result: Record<string, number> = {};
+
+  for (const key of Object.keys(defaultsRecord)) {
+    const rawValue = deltaObj[key];
+    let appliedDelta = 0;
+
+    if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+      appliedDelta = rawValue;
+    } else if (rawValue !== undefined) {
+      console.warn(`[emotionUpdater] ${label}.${key} が不正な値のため無視します（変化なしとして扱う）:`, rawValue);
+    }
+
+    result[key] = clamp((currentRecord[key] ?? defaultsRecord[key]) + appliedDelta);
+  }
+
+  return result as unknown as T;
 }

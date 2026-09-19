@@ -383,12 +383,51 @@ describe("mood/perceptionのラベルと段階", () => {
   });
 });
 
-describe("現状の挙動の確認（モデルの差分が数値でない場合）", () => {
-  // moodDelta/perceptionDelta は型上 Partial<Record<..., number>> だが、
-  // invokeModelJson は Bedrock の JSON 出力をそのまま T として返すだけで実行時の型チェックは行わない。
-  // 数値でない値が来ると `current + delta` が文字列連結になり、Math.round 後の
-  // clamp（Math.max/Math.min）で意図しない値になる。
-  it("差分が数字の文字列\"5\" → 文字列連結された上でclampされ100になる（35+\"5\"=\"355\"）", async () => {
+describe("モデルの差分が数値でない場合（F-019）", () => {
+  // invokeModelJson は Bedrock の JSON 出力をそのまま返すだけで実行時の型チェックは行わない。
+  // 数値でない値（数字の文字列・null・NaN・Infinity・オブジェクト等）は
+  // applyDelta 側で弾き、0（変化なし）として扱うことで current + delta が
+  // 文字列連結や NaN にならないようにする（F-019）。
+  it.each([
+    ["数字の文字列\"5\"", "5" as unknown as number],
+    ["マイナスを表す文字列\"-5\"", "-5" as unknown as number],
+    ["null", null as unknown as number],
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+    ["オブジェクト", { foo: "bar" } as unknown as number],
+  ])("差分が%s → 無効な値として無視され現在値のまま変わらない", async (_label, invalidValue) => {
+    mockedGetCharacterState.mockResolvedValue({
+      mood: { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 },
+      perception: { ...DEFAULT_PERCEPTION },
+    });
+    mockedInvokeModelJson.mockResolvedValueOnce({
+      moodDelta: { joy: invalidValue },
+      perceptionDelta: {},
+    });
+
+    const result = await runEmotionUpdater(process1Req());
+
+    expect(result.mood.joy).toBe(35);
+    expect(Number.isNaN(result.mood.joy)).toBe(false);
+  });
+
+  it("同じ差分内の正しい数値の項目（数値の joy）は無効な項目（文字列の anxiety）とは別に適用される", async () => {
+    mockedGetCharacterState.mockResolvedValue({
+      mood: { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 },
+      perception: { ...DEFAULT_PERCEPTION },
+    });
+    mockedInvokeModelJson.mockResolvedValueOnce({
+      moodDelta: { joy: 5, anxiety: "3" as unknown as number },
+      perceptionDelta: {},
+    });
+
+    const result = await runEmotionUpdater(process1Req());
+
+    expect(result.mood.joy).toBe(40);
+    expect(result.mood.anxiety).toBe(62);
+  });
+
+  it("不正な値のとき console.warn が項目名・値とともに呼ばれる", async () => {
     mockedGetCharacterState.mockResolvedValue({
       mood: { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 },
       perception: { ...DEFAULT_PERCEPTION },
@@ -398,39 +437,112 @@ describe("現状の挙動の確認（モデルの差分が数値でない場合�
       perceptionDelta: {},
     });
 
-    const result = await runEmotionUpdater(process1Req());
+    await runEmotionUpdater(process1Req());
 
-    // 期待される「35+5=40」ではなく、"35"+"5"="355" → clampで100になる
-    expect(result.mood.joy).toBe(100);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("moodDelta.joy"),
+      "5"
+    );
   });
 
-  it("差分がマイナスを表す文字列\"-5\" → 数値化に失敗しNaNになる（35+\"-5\"=\"35-5\"はNumberでNaN）", async () => {
+  it("項目が省略されている（undefined）場合は console.warn が呼ばれない", async () => {
     mockedGetCharacterState.mockResolvedValue({
       mood: { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 },
       perception: { ...DEFAULT_PERCEPTION },
     });
     mockedInvokeModelJson.mockResolvedValueOnce({
-      moodDelta: { joy: "-5" as unknown as number },
+      moodDelta: {},
       perceptionDelta: {},
+    });
+
+    await runEmotionUpdater(process1Req());
+
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("perceptionDelta 側でも同様に無効な値は現在値のまま変わらない", async () => {
+    const currentPerception: Perception = {
+      trust: 72,
+      affection: 55,
+      respect: 80,
+      fear: 12,
+      dependence: 30,
+      familiarity: 65,
+    };
+    mockedGetCharacterState.mockResolvedValue({
+      mood: { ...DEFAULT_MOOD },
+      perception: currentPerception,
+    });
+    mockedInvokeModelJson.mockResolvedValueOnce({
+      moodDelta: {},
+      perceptionDelta: { trust: "3" as unknown as number, affection: 5 },
     });
 
     const result = await runEmotionUpdater(process1Req());
 
-    expect(result.mood.joy).toBeNaN();
+    expect(result.perception.trust).toBe(72);
+    expect(result.perception.affection).toBe(60);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("perceptionDelta.trust"),
+      "3"
+    );
   });
 
-  it("差分がnull → 加算時に0として扱われ現在値のまま変わらない（意図せず「変化なし」に見える）", async () => {
+  it("モデルの応答全体がnull → 例外にならず現在値のまま保存される", async () => {
+    const currentMood: Mood = { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 };
+    const currentPerception: Perception = {
+      trust: 72,
+      affection: 55,
+      respect: 80,
+      fear: 12,
+      dependence: 30,
+      familiarity: 65,
+    };
+    mockedGetCharacterState.mockResolvedValue({ mood: currentMood, perception: currentPerception });
+    mockedInvokeModelJson.mockResolvedValueOnce(null as never);
+
+    const result = await runEmotionUpdater(process1Req());
+
+    expect(result.mood).toEqual(currentMood);
+    expect(result.perception).toEqual(currentPerception);
+    expect(mockedSaveCharacterState).toHaveBeenCalledWith("char-1", currentMood, currentPerception);
+  });
+
+  it.each([
+    ["配列", [1, 2, 3] as unknown],
+    ["文字列", "not-an-object" as unknown],
+  ])("moodDeltaが%sのとき現在値のまま変わらない", async (_label, invalidMoodDelta) => {
+    const currentMood: Mood = { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 };
+    mockedGetCharacterState.mockResolvedValue({ mood: currentMood, perception: { ...DEFAULT_PERCEPTION } });
+    mockedInvokeModelJson.mockResolvedValueOnce({
+      moodDelta: invalidMoodDelta,
+      perceptionDelta: {},
+    } as never);
+
+    const result = await runEmotionUpdater(process1Req());
+
+    expect(result.mood).toEqual(currentMood);
+  });
+
+  it("saveCharacterStateにNaNが渡らない（不正な差分が混ざっていても保存値はすべて有限の数値）", async () => {
     mockedGetCharacterState.mockResolvedValue({
       mood: { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 },
       perception: { ...DEFAULT_PERCEPTION },
     });
     mockedInvokeModelJson.mockResolvedValueOnce({
-      moodDelta: { joy: null as unknown as number },
-      perceptionDelta: {},
+      moodDelta: { joy: "-5" as unknown as number, anxiety: NaN, angry: Infinity },
+      perceptionDelta: { trust: null as unknown as number },
     });
 
-    const result = await runEmotionUpdater(process1Req());
+    await runEmotionUpdater(process1Req());
 
-    expect(result.mood.joy).toBe(35);
+    expect(mockedSaveCharacterState).toHaveBeenCalledTimes(1);
+    const [, savedMood, savedPerception] = mockedSaveCharacterState.mock.calls[0];
+    for (const value of Object.values(savedMood)) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+    for (const value of Object.values(savedPerception)) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
   });
 });

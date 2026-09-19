@@ -397,7 +397,7 @@ flowchart TD
     RULE1 --> PROMPT[固定部・可変部のテンプレートで<br/>システムプロンプトの層を構築]
     RULE2 --> PROMPT
     PROMPT --> BEDROCK[Bedrock 呼び出し<br/>moodDelta + perceptionDelta 取得]
-    BEDROCK --> APPLY[差分を適用<br/>clamp 1~100]
+    BEDROCK --> APPLY[差分を適用<br/>有限の数値でない差分は 0 として扱う<br/>clamp 1~100]
     APPLY --> SAVE[DynamoDB に保存]
     SAVE --> END_([完了: updated mood/perception 返却])
 ```
