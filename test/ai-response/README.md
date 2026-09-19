@@ -2,7 +2,7 @@
 
 AI 応答テスト（AI の出力の質を確かめ、モデルやプロンプトを比べるテスト）の実装。考え方は [`../../../test/test_ai_response/README.md`](../../../test/test_ai_response/README.md) を参照。
 
-**整備中（2026-09-19〜）。** `.notes/model-selection-roadmap.md` のフェーズ3で仕組み（実行・判定・集計・レポート）、フェーズ4でシナリオ（4機能・計27件）と評価基準を作った。フェーズ5で LLM による採点を加えた。
+2026-09-19 に整備した（`.notes/model-selection-roadmap.md`）。運用の手順（いつ実行するか、結果の見方、基準の更新、シナリオ・判定・モデルの足し方）は [`../../../test/test_ai_response/README.md`](../../../test/test_ai_response/README.md) の「運用の手順」を参照。
 
 ## 実行
 
