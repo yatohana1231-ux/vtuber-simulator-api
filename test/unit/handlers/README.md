@@ -20,9 +20,10 @@
 | `memoryRetriever.test.ts` | `src/handlers/memoryRetriever.ts` | `characterId`/`process` の入力チェックは同上、process1・process2 とも `events`/`actions` が送られても `run*` に渡らないこと、成功時 body は常に `{ ok: true }`（`runMemoryRetriever` の戻り値は使わない） |
 | `dialogueGenerator.test.ts` | `src/handlers/dialogueGenerator.ts` | `characterId` 未指定・`now` の日時フォーマット不正・不明な `packageId` で 400、`message` 省略時は空文字、`mood`/`perception` 省略時は `undefined` のまま渡る（DynamoDB 参照は `run*` 側の責務のため未検証）、`events`/`actions` は送られても `run*` に渡らないこと、`longTimeFlag` の受け渡し、成功時 body は `{ reply }` |
 
-## 契約とのずれ・気づいたこと（`src/` は未修正）
+## 入力チェック（F-018）
 
-いずれも「実装した機能に対応する」テストではなく、既存実装の現状の挙動をそのまま確認したもの。`src/` の修正は本フェーズの対象外のため行っていない。詳細は作業報告（呼び出し元へのハンドバック）を参照。
+以前は「契約とのずれ」として、壊れた JSON の body が 500 になること、文字列以外の `characterId` が通ることを現状の挙動のまま確かめていた。2026-09-19 に [F-018](../../../../.notes/followup/F-018.md) を直し（`src/lib/apiHandler.ts`）、期待する挙動を確かめるテストに書き換えた。
 
-- **body が JSON として壊れている場合、400 ではなく 500 になる**（`absenceSimulator.test.ts` の「契約とのずれの確認」で確認。旧 `eventResolver.test.ts` から移した）。`parseRequestBody`（`src/lib/utils.ts`）内の `JSON.parse` が例外を投げ、ハンドラーの `catch` が拾って 500 にする。`api/README.md` の「エラーレスポンス」節は 400 の条件に `characterId` 未指定 / `process` 不正 / 日時フォーマット不正のみを挙げており、壊れたリクエストボディは明記されていない。
-- **`characterId` が文字列以外（例: 数値）でも、truthy であれば型チェックされずに通る**（`absenceSimulator.test.ts` で確認）。`characterId` の必須チェックは `!characterId` の真偽判定のみで、型は見ていない。`api/README.md` は `characterId` の型を `string` としている。
+- `absenceSimulator.test.ts` の「入力チェック（F-018）」と、ほかの3本のテストで、壊れた JSON の body と数値の `characterId` が 400 になり、`run*` が呼ばれないことを確かめる。
+- `characterId` のエラーメッセージは、未指定・文字列以外・空文字のどれでも `characterId must be a non-empty string`。
+- オブジェクトでない JSON の body（`null`・配列など）の扱いは、共通処理のテスト（`../lib/apiHandler.test.ts`）で確かめる。

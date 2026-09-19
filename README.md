@@ -658,7 +658,11 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 ### エラーレスポンス（全エンドポイント共通）
 
-- **400** — `characterId` 未指定 / `process` が 1,2 以外 / 日時フォーマット不正 / `now` が `lastLoginAt` より前（`/absence-simulator`） / 不明な `packageId`: `{ "error": "..." }`
+- **400** — 入力が不正な場合: `{ "error": "..." }`。チェックは次の順に行い、最初に当てはまったものを返す。
+  - body が JSON として壊れている（`invalid JSON body`）／JSON だがオブジェクトでない〔`null`・配列・数値・文字列など〕（`request body must be a JSON object`）
+  - `characterId` が未指定・文字列以外・空文字（`characterId must be a non-empty string`）
+  - 各エンドポイント固有のチェック: `process` が 1,2 以外（`/emotion-updater`・`/memory-retriever`）／日時フォーマット不正／`now` が `lastLoginAt` より前（`/absence-simulator`）
+  - 不明な `packageId`（`unknown packageId`）
 - **500** — サーバー内部エラー（Bedrock呼び出し失敗、DynamoDBエラー等）: `{ "error": "Failed to generate a response", "errorName": "...", "errorMessage": "..." }`
 
 ### フロント実装ガイド

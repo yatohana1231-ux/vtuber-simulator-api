@@ -5,7 +5,7 @@
 | テストファイル | 対象 | 内容 |
 |---|---|---|
 | `utils.test.ts` | `src/lib/utils.ts` | `parseRequestBody` / `clamp` / `createResponse` |
-| `apiHandler.test.ts` | `src/lib/apiHandler.ts` | `handleApiRequest`（`BadRequestError` で 400、その他の例外で 500 と `errorName`/`errorMessage`、`handle` の戻り値をそのまま返す、壊れた JSON の body は現状 500〔F-018〕、イベントのログ出力）、`requireCharacterId`（あり／未指定／空文字）、`requirePackage`（本物の `api/content/` を読む。省略時の既定パッケージ、存在しない ID で `BadRequestError`） |
+| `apiHandler.test.ts` | `src/lib/apiHandler.ts` | `handleApiRequest`（`BadRequestError` で 400、その他の例外で 500 と `errorName`/`errorMessage`、`handle` の戻り値をそのまま返す、イベントのログ出力。F-018: 壊れた JSON〔base64 を含む〕で 400、オブジェクトでない JSON〔`null`・配列・数値・文字列・真偽値〕で 400、`body` キーの無い直接呼び出しのイベントはそのまま通す、`handle` の中で起きた `SyntaxError` は 500 のまま）、`requireCharacterId`（あり／未指定／空文字／数値／`null`）、`requirePackage`（本物の `api/content/` を読む。省略時の既定パッケージ、存在しない ID で `BadRequestError`） |
 | `characterStateText.test.ts` | `src/lib/characterStateText.ts` | mood・perception それぞれで、6項目の並び順、書式（`・喜び：35（低い）`）、段階のラベルの境界値（20/21・40/41・60/61・80/81） |
 | `absenceRecordText.test.ts` | `src/lib/absenceRecordText.ts` | `formatAbsenceRecordForPrompt`: 期間の表記（タイムゾーンの変換・日付またぎ）、出来事の2行形式と番号（`kind`・`threadId` は出さない）、行動の `memo` あり/なし、open の話題だけを出すこと、各項目が0件のときの「（なし）」、`/` がエスケープされないこと。`formatAbsenceRecordAsInputText`: 出来事・行動があるときの組み立て、両方0件のときの「（なし）」 |
 | `timezone.test.ts` | `src/lib/timezone.ts` | `getLocalParts`（Asia/Tokyo での日付の繰り上がりと曜日）、`localTimeToInstant`（JST→UTC、`day` の範囲外〔月末・前月末・年末〕の繰り上がり/繰り下がり、往復変換、America/New_York の冬時間・夏時間）、`formatLocalDateTime`（曜日・ゼロ埋め・日付の繰り上がり） |

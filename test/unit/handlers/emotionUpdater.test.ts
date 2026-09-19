@@ -43,7 +43,29 @@ describe("入力チェック", () => {
     )) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body)).toEqual({ error: "characterId is required" });
+    expect(JSON.parse(res.body)).toEqual({
+      error: "characterId must be a non-empty string",
+    });
+    expect(mockedRun).not.toHaveBeenCalled();
+  });
+
+  it("bodyがJSONとして壊れている → 400 invalid JSON body（F-018）", async () => {
+    const res = (await handler({ body: "{bad" })) as LambdaResponse;
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: "invalid JSON body" });
+    expect(mockedRun).not.toHaveBeenCalled();
+  });
+
+  it("characterIdが文字列以外（数値） → 400 characterId must be a non-empty string（F-018）", async () => {
+    const res = (await handler(
+      makeEvent({ characterId: 12345, process: 1 })
+    )) as LambdaResponse;
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({
+      error: "characterId must be a non-empty string",
+    });
     expect(mockedRun).not.toHaveBeenCalled();
   });
 

@@ -19,6 +19,11 @@ export class BadRequestError extends Error {}
  * 4本のハンドラーに共通する処理。ログ出力 → parseRequestBody → handle(body) の
  * 呼び出しを行う。handle が BadRequestError を投げたら 400、それ以外の例外は
  * 今までどおり 500（errorName/errorMessage 付き）にする。
+ *
+ * parseRequestBody が壊れた JSON（SyntaxError）を投げた場合は 400
+ * （"invalid JSON body"）にする。パースできてもオブジェクトでない場合
+ * （null・配列・数値・文字列・真偽値）も 400（"request body must be a JSON
+ * object"）にする。SyntaxError 以外の例外はそのまま 500 にする（F-018）。
  */
 export async function handleApiRequest(
   event: unknown,
@@ -27,8 +32,21 @@ export async function handleApiRequest(
   console.log("Received event:", JSON.stringify(event));
 
   try {
-    const body = parseRequestBody(event);
-    return await handle(body);
+    let parsed: unknown;
+    try {
+      parsed = parseRequestBody(event);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new BadRequestError("invalid JSON body");
+      }
+      throw error;
+    }
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new BadRequestError("request body must be a JSON object");
+    }
+
+    return await handle(parsed as Record<string, unknown>);
   } catch (error) {
     if (error instanceof BadRequestError) {
       return createResponse(400, { error: error.message });
@@ -42,11 +60,14 @@ export async function handleApiRequest(
   }
 }
 
-/** characterId が指定されているか確認する。無ければ BadRequestError */
+/**
+ * characterId が空でない文字列として指定されているか確認する。
+ * 未指定・文字列以外・空文字のいずれも同じメッセージの BadRequestError にする（F-018）。
+ */
 export function requireCharacterId(body: Record<string, unknown>): string {
-  const characterId = body.characterId as string | undefined;
-  if (!characterId) {
-    throw new BadRequestError("characterId is required");
+  const characterId = body.characterId;
+  if (typeof characterId !== "string" || characterId === "") {
+    throw new BadRequestError("characterId must be a non-empty string");
   }
   return characterId;
 }

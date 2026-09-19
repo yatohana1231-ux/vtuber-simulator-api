@@ -19,11 +19,13 @@ beforeEach(() => {
 describe("handleApiRequest", () => {
   it("handleがBadRequestErrorを投げる → 400でメッセージがerrorになる", async () => {
     const res = await handleApiRequest(makeEvent({}), async () => {
-      throw new BadRequestError("characterId is required");
+      throw new BadRequestError("characterId must be a non-empty string");
     });
 
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body)).toEqual({ error: "characterId is required" });
+    expect(JSON.parse(res.body)).toEqual({
+      error: "characterId must be a non-empty string",
+    });
   });
 
   it("handleがBadRequestError以外の例外を投げる → 500でerrorName/errorMessageが入る", async () => {
@@ -55,16 +57,96 @@ describe("handleApiRequest", () => {
     });
   });
 
-  it("bodyがJSONとして壊れている → 500になる（現状の挙動）", async () => {
+  it("bodyがJSONとして壊れている → 400 invalid JSON body（F-018）", async () => {
     const handle = vi.fn();
 
     const res = await handleApiRequest({ body: "{bad" }, handle);
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: "invalid JSON body" });
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("base64エンコードされたbodyがJSONとして壊れている → 400 invalid JSON body", async () => {
+    const handle = vi.fn();
+    const event = {
+      body: Buffer.from("{bad", "utf8").toString("base64"),
+      isBase64Encoded: true,
+    };
+
+    const res = await handleApiRequest(event, handle);
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: "invalid JSON body" });
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("base64エンコードされた正しいJSONのbody → デコードしてhandleに渡る", async () => {
+    const event = {
+      body: Buffer.from(JSON.stringify({ characterId: "c1" }), "utf8").toString(
+        "base64"
+      ),
+      isBase64Encoded: true,
+    };
+
+    const res = await handleApiRequest(event, async (body) =>
+      Promise.resolve({
+        statusCode: 200,
+        headers: {},
+        body: JSON.stringify(body),
+      })
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ characterId: "c1" });
+  });
+
+  it.each([
+    ["null", null],
+    ["配列", []],
+    ["数値", 123],
+    ["文字列", "abc"],
+    ["真偽値", true],
+  ])(
+    "bodyがJSONとしては読めるがオブジェクトでない（%s） → 400 request body must be a JSON object",
+    async (_label, value) => {
+      const handle = vi.fn();
+
+      const res = await handleApiRequest(makeEvent(value), handle);
+
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body)).toEqual({
+        error: "request body must be a JSON object",
+      });
+      expect(handle).not.toHaveBeenCalled();
+    }
+  );
+
+  it("bodyキーが無いイベント（Lambda直接呼び出し） → イベント自体がオブジェクトとしてhandleに渡る", async () => {
+    const event = { characterId: "c1" };
+
+    const res = await handleApiRequest(event, async (body) =>
+      Promise.resolve({
+        statusCode: 200,
+        headers: {},
+        body: JSON.stringify(body),
+      })
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ characterId: "c1" });
+  });
+
+  it("handle内部で投げたSyntaxErrorは500のまま（invalid JSON bodyに変換されるのはparseRequestBody起因のみ）", async () => {
+    const res = await handleApiRequest(makeEvent({}), async () => {
+      throw new SyntaxError("handle内部のSyntaxError");
+    });
 
     expect(res.statusCode).toBe(500);
     const parsed = JSON.parse(res.body);
     expect(parsed.error).toBe("Failed to generate a response");
     expect(parsed.errorName).toBe("SyntaxError");
-    expect(handle).not.toHaveBeenCalled();
+    expect(parsed.errorMessage).toBe("handle内部のSyntaxError");
   });
 
   it("受け取ったeventをログ出力する", async () => {
@@ -88,15 +170,35 @@ describe("requireCharacterId", () => {
     expect(requireCharacterId({ characterId: "c1" })).toBe("c1");
   });
 
-  it("characterIdが未指定 → BadRequestError", () => {
+  it("characterIdが未指定 → BadRequestError（characterId must be a non-empty string）", () => {
     expect(() => requireCharacterId({})).toThrow(BadRequestError);
-    expect(() => requireCharacterId({})).toThrow("characterId is required");
+    expect(() => requireCharacterId({})).toThrow(
+      "characterId must be a non-empty string"
+    );
   });
 
-  it("characterIdが空文字 → BadRequestError", () => {
+  it("characterIdが空文字 → BadRequestError（characterId must be a non-empty string）", () => {
     expect(() => requireCharacterId({ characterId: "" })).toThrow(BadRequestError);
     expect(() => requireCharacterId({ characterId: "" })).toThrow(
-      "characterId is required"
+      "characterId must be a non-empty string"
+    );
+  });
+
+  it("characterIdが数値 → BadRequestError（characterId must be a non-empty string）", () => {
+    expect(() => requireCharacterId({ characterId: 12345 })).toThrow(
+      BadRequestError
+    );
+    expect(() => requireCharacterId({ characterId: 12345 })).toThrow(
+      "characterId must be a non-empty string"
+    );
+  });
+
+  it("characterIdがnull → BadRequestError（characterId must be a non-empty string）", () => {
+    expect(() => requireCharacterId({ characterId: null })).toThrow(
+      BadRequestError
+    );
+    expect(() => requireCharacterId({ characterId: null })).toThrow(
+      "characterId must be a non-empty string"
     );
   });
 });

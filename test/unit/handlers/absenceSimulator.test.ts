@@ -51,7 +51,9 @@ describe("入力チェック", () => {
     const res = (await handler(makeEvent({}))) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body)).toEqual({ error: "characterId is required" });
+    expect(JSON.parse(res.body)).toEqual({
+      error: "characterId must be a non-empty string",
+    });
     expect(mockedRun).not.toHaveBeenCalled();
   });
 
@@ -237,24 +239,24 @@ describe("レスポンス", () => {
   });
 });
 
-describe("契約とのずれの確認", () => {
-  it("bodyがJSONとして壊れている → 400ではなく500になる（現状の挙動）", async () => {
+describe("入力チェック（F-018）", () => {
+  it("bodyがJSONとして壊れている → 400 invalid JSON body", async () => {
     const res = (await handler({ body: "{bad" })) as LambdaResponse;
 
-    expect(res.statusCode).toBe(500);
-    const parsed = JSON.parse(res.body);
-    expect(parsed.error).toBe("Failed to generate a response");
-    expect(parsed.errorName).toBe("SyntaxError");
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: "invalid JSON body" });
     expect(mockedRun).not.toHaveBeenCalled();
   });
 
-  it("characterIdが文字列以外（truthyな数値） → 型チェックされず素通りする（現状の挙動）", async () => {
+  it("characterIdが文字列以外（数値） → 400 characterId must be a non-empty string", async () => {
     const res = (await handler(
       makeEvent({ characterId: 12345 })
     )) as LambdaResponse;
 
-    expect(res.statusCode).toBe(200);
-    const req = mockedRun.mock.calls[0][0] as AbsenceSimulatorRequest;
-    expect(req.characterId as unknown).toBe(12345);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({
+      error: "characterId must be a non-empty string",
+    });
+    expect(mockedRun).not.toHaveBeenCalled();
   });
 });
