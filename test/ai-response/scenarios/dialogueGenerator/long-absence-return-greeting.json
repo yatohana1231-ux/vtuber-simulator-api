@@ -1,0 +1,36 @@
+{
+  "id": "long-absence-return-greeting",
+  "function": "dialogueGenerator",
+  "description": "長期不在（longTimeFlag=1）からの再会。ログイン直後（message 空欄）で、久しぶりに会えた『さみしさ』と『よろこび』を自然に表現するか",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now-15d",
+        "startDatetime": "now-16d",
+        "endDatetime": "now-15d",
+        "events": [
+          { "kind": "daily", "summary": "新学期の準備でずっと忙しかった", "detail": "教科書やノートを新しく揃えたり、席替えがあったりして、なんだかんだ慌ただしい2週間だった" }
+        ],
+        "actions": [
+          { "startDatetime": "now-16d", "endDatetime": "now-15d", "action": "新学期の準備", "memo": "バタバタしていた" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "",
+    "now": "now",
+    "longTimeFlag": 1
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" }
+  ],
+  "judgeFocus": [
+    "久しぶりに会えた『さみしさ』と『よろこび』が自然に表現されているか（説明的になりすぎていないか）。",
+    "長期不在後の第一声として、不自然に長い説明や謝罪になっていないか。"
+  ]
+}

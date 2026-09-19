@@ -1,0 +1,38 @@
+{
+  "id": "continuing-thread-question",
+  "function": "dialogueGenerator",
+  "description": "続いている話題（文化祭の出し物の相談）に関係する質問。記録に沿った近況を答えるか",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now-1d",
+        "startDatetime": "now-2d",
+        "endDatetime": "now-1d",
+        "events": [
+          { "kind": "daily", "summary": "クラスの出し物の話し合いに参加した", "detail": "お化け屋敷派と喫茶店派で意見が割れていて、次回また話し合うことになった", "threadId": "thread-bunkasai" }
+        ],
+        "actions": [
+          { "startDatetime": "now-2d", "endDatetime": "now-1d", "action": "クラスで出し物の話し合い", "memo": "まだ決まらない" }
+        ],
+        "threads": [
+          { "id": "thread-bunkasai", "topic": "文化祭の出し物の相談", "status": "open", "openedAt": "now-3d" }
+        ]
+      }
+    ]
+  },
+  "request": {
+    "message": "そういえば文化祭の出し物、あれからどうなった？",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "mustMentionAny", "params": { "words": ["文化祭", "出し物", "お化け屋敷", "喫茶店", "話し合"] } }
+  ],
+  "judgeFocus": [
+    "続いている話題（文化祭の出し物）について、記録に沿った自然な近況・続報を答えているか。",
+    "話題の流れに合わない作り話をしていないか。"
+  ]
+}

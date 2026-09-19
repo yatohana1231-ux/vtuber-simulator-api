@@ -1,0 +1,45 @@
+{
+  "id": "process1-happy-event",
+  "function": "emotionUpdater",
+  "description": "process=1。最新の不在期間の記録に嬉しい出来事（small-joy）があるとき、喜びが下がらず、関係値の変化は小さいこと",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now",
+        "startDatetime": "now-14h",
+        "endDatetime": "now",
+        "events": [
+          {
+            "kind": "small-joy",
+            "summary": "配信のコメント欄でイラストのセンスを褒められた",
+            "detail": "配信中にリスナーから「イラストのセンスある」とコメントをもらい、思わずにやけてしまった"
+          }
+        ],
+        "actions": [
+          { "startDatetime": "now-3h", "endDatetime": "now-1h", "action": "VTuberとしての配信", "memo": "" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "process": 1
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    {
+      "type": "deltaDirection",
+      "params": {
+        "expect": {
+          "mood.joy": "notDown"
+        }
+      }
+    },
+    { "type": "deltaWithin", "params": { "path": "perception", "max": 3 } }
+  ],
+  "judgeFocus": [
+    "喜びが下がらないなど、記録された嬉しい出来事に対して感情の向きが妥当か。",
+    "プレイヤーが不在中に起きた出来事なので、関係値（perception）の変化が小さく抑えられているか。"
+  ]
+}

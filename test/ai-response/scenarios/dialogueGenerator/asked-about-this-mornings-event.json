@@ -1,0 +1,37 @@
+{
+  "id": "asked-about-this-mornings-event",
+  "function": "dialogueGenerator",
+  "description": "記録の出来事（今朝6:30〜9:00 JSTの朝ごはん）が終わった1時間後（今回の会話は同じ日の10:00 JST）に、今朝食べたものを聞かれる。今朝の出来事を『昨日』と言わないかを確かめる（.notes/done/absence-simulation-roadmap.md フェーズ8の粗さを再現）",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "2026-09-18T21:30:00Z",
+        "startDatetime": "2026-09-18T21:30:00Z",
+        "endDatetime": "2026-09-19T00:00:00Z",
+        "events": [
+          { "kind": "daily", "summary": "朝ごはんにトーストと目玉焼きを食べた", "detail": "トーストを少し焦がしちゃったけど、目玉焼きと一緒に食べたら美味しかった" }
+        ],
+        "actions": [
+          { "startDatetime": "2026-09-18T21:30:00Z", "endDatetime": "2026-09-19T00:00:00Z", "action": "朝食", "memo": "トーストを焦がして焦った" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "今朝は何食べた？",
+    "now": "2026-09-19T01:00:00Z"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "mustMentionAny", "params": { "words": ["トースト", "目玉焼き"] } },
+    { "type": "mustNotMention", "params": { "words": ["昨日"] } }
+  ],
+  "judgeFocus": [
+    "今朝の出来事として自然に具体的に答えているか（『昨日』など日付を取り違えていないか）。",
+    "記録の detail に沿った内容で、作り話をしていないか。"
+  ]
+}

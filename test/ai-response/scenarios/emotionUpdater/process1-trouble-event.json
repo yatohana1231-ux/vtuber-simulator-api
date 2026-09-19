@@ -1,0 +1,45 @@
+{
+  "id": "process1-trouble-event",
+  "function": "emotionUpdater",
+  "description": "process=1。最新の不在期間の記録にちょっとしたトラブル（small-trouble）があるとき、喜びが上がらないこと",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now",
+        "startDatetime": "now-14h",
+        "endDatetime": "now",
+        "events": [
+          {
+            "kind": "small-trouble",
+            "summary": "配信中にマイクの調子が悪くなった",
+            "detail": "配信の途中でマイクの音が途切れがちになり、聞き取りづらくなって焦ってしまった"
+          }
+        ],
+        "actions": [
+          { "startDatetime": "now-3h", "endDatetime": "now-1h", "action": "VTuberとしての配信", "memo": "" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "process": 1
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    {
+      "type": "deltaDirection",
+      "params": {
+        "expect": {
+          "mood.joy": "notUp"
+        }
+      }
+    },
+    { "type": "deltaWithin", "params": { "path": "perception", "max": 3 } }
+  ],
+  "judgeFocus": [
+    "喜びが上がらないなど、記録されたトラブルに対して感情の向きが妥当か。深刻すぎる落ち込み方になっていないか。",
+    "プレイヤーが不在中に起きた出来事なので、関係値（perception）の変化が小さく抑えられているか。"
+  ]
+}

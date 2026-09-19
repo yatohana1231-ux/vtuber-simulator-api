@@ -1,0 +1,36 @@
+{
+  "id": "login-greeting-recent-event",
+  "function": "dialogueGenerator",
+  "description": "ログイン直後（message 空欄）。最新の不在期間の記録があり、プレイヤーから話しかける前にキャラクターから話しかける状況。最近の出来事に自然に触れるか",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now-1h",
+        "startDatetime": "now-3h",
+        "endDatetime": "now-1h",
+        "events": [
+          { "kind": "daily", "summary": "友達と学食で新作ラーメンを食べた", "detail": "学食に期間限定の味噌ラーメンが出て、友達と一緒に並んで食べた。かなり並んだけど美味しかった" }
+        ],
+        "actions": [
+          { "startDatetime": "now-3h", "endDatetime": "now-1h", "action": "友達と学食で昼食", "memo": "行列ができていて驚いた" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "mustMentionAny", "params": { "words": ["ラーメン", "学食"] } }
+  ],
+  "judgeFocus": [
+    "ログイン直後の第一声として、聞かれなくても不在中の出来事に自然に触れているか。",
+    "テンション・口調がキャラクターらしいか。"
+  ]
+}

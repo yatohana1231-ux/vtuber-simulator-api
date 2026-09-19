@@ -1,0 +1,20 @@
+{
+  "id": "first-meeting-greeting",
+  "function": "dialogueGenerator",
+  "description": "会話ログ・記録が無い初対面の挨拶。キャラクター設定上、初対面では丁寧語を使う",
+  "request": {
+    "message": "はじめまして",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "politenessStyle", "params": { "expect": "polite" } }
+  ],
+  "judgeFocus": [
+    "初対面らしい緊張感・丁寧さが感じられるか。",
+    "口調の例文・性格設定から逸脱していないか。"
+  ]
+}

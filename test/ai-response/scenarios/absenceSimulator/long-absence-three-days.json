@@ -1,0 +1,19 @@
+{
+  "id": "long-absence-three-days",
+  "function": "absenceSimulator",
+  "description": "3日間（72時間）の長期不在。出来事の件数は上限の5件になる",
+  "request": {
+    "lastLoginAt": "now-3d",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "eventCountMatchesSkeleton" },
+    { "type": "actionsMatchedByIndex" }
+  ],
+  "judgeFocus": [
+    "3日分・5件の出来事が、単調な繰り返しにならず、それぞれ異なる内容になっているか。",
+    "行動の枠（直近12時間分）の時間帯と出来事の内容が矛盾していないか。"
+  ]
+}

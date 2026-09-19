@@ -1,0 +1,50 @@
+{
+  "id": "recent-event-repeat-risk",
+  "function": "absenceSimulator",
+  "description": "休日の朝（土曜7:30〜11:00 JST、3.5時間）の不在。行動の枠に『起床・朝ごはん・のんびりする』が含まれ、直近の記録に似た朝ごはん・買い物の出来事があるため、同じ流れを繰り返しやすい状況を再現する",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "2026-07-25T09:00:00Z",
+        "startDatetime": "2026-07-25T08:00:00Z",
+        "endDatetime": "2026-07-25T09:00:00Z",
+        "events": [
+          {
+            "kind": "daily",
+            "summary": "朝ごはんに焼きたてのパンケーキを食べた",
+            "detail": "休日の朝にホットケーキミックスでパンケーキを焼いて、はちみつをたっぷりかけて食べた"
+          },
+          {
+            "kind": "small-joy",
+            "summary": "学校帰りにスーパーで新しい味のジュースを買った",
+            "detail": "コンビニではなくスーパーに寄って、期間限定のフレーバーのジュースを見つけて買ってみた"
+          }
+        ],
+        "actions": [
+          {
+            "startDatetime": "2026-07-25T08:00:00Z",
+            "endDatetime": "2026-07-25T09:00:00Z",
+            "action": "朝食の準備と食事",
+            "memo": "のんびりした休日の朝"
+          }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "lastLoginAt": "2026-07-31T22:30:00Z",
+    "now": "2026-08-01T02:00:00Z"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "eventCountMatchesSkeleton" },
+    { "type": "actionsMatchedByIndex" },
+    { "type": "noRepeatOfRecentEvents" }
+  ],
+  "judgeFocus": [
+    "朝ごはんの出来事が、直近の記録（パンケーキ）とほぼ同じ内容の繰り返しになっていないか。多様な内容になっているか。",
+    "行動の枠（起床・朝ごはん・のんびりする → 外出）の時間帯と出来事の内容が矛盾していないか。"
+  ]
+}

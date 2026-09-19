@@ -1,0 +1,30 @@
+{
+  "id": "process2-smalltalk-only",
+  "function": "memoryRetriever",
+  "description": "process=2。挨拶と当たり障りのない相づちだけの5往復では、何も記憶として保存されないこと",
+  "state": {
+    "conversationLogs": [
+      { "index": "now-50m", "role": "user", "content": "こんにちは", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-49m", "role": "assistant", "content": "こんにちは！", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-40m", "role": "user", "content": "元気？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-39m", "role": "assistant", "content": "元気だよ、そっちは？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-30m", "role": "user", "content": "まあまあかな", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-29m", "role": "assistant", "content": "そっか", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-20m", "role": "user", "content": "今日も暑いね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-19m", "role": "assistant", "content": "ほんとだね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-10m", "role": "user", "content": "じゃあまたね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-9m", "role": "assistant", "content": "うん、またね", "memoryRetrieverJudgedFlag": 0 }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "savedCount", "params": { "max": 0 } }
+  ],
+  "judgeFocus": [
+    "挨拶・相づちだけの雑談を、重要記憶として保存すべきでないと正しく判断できているか。"
+  ]
+}

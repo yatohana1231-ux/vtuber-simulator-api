@@ -126,4 +126,31 @@ describe("politenessStyle", () => {
     const result = makeRunResult({ output: "ありがとう！" });
     expect(politenessStyle(result, makeContext(), { expect: "friendly" }).passed).toBe(false);
   });
+
+  it("passes polite for a fixed greeting followed by a polite sentence", () => {
+    const result = makeRunResult({ output: "はじめまして！よろしくお願いします。" });
+    expect(politenessStyle(result, makeContext(), { expect: "polite" }).passed).toBe(true);
+  });
+
+  it("fails polite for a fixed greeting followed by a casual sentence", () => {
+    const result = makeRunResult({ output: "はじめまして！よろしくね。" });
+    const outcome = politenessStyle(result, makeContext(), { expect: "polite" });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.detail).toContain("よろしくね");
+  });
+
+  it("passes polite for '〜ですね' (a polite ending followed by the sentence-final 'ね')", () => {
+    const result = makeRunResult({ output: "そうなんですね！" });
+    expect(politenessStyle(result, makeContext(), { expect: "polite" }).passed).toBe(true);
+  });
+
+  // 「えっ、ほんとに！？うれしい…！」はどの文も丁寧語・常体いずれの語尾にも当たらず
+  // neutral になる（「うれしい」は形容詞の言い切りで、text.test.ts の classifySentenceStyle
+  // のテストで neutral であることを直接確かめている）。neutral な文はどちらの期待でも
+  // 数えないため、polite・casual のどちらの期待でも合格する。
+  it("passes both polite and casual for an exclamation with no polite/casual sentence-ending ('えっ、ほんとに！？うれしい…！')", () => {
+    const result = makeRunResult({ output: "えっ、ほんとに！？うれしい…！" });
+    expect(politenessStyle(result, makeContext(), { expect: "polite" }).passed).toBe(true);
+    expect(politenessStyle(result, makeContext(), { expect: "casual" }).passed).toBe(true);
+  });
 });

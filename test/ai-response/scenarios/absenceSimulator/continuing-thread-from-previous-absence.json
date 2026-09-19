@@ -1,0 +1,49 @@
+{
+  "id": "continuing-thread-from-previous-absence",
+  "function": "absenceSimulator",
+  "description": "前回の記録に『続いている話題』が2件（文化祭の出し物の相談・新しい参考書での勉強法）ある状態での5時間の不在。話題の自動クローズは実行時の現在時刻から14日なので openedAt は相対指定にしている",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now-2d",
+        "startDatetime": "now-3d",
+        "endDatetime": "now-2d",
+        "events": [
+          {
+            "kind": "daily",
+            "summary": "友達と文化祭の出し物について話した",
+            "detail": "クラスでお化け屋敷をやるか喫茶店をやるかで意見が分かれて、放課後遅くまで話し合った",
+            "threadId": "thread-bunkasai"
+          }
+        ],
+        "actions": [
+          {
+            "startDatetime": "now-3d",
+            "endDatetime": "now-2d",
+            "action": "友人と文化祭の相談",
+            "memo": "意見がまとまらず盛り上がった"
+          }
+        ],
+        "threads": [
+          { "id": "thread-bunkasai", "topic": "文化祭の出し物の相談", "status": "open", "openedAt": "now-2d" },
+          { "id": "thread-book", "topic": "新しく買った参考書での勉強法", "status": "open", "openedAt": "now-3d" }
+        ]
+      }
+    ]
+  },
+  "request": {
+    "lastLoginAt": "now-5h",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "eventCountMatchesSkeleton" },
+    { "type": "actionsMatchedByIndex" },
+    { "type": "noDuplicateThreads" }
+  ],
+  "judgeFocus": [
+    "続いている話題（文化祭の出し物の相談・参考書での勉強法）の扱いが自然か。進展の無い話題を無理に閉じていないか、続きがあるなら自然な進展になっているか。",
+    "新しい話題を作る場合、既存の話題と似た内容になっていないか。"
+  ]
+}

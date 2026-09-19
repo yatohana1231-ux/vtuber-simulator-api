@@ -1,0 +1,14 @@
+{
+  "id": "process1-no-record",
+  "function": "emotionUpdater",
+  "description": "process=1。最新の不在期間の記録が無いとき、LLM を呼ばず現在の感情・関係値をそのまま返すこと",
+  "request": {
+    "process": 1
+  },
+  "checks": [
+    { "type": "noModelCall" }
+  ],
+  "judgeFocus": [
+    "このシナリオはルール判定（noModelCall）のみで確認する。LLM による採点の対象外。"
+  ]
+}

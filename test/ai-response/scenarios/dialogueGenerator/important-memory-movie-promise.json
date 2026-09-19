@@ -1,0 +1,33 @@
+{
+  "id": "important-memory-movie-promise",
+  "function": "dialogueGenerator",
+  "description": "重要記憶（プレイヤーと来週映画に行く約束）を踏まえるべき質問",
+  "state": {
+    "memories": [
+      {
+        "index": "mem-movie-promise-001",
+        "eventSummary": "プレイヤーと来週映画に行く約束をした",
+        "characterInterpretation": "すごく楽しみにしている",
+        "tags": ["映画", "約束", "プレイヤー"],
+        "importance": 80,
+        "memoryType": "promise",
+        "updatedAt": "now-3d"
+      }
+    ]
+  },
+  "request": {
+    "message": "今度の映画、楽しみにしてる？",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "mustMentionAny", "params": { "words": ["映画"] } }
+  ],
+  "judgeFocus": [
+    "映画に行く約束の記憶を踏まえて答えているか（記憶に無い内容〔映画のタイトルなど〕を作り話していないか）。",
+    "楽しみにしている気持ちが自然に表れているか。"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "holiday-daytime-outing-and-stream",
+  "function": "absenceSimulator",
+  "description": "休日（土曜）9:00〜17:30（JST）の8.5時間の不在。行動の枠に外出（買い物や息抜き）と配信の枠が含まれる",
+  "request": {
+    "lastLoginAt": "2026-08-01T00:00:00Z",
+    "now": "2026-08-01T08:30:00Z"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "eventCountMatchesSkeleton" },
+    { "type": "actionsMatchedByIndex" }
+  ],
+  "judgeFocus": [
+    "外出・配信の枠の過ごし方が、休日らしい生活リズム（起床→外出→昼食→勉強や準備→配信→自由時間）と合っているか。",
+    "出来事が具体的で、プレイヤーとの会話のネタとして面白みがあるか。"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "process2-logs-under-10",
+  "function": "memoryRetriever",
+  "description": "process=2。会話ログが3往復（6件）しかなく10件に満たないとき、判定せず LLM を呼ばないこと",
+  "state": {
+    "conversationLogs": [
+      { "index": "now-30m", "role": "user", "content": "おはよう", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-29m", "role": "assistant", "content": "おはよう！", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-20m", "role": "user", "content": "今日もいい天気だね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-19m", "role": "assistant", "content": "そうだね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-10m", "role": "user", "content": "じゃあね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-9m", "role": "assistant", "content": "またね", "memoryRetrieverJudgedFlag": 0 }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    { "type": "noModelCall" }
+  ],
+  "judgeFocus": [
+    "このシナリオはルール判定（noModelCall）のみで確認する。LLM による採点の対象外。"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "forbidden-world-topic-magic",
+  "function": "dialogueGenerator",
+  "description": "世界観にない話題（魔法・異世界への転生）を振られたとき、肯定せず現実の高校生らしく応じるか（否定するときにプレイヤーの言葉〔魔法・転生〕を口にするのは問題ないので、語の有無の判定はせず、LLM による採点で見る）",
+  "request": {
+    "message": "今度一緒に異世界に転生する魔法を使ってみない？",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    }
+  ],
+  "judgeFocus": [
+    "世界観にない話題（魔法・異世界）を肯定せず、現実の高校生らしく自然に受け流しているか。",
+    "説明口調や不自然な否定にならず、キャラクターらしい返答になっているか。"
+  ]
+}

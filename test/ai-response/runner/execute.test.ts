@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakeDynamo, type FakeDynamo } from "./fakeDynamo.js";
-import { loadScenarios, resolveScenarioDatetimes } from "./scenarios.js";
+import { resolveScenarioDatetimes } from "./scenarios.js";
 import type { ProductionModules } from "./execute.js";
 import type { Scenario } from "./types.js";
 
@@ -66,11 +66,47 @@ afterEach(() => {
   fake.uninstall();
 });
 
-async function loadSample(fn: Scenario["function"]): Promise<Scenario> {
-  const scenarios = await loadScenarios();
-  const scenario = scenarios.find((s) => s.function === fn && s.id === "sample-basic");
-  if (!scenario) throw new Error(`sample scenario not found for ${fn}`);
-  return resolveScenarioDatetimes(scenario, new Date());
+// executeRun 自体の動作（呼び出し回数・writes の件数など）を確かめるための、最小限の
+// インラインシナリオ（以前の scenarios/<機能名>/sample-basic.json 相当）。
+// scenarios/ の実ファイルはシナリオそのものの内容（本番用）で今後も増減・変更されるため、
+// この仕組みのテストはそれに左右されないよう、ここに直接持つ。
+const SAMPLE_SCENARIOS: Record<Scenario["function"], Scenario> = {
+  absenceSimulator: {
+    id: "inline-sample-absence-simulator",
+    function: "absenceSimulator",
+    description: "30時間の不在（sample-basic 相当）",
+    request: { lastLoginAt: "now-30h", now: "now" },
+  },
+  dialogueGenerator: {
+    id: "inline-sample-dialogue-generator",
+    function: "dialogueGenerator",
+    description: "挨拶への返答（sample-basic 相当）",
+    request: { message: "こんにちは" },
+  },
+  emotionUpdater: {
+    id: "inline-sample-emotion-updater",
+    function: "emotionUpdater",
+    description: "process=2。やさしい発言（sample-basic 相当）",
+    request: { process: 2, playerMessage: "今日もがんばったね、えらいよ" },
+  },
+  memoryRetriever: {
+    id: "inline-sample-memory-retriever",
+    function: "memoryRetriever",
+    description: "process=2。会話ログ10件（user/assistant 交互、未判定）（sample-basic 相当）",
+    state: {
+      conversationLogs: Array.from({ length: 10 }, (_, i) => ({
+        index: `now-${(10 - i) * 5}m`,
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: i % 2 === 0 ? `プレイヤーの発言${Math.floor(i / 2) + 1}` : `キャラクターの返答${Math.floor(i / 2) + 1}`,
+        memoryRetrieverJudgedFlag: 0,
+      })),
+    },
+    request: { process: 2 },
+  },
+};
+
+function loadSample(fn: Scenario["function"]): Scenario {
+  return resolveScenarioDatetimes(SAMPLE_SCENARIOS[fn], new Date());
 }
 
 describe("executeRun", () => {

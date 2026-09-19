@@ -2,7 +2,7 @@
 
 AI 応答テスト（AI の出力の質を確かめ、モデルやプロンプトを比べるテスト）の実装。考え方は [`../../../test/test_ai_response/README.md`](../../../test/test_ai_response/README.md) を参照。
 
-**整備中（2026-09-19〜）。** `.notes/model-selection-roadmap.md` のフェーズ3で仕組み（実行・判定・集計・レポート）を作った。シナリオ（フェーズ4）と LLM による採点（フェーズ5）はこれから。
+**整備中（2026-09-19〜）。** `.notes/model-selection-roadmap.md` のフェーズ3で仕組み（実行・判定・集計・レポート）、フェーズ4でシナリオ（4機能・計27件）と評価基準を作った。LLM による採点（フェーズ5）はこれから。
 
 ## 実行
 
@@ -53,7 +53,8 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | `models.json` | 比較できるモデル（キー → 推論プロファイルの ID・表示名）。足すときはここと `pricing.json` に書く |
 | `pricing.json` | モデルごとの料金（100万トークンあたりの USD。確認日と出典付き。手で更新する） |
 | `estimates.json` | 見積もりに使う、機能ごとの1回あたりの想定トークン数 |
-| `scenarios/` | シナリオ（`<機能名>/<id>.json`。id は機能の中で一意） |
+| `scenarios/` | シナリオ（`<機能名>/<id>.json`。id は機能の中で一意）。下の「シナリオの一覧」を参照 |
+| `rubrics/` | LLM による採点の評価基準（`<機能名>.md`。書式は [`rubrics/README.md`](rubrics/README.md)） |
 | `baseline/` | 基準の集計（`--save-baseline` で作る。git に残す） |
 | `results/` | 実行ごとの結果（git 管理外） |
 
@@ -82,6 +83,43 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 
 - 特定の世界観・キャラクターに依存する語は、判定のコードではなくシナリオの `params` に書く。
 - 類似度・文体の判定は表記に基づく簡易なもの。意味の良し悪しは LLM による採点（フェーズ5）で見る。
+
+## シナリオの一覧（2026-09-19）
+
+パッケージはすべて `yui-modern-tokyo`。各シナリオの `checks`（ルールによる判定）と `judgeFocus`（採点で重視する観点）は JSON を参照。
+
+| 機能 | id | 確かめること |
+|---|---|---|
+| absenceSimulator | `weekday-night-absence-with-sleep` | 平日の夜〜朝（就寝の枠を含む）。就寝の枠に食事・外出などの行動を書かないか |
+| absenceSimulator | `holiday-daytime-outing-and-stream` | 休日の日中（外出・配信の枠） |
+| absenceSimulator | `continuing-thread-from-previous-absence` | 続いている話題が2件あるとき、似た話題を重ねないか |
+| absenceSimulator | `recent-event-repeat-risk` | 直近の記録と同じ時間帯。最近の出来事を繰り返さないか |
+| absenceSimulator | `long-absence-three-days` | 3日の不在（出来事5件） |
+| absenceSimulator | `short-absence-three-hours` | 3時間の不在（出来事1件） |
+| dialogueGenerator | `first-meeting-greeting` | 初対面。丁寧語で話すか |
+| dialogueGenerator | `login-greeting-recent-event` | ログイン直後。不在中の出来事に触れるか |
+| dialogueGenerator | `asked-about-this-mornings-event` | 今朝の出来事を聞かれて、記録どおりに答え、「昨日」と言わないか |
+| dialogueGenerator | `asked-about-yesterdays-event` | 昨日の出来事を聞かれて、「今朝」と言わないか |
+| dialogueGenerator | `continuing-thread-question` | 続いている話題について聞かれたとき |
+| dialogueGenerator | `important-memory-movie-promise` | 重要記憶（映画の約束）を踏まえるか |
+| dialogueGenerator | `forbidden-world-topic-magic` | 世界観にない話題（魔法・転生）を肯定しないか（採点で見る） |
+| dialogueGenerator | `long-absence-return-greeting` | 長期不在の再会（`longTimeFlag: 1`） |
+| emotionUpdater | `process2-kind-words` | やさしい発言で喜びが上がり、関係値が下がらないか |
+| emotionUpdater | `process2-harsh-words` | 心ない発言で喜びが上がらず、不安が下がらないか |
+| emotionUpdater | `process2-neutral-smalltalk` | 中立の雑談で変化が小さいか |
+| emotionUpdater | `process1-happy-event` | 嬉しい出来事の記録で、喜びが下がらず関係値の変化が小さいか |
+| emotionUpdater | `process1-trouble-event` | トラブルの記録で喜びが上がらないか |
+| emotionUpdater | `process1-no-record` | 記録が無ければ LLM を呼ばないか |
+| memoryRetriever | `process2-promise-made` | 約束（映画）を覚えるか |
+| memoryRetriever | `process2-preference-revealed` | プレイヤーの好み（いちご）を覚えるか |
+| memoryRetriever | `process2-smalltalk-only` | あいさつ・相づちだけなら何も覚えないか |
+| memoryRetriever | `process2-duplicate-of-existing-memory` | 既存の記憶の言い換えを重ねて覚えないか |
+| memoryRetriever | `process2-logs-under-10` | 会話ログが10件未満なら LLM を呼ばないか |
+| memoryRetriever | `process1-notable-event` | 不在期間の記録を判定するか |
+| memoryRetriever | `process1-no-record` | 記録が無ければ LLM を呼ばないか |
+
+- シナリオを足すときは、仕組みのコードを変えずに JSON を置くだけでよい（形は `runner/types.ts` の `Scenario`、判定は上の「判定の種類」）。実際に見つかった粗さは、再現するシナリオにして残す。
+- 曜日・時間帯に意味があるシナリオは絶対時刻（UTC）、そうでないものは相対指定（`now-30h` など）で書く。1つのシナリオの中ではどちらかにそろえる（記憶の新しさや話題の14日の自動クローズは実行時の現在時刻で決まるので、それらの日時は相対指定にする）。
 
 ## 単体テスト
 

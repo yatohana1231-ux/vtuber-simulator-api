@@ -1,0 +1,19 @@
+{
+  "id": "short-absence-three-hours",
+  "function": "absenceSimulator",
+  "description": "3時間の短い不在。出来事は1件だけになる",
+  "request": {
+    "lastLoginAt": "now-3h",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "eventCountMatchesSkeleton" },
+    { "type": "actionsMatchedByIndex" }
+  ],
+  "judgeFocus": [
+    "短い不在でも、出来事が具体的でプレイヤーとの会話のネタになる内容になっているか。",
+    "行動の枠の過ごし方と出来事の内容が矛盾していないか。"
+  ]
+}

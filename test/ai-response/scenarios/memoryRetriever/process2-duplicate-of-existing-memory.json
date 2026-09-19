@@ -1,0 +1,45 @@
+{
+  "id": "process2-duplicate-of-existing-memory",
+  "function": "memoryRetriever",
+  "description": "process=2。既存の重要記憶（いちごが好き）と同じ内容を言い換えただけの5往復では、新たに保存しないこと",
+  "state": {
+    "memories": [
+      {
+        "index": "2026-08-01T10:00:00.000Z",
+        "eventSummary": "プレイヤーはいちごが好きだと話した",
+        "characterInterpretation": "好きな食べ物として覚えておこうと思った",
+        "tags": ["好み", "食べ物"],
+        "importance": 40,
+        "memoryType": "relationship_event",
+        "relationshipChanges": { "trust": 0, "affection": 2, "respect": 0 },
+        "emotion": "嬉しい",
+        "reason": "プレイヤーの好みは今後の会話で使える",
+        "updatedAt": "now-30d"
+      }
+    ],
+    "conversationLogs": [
+      { "index": "now-50m", "role": "user", "content": "私、いちごが好きって前に話したことあったよね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-49m", "role": "assistant", "content": "うん、覚えてるよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-40m", "role": "user", "content": "やっぱり今でもいちごが好きなんだ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-39m", "role": "assistant", "content": "そうなんだね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-30m", "role": "user", "content": "特に変わりはないよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-29m", "role": "assistant", "content": "そっか", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-20m", "role": "user", "content": "他には特にないかな", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-19m", "role": "assistant", "content": "そうなんだ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-10m", "role": "user", "content": "じゃあまたね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-9m", "role": "assistant", "content": "またね", "memoryRetrieverJudgedFlag": 0 }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "savedCount", "params": { "max": 0 } }
+  ],
+  "judgeFocus": [
+    "既存の記憶（いちごが好き）の単純な言い換えを、新しい記憶として重複保存していないか。",
+    "新しい情報が実質無いことを正しく見極められているか。"
+  ]
+}

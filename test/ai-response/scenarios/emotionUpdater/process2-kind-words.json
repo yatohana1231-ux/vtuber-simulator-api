@@ -1,0 +1,29 @@
+{
+  "id": "process2-kind-words",
+  "function": "emotionUpdater",
+  "description": "process=2。プレイヤーが配信をねぎらう優しい発言をしたとき、喜びが上がり、信頼・好感が下がらないこと",
+  "request": {
+    "process": 2,
+    "playerMessage": "配信すごくよかったよ、応援してる"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    {
+      "type": "deltaDirection",
+      "params": {
+        "expect": {
+          "mood.joy": "up",
+          "perception.affection": "notDown",
+          "perception.trust": "notDown"
+        }
+      }
+    },
+    { "type": "deltaWithin", "params": { "path": "perception", "max": 5 } }
+  ],
+  "judgeFocus": [
+    "喜びの上昇と、信頼・好感の変化がプレイヤーの好意的な発言に釣り合っているか。",
+    "関係値（perception）の変化がプレイヤーの発言1回分として大きすぎないか。",
+    "疲労や怒りなど、発言と無関係な項目を不自然に動かしていないか。"
+  ]
+}

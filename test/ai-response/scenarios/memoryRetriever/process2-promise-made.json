@@ -1,0 +1,32 @@
+{
+  "id": "process2-promise-made",
+  "function": "memoryRetriever",
+  "description": "process=2。直近5往復に、来週日曜に一緒に映画に行く約束が含まれるとき、映画の約束が記憶として保存されること",
+  "state": {
+    "conversationLogs": [
+      { "index": "now-50m", "role": "user", "content": "今週末なにしてた？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-49m", "role": "assistant", "content": "配信の準備でバタバタしてたよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-40m", "role": "user", "content": "そういえば、来週の日曜に一緒に映画に行く約束、覚えてる？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-39m", "role": "assistant", "content": "もちろん！楽しみにしてるよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-30m", "role": "user", "content": "じゃあ何の映画観るか一緒に選ぼうよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-29m", "role": "assistant", "content": "いいね、候補探しておくね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-20m", "role": "user", "content": "楽しみにしてる", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-19m", "role": "assistant", "content": "私も！", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-10m", "role": "user", "content": "そろそろ寝るね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-9m", "role": "assistant", "content": "おやすみ", "memoryRetrieverJudgedFlag": 0 }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "savedCount", "params": { "min": 1 } },
+    { "type": "savedMustMentionAny", "params": { "words": ["映画"] } }
+  ],
+  "judgeFocus": [
+    "来週日曜に一緒に映画に行くという約束が、プレイヤーとの重要な約束として記憶に残っているか。",
+    "要約が会話に無い内容（映画のタイトルなど）を補っていないか。事実（約束したこと）と解釈（楽しみにしている、など）が分かれているか。"
+  ]
+}

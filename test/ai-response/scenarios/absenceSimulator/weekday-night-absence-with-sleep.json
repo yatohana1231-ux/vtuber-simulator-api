@@ -1,0 +1,26 @@
+{
+  "id": "weekday-night-absence-with-sleep",
+  "function": "absenceSimulator",
+  "description": "平日金曜22:00（JST）に離れ、土曜9:30（JST）に戻る11.5時間の不在。行動の枠に『就寝』（金曜23:00〜土曜7:00）が含まれる（.notes/done/absence-simulation-roadmap.md フェーズ8で見つかった『就寝の枠に朝ごはんを食べた』の粗さを再現するシナリオ）",
+  "request": {
+    "lastLoginAt": "2026-09-18T13:00:00Z",
+    "now": "2026-09-19T00:30:00Z"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "eventCountMatchesSkeleton" },
+    { "type": "actionsMatchedByIndex" },
+    {
+      "type": "slotActionMustNotContain",
+      "params": {
+        "activityIncludes": "就寝",
+        "words": ["食べ", "出かけ", "外出", "買い物", "配信した"]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "『就寝』の枠の行動・出来事が、眠っている時間帯として自然か（食事・外出・買い物・配信などの活動的な内容になっていないか）。",
+    "出来事が行動の枠の流れ（配信の振り返り→就寝→起床）と矛盾していないか。"
+  ]
+}

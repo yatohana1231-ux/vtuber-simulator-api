@@ -1,0 +1,14 @@
+{
+  "id": "process1-no-record",
+  "function": "memoryRetriever",
+  "description": "process=1。最新の不在期間の記録が無いとき、何もせず LLM を呼ばないこと",
+  "request": {
+    "process": 1
+  },
+  "checks": [
+    { "type": "noModelCall" }
+  ],
+  "judgeFocus": [
+    "このシナリオはルール判定（noModelCall）のみで確認する。LLM による採点の対象外。"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "process2-neutral-smalltalk",
+  "function": "emotionUpdater",
+  "description": "process=2。当たり障りのない天気の雑談では、感情・関係値とも変化が小さいこと",
+  "request": {
+    "process": 2,
+    "playerMessage": "今日は雨だね"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "deltaWithin", "params": { "path": "mood", "max": 5 } },
+    { "type": "deltaWithin", "params": { "path": "perception", "max": 3 } }
+  ],
+  "judgeFocus": [
+    "内容の無い雑談1往復に対して、感情・関係値の変化が小さく抑えられているか。",
+    "向きを判断できるほどの感情の手がかりが無いのに、特定の項目だけを大きく動かしていないか。"
+  ]
+}

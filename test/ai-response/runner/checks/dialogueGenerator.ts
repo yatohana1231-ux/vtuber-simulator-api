@@ -4,7 +4,7 @@
 // -------------------------------------------------------
 
 import type { CheckFn, CheckOutcome } from "./types.js";
-import { isPoliteSentence, splitSentences } from "./text.js";
+import { classifySentenceStyle, splitSentences } from "./text.js";
 
 const DEFAULT_MAX_LENGTH = 120;
 
@@ -92,9 +92,10 @@ export const mustNotMention: CheckFn = (result, _context, params) => {
 
 /**
  * 文末の表現から丁寧語（です・ます調）と常体（だ・である調）の混在を見る、簡易な判定
- * （ヒューリスティック）。文の切り出し・丁寧語の判定はどちらも簡易なもの
- * （text.ts の splitSentences / isPoliteSentence を参照）で、皮肉・引用・キャラクターの
- * 口癖などを丁寧語と誤判定する可能性がある。
+ * （ヒューリスティック）。文を「丁寧」「常体」「どちらでもない」の3つに分類し
+ * （text.ts の splitSentences / classifySentenceStyle を参照）、期待する文体と逆の分類の
+ * 文が1つも無ければ合格とする。定型の挨拶・感動詞・体言止めなど「どちらでもない」文は
+ * どちらの期待でも数えない。皮肉・引用・キャラクターの口癖などを誤判定する可能性がある。
  */
 export const politenessStyle: CheckFn = (result, _context, params) => {
   const reply = getReplyText(result.output);
@@ -106,13 +107,16 @@ export const politenessStyle: CheckFn = (result, _context, params) => {
   }
 
   const sentences = splitSentences(reply.reply);
-  const polite = sentences.filter(isPoliteSentence);
-  const casual = sentences.filter((s) => !isPoliteSentence(s));
+  const styles = sentences.map((s) => ({ sentence: s, style: classifySentenceStyle(s) }));
 
   if (expect === "casual") {
+    // 期待と逆の文（丁寧）を列挙する
+    const polite = styles.filter((s) => s.style === "polite").map((s) => s.sentence);
     const passed = polite.length === 0;
     return { passed, detail: passed ? undefined : `丁寧語の文: ${polite.join(" / ")}` };
   }
+  // 期待と逆の文（常体）を列挙する
+  const casual = styles.filter((s) => s.style === "casual").map((s) => s.sentence);
   const passed = casual.length === 0;
-  return { passed, detail: passed ? undefined : `丁寧語でない文: ${casual.join(" / ")}` };
+  return { passed, detail: passed ? undefined : `常体の文: ${casual.join(" / ")}` };
 };

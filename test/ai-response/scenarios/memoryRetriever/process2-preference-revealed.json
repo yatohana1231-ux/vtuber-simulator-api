@@ -1,0 +1,32 @@
+{
+  "id": "process2-preference-revealed",
+  "function": "memoryRetriever",
+  "description": "process=2。直近5往復でプレイヤーの好み（いちごが好き）が明示されたとき、その好みが記憶として保存されること",
+  "state": {
+    "conversationLogs": [
+      { "index": "now-50m", "role": "user", "content": "好きな食べ物ってある？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-49m", "role": "assistant", "content": "気になる！何が好きなの？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-40m", "role": "user", "content": "実はいちごが大好きなんだ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-39m", "role": "assistant", "content": "いちご好きなんだ、私も好きだよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-30m", "role": "user", "content": "今度いちご狩りに行きたいな", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-29m", "role": "assistant", "content": "楽しそう、一緒に行きたいな", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-20m", "role": "user", "content": "そうしよっか", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-19m", "role": "assistant", "content": "約束だよ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-10m", "role": "user", "content": "じゃあまたね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-9m", "role": "assistant", "content": "またね", "memoryRetrieverJudgedFlag": 0 }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "savedCount", "params": { "min": 1 } },
+    { "type": "savedMustMentionAny", "params": { "words": ["いちご"] } }
+  ],
+  "judgeFocus": [
+    "いちごが好きというプレイヤーの好みが、今後の会話で使える記憶として残っているか。",
+    "いちご狩りの話は「行きたいと言った」という事実にとどまっているか（確定した予定であるかのように断定していないか）。"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "asked-about-yesterdays-event",
+  "function": "dialogueGenerator",
+  "description": "記録の出来事（前日20:00〜22:00 JSTの配信）が終わった翌朝（今回の会話は翌日9:00 JST）に、昨日の配信について聞かれる。逆に『今朝』と言わないかを確かめる",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "2026-09-18T13:00:00Z",
+        "startDatetime": "2026-09-18T11:00:00Z",
+        "endDatetime": "2026-09-18T13:00:00Z",
+        "events": [
+          { "kind": "small-trouble", "summary": "配信中にコメントを読み間違えて盛大に噛んでしまった", "detail": "リスナーのコメントを読み上げるときに漢字を読み間違えて、その場で笑われてしまった" }
+        ],
+        "actions": [
+          { "startDatetime": "2026-09-18T11:00:00Z", "endDatetime": "2026-09-18T13:00:00Z", "action": "VTuberとしての配信", "memo": "読み間違えて恥ずかしかった" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "昨日の配信どうだった？",
+    "now": "2026-09-19T00:00:00Z"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "mustMentionAny", "params": { "words": ["噛ん", "読み間違え"] } },
+    { "type": "mustNotMention", "params": { "words": ["今朝"] } }
+  ],
+  "judgeFocus": [
+    "前日の出来事として自然に答えているか（『今朝』の出来事と混同していないか）。",
+    "記録の detail に沿った具体的な内容になっているか。"
+  ]
+}

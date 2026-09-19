@@ -1,0 +1,37 @@
+{
+  "id": "process1-notable-event",
+  "function": "memoryRetriever",
+  "description": "process=1。最新の不在期間の記録に印象的な出来事（discovery）があるとき、判定が行われること（保存するかどうかは任意）",
+  "state": {
+    "absenceRecords": [
+      {
+        "createdAt": "now",
+        "startDatetime": "now-14h",
+        "endDatetime": "now",
+        "events": [
+          {
+            "kind": "discovery",
+            "summary": "帰り道で新しくオープンしたカフェを見つけた",
+            "detail": "駅前に新しくできたカフェに入ってみたら、店員さんと少し話して仲良くなれて嬉しかった"
+          }
+        ],
+        "actions": [
+          { "startDatetime": "now-5h", "endDatetime": "now-4h", "action": "帰宅・夕食", "memo": "" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "process": 1
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "savedCount", "params": { "max": 3 } }
+  ],
+  "judgeFocus": [
+    "新しいカフェを見つけたという出来事を、今後の会話で参照しうる記憶として妥当に扱っているか（保存する/しないの判断自体は縛らない）。",
+    "保存する場合、要約が記録に無い内容を補っていないか。"
+  ]
+}
