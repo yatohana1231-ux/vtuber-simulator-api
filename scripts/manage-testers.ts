@@ -35,7 +35,7 @@
  *
  * 反映:
  *   - 登録・削除は CloudFront Functions の KeyValueStore に反映されるまで
- *     数秒かかることがある（実行後にその旨を表示する）。
+ *     1分ほどかかることがある（実行後にその旨を表示する）。
  */
 
 import crypto from "node:crypto";
@@ -217,13 +217,21 @@ function readPasswordFromTty(promptText: string): Promise<string> {
   });
 }
 
-/** パイプ等（TTY でない）の標準入力から1行読み取る。 */
-function readLineFromStdin(): Promise<string> {
+/**
+ * パイプ等（TTY でない）の標準入力から1行読み取る。
+ * `input` は既定で `process.stdin`（テストでは任意の Readable を渡せる）。
+ *
+ * `rl.close()` は同期的に `close` イベントを発生させるため、`line` ハンドラ内で
+ * `resolve(line)` を `rl.close()` より先に呼ぶ（`close` 側の `resolve("")` は
+ * 一度解決した Promise には効かないが、`line` が一度も来ないまま入力が終わった
+ * 場合はそちらが空文字で解決する）。
+ */
+export function readLineFromStdin(input: NodeJS.ReadableStream = process.stdin): Promise<string> {
   return new Promise((resolve, reject) => {
-    const rl = readline.createInterface({ input: process.stdin, terminal: false });
+    const rl = readline.createInterface({ input, terminal: false });
     rl.once("line", (line) => {
-      rl.close();
       resolve(line);
+      rl.close();
     });
     rl.once("close", () => {
       resolve("");
@@ -400,7 +408,7 @@ async function cmdAdd(kvsArn: string, id: string): Promise<void> {
   await putKey(kvsArn, id, value, etag);
 
   console.log(`登録しました: ${id}`);
-  console.log("反映まで数秒かかることがあります。");
+  console.log("反映まで1分ほどかかることがあります（2026-09-19 の確認では約45秒）。");
 }
 
 async function cmdRemove(kvsArn: string, id: string): Promise<void> {
@@ -413,7 +421,7 @@ async function cmdRemove(kvsArn: string, id: string): Promise<void> {
   await deleteKey(kvsArn, id, etag);
 
   console.log(`削除しました: ${id}`);
-  console.log("反映まで数秒かかることがあります。");
+  console.log("反映まで1分ほどかかることがあります（2026-09-19 の確認では約45秒）。");
 }
 
 async function cmdList(kvsArn: string): Promise<void> {

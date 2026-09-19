@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { Readable } from "node:stream";
 import {
   validateTesterId,
   validatePassword,
   createStoredValue,
   generateSalt,
   parseArgs,
+  readLineFromStdin,
   MAX_TESTER_ID_BYTES,
   MIN_PASSWORD_LENGTH,
 } from "../../../scripts/manage-testers.js";
@@ -132,6 +134,18 @@ describe("parseArgs", () => {
 
   it("--stage に値が無い → 例外", () => {
     expect(() => parseArgs(["list", "--stage"])).toThrow();
+  });
+});
+
+describe("readLineFromStdin", () => {
+  it("1行分の入力があるストリームを渡す → その行が改行なしで返る", async () => {
+    const result = await readLineFromStdin(Readable.from(["abcdefghijkl\n"]));
+    expect(result).toBe("abcdefghijkl");
+  });
+
+  it("空の入力ストリームを渡す → 空文字が返る", async () => {
+    const result = await readLineFromStdin(Readable.from([]));
+    expect(result).toBe("");
   });
 });
 

@@ -50,4 +50,4 @@ npx tsx scripts/manage-testers.ts list --kvs-arn arn:aws:cloudfront::<account>:k
 
 ### 反映の遅れ
 
-`add`/`remove` の直後、CloudFront Functions の KeyValueStore への反映まで数秒かかることがある（実行後にその旨を表示する）。登録・削除の直後に API 専用 CloudFront で確認する場合は、少し待ってから試すこと。
+`add`/`remove` の直後、CloudFront Functions の KeyValueStore への反映まで1分ほどかかることがある（2026-09-19 の確認では約45秒。反映前は正しい資格情報でも 401 になる）（実行後にその旨を表示する）。登録・削除の直後に API 専用 CloudFront で確認する場合は、少し待ってから試すこと。
