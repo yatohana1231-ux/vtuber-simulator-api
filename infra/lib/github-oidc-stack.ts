@@ -18,6 +18,17 @@ import { Construct } from "constructs";
 //      - AWS_ROLE_ARN_STG = (出力されたロール ARN)
 // ==============================================================================
 
+/**
+ * CDK のブートストラップの修飾子。`cdk bootstrap` の既定値（`hnb659fds`）で
+ * ブートストラップしている。修飾子を変えてブートストラップし直したら合わせること。
+ */
+const CDK_BOOTSTRAP_QUALIFIER = "hnb659fds";
+
+/** CDK のブートストラップのロールの ARN（例: cdk-hnb659fds-deploy-role-<account>-<region>） */
+function cdkBootstrapRoleArn(kind: string, account: string, region: string): string {
+  return `arn:aws:iam::${account}:role/cdk-${CDK_BOOTSTRAP_QUALIFIER}-${kind}-role-${account}-${region}`;
+}
+
 export interface GithubOidcStackProps extends cdk.StackProps {
   /** GitHub リポジトリ (形式: "owner/repo") ※表示・参照用 */
   githubRepo: string;
@@ -75,12 +86,23 @@ export class GithubOidcStack extends cdk.Stack {
     });
 
     // --------------------------------------------------
-    // 権限付与
+    // 権限付与（最小権限。D-036 / F-029）
     // --------------------------------------------------
-    // CDK デプロイには CloudFormation, S3, Lambda, IAM 等の広範な権限が必要。
-    // 本番運用時は最小権限に絞ることを推奨。
-    stgRole.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName("AdministratorAccess")
+    // CI がするのは `cdk deploy VtuberSimulatorStack` だけで、実際の操作は
+    // CDK のブートストラップのロールが行う（CloudFormation の操作は deploy ロール、
+    // アセットの S3 への公開は file-publishing ロール、リソースの作成は
+    // CloudFormation が cfn-exec ロールで行う）。ブートストラップのロールは
+    // アカウントを信頼しているので、CI のロールにはそれらを引き受ける権限だけを付ける。
+    // image-publishing（Docker イメージのアセット）・lookup（fromLookup などの
+    // コンテキストの参照）は使っていないので含めない。使うようになったら足すこと。
+    stgRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "AssumeCdkBootstrapRoles",
+        actions: ["sts:AssumeRole", "sts:TagSession"],
+        resources: ["deploy", "file-publishing"].map((kind) =>
+          cdkBootstrapRoleArn(kind, this.account, this.region)
+        ),
+      })
     );
 
     // --------------------------------------------------

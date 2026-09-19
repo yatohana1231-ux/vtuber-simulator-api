@@ -16,7 +16,7 @@ VTuber キャラクターとのチャットインタラクションを提供す�
 | データベース | Amazon DynamoDB |
 | API ゲートウェイ | Amazon API Gateway (REST API) |
 | IaC | AWS CDK (TypeScript) |
-| CI/CD | GitHub Actions (OIDC 認証) |
+| CI/CD | GitHub Actions (OIDC 認証。CI のロールは CDK のブートストラップのロールを引き受ける権限だけを持つ。D-036) |
 | テンプレートエンジン | Mustache |
 | リージョン | ap-northeast-1 (東京) |
 
@@ -250,6 +250,8 @@ graph LR
     GHA --> CHECKOUT
     CDK --> CFN
 ```
+
+CI の IAM ロール（`github-actions-vtuber-simu-stg`、`infra/lib/github-oidc-stack.ts` の `GithubOidcStack`。手動デプロイ専用）は、`develop` ブランチからの GitHub OIDC だけを信頼し、権限は CDK のブートストラップのロールのうち deploy（CloudFormation の操作）と file-publishing（アセットの S3 への公開）を引き受けることだけに絞っている（`.notes/decision-history.md` の D-036）。実際のリソースの作成は、CloudFormation がブートストラップの実行ロール（`cdk-hnb659fds-cfn-exec-role-*`。CDK の既定で `AdministratorAccess`。絞り込みは `.notes` の F-035）で行う。Docker イメージのアセットや `fromLookup` などのコンテキストの参照を使うようにしたら、image-publishing・lookup のロールを引き受ける権限を足してから `GithubOidcStack` をデプロイし直すこと。
 
 ## リクエスト処理フロー
 

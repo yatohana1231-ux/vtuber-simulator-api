@@ -8,9 +8,11 @@
 #   1. AWS OIDC Identity Provider を作成済み
 #      - プロバイダURL: https://token.actions.githubusercontent.com
 #      - 対象者: sts.amazonaws.com
-#   2. GitHub Actions 用 IAM ロールを作成済み
-#      - 信頼ポリシーで対象リポジトリ/ブランチを許可
-#      - CDK デプロイに必要な権限を付与 (CloudFormation, Lambda, IAM, DynamoDB, API Gateway 等)
+#   2. GitHub Actions 用 IAM ロールを作成済み（infra/lib/github-oidc-stack.ts。手動デプロイ）
+#      - 信頼ポリシーで対象リポジトリ/ブランチ（develop）を許可
+#      - 権限は CDK のブートストラップのロール（deploy・file-publishing）を
+#        引き受けることだけ（最小権限。D-036 / F-029）。実際のリソースの操作は
+#        ブートストラップのロールと CloudFormation が行う
 #   3. リポジトリの Settings > Secrets and variables > Actions に以下を登録:
 #      - AWS_ROLE_ARN_STG : stg 用 IAM ロール ARN
 # ==============================================================================
