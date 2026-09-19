@@ -703,7 +703,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 - **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
 - **料金の監視:** AWS Budgets の予算アラートは CDK では作らない（通知先のメールアドレスをリポジトリに置かないため）。AWS コンソールの「Billing and Cost Management → Budgets」で、月額の予算とメールの通知を手動で設定する。
 - **テスターの ID の受け渡し:** CloudFront Function は、資格情報を確かめたあと、その ID を UTF-8 の base64url にして `x-tester-id` ヘッダーで API Gateway に渡す。クライアントが送った `x-tester-id` は先に消す。Lambda は `src/lib/testerId.ts` の `getTesterIdFromEvent` で取り出す。
-- **キャラクターの持ち主の確認:** 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が `"true"` のとき（`infra/cdk.json` の `context.enforceCharacterOwnership.<stage>`。stg は段階的に有効にするため当面 `false`）、4つのエンドポイントは、テスターがその `characterId` の持ち主であることを確かめる（`src/lib/apiHandler.ts`）。`x-tester-id` が無い・持ち主でない・存在しない `characterId` は `403 { "error": "forbidden" }`。登録されている `packageId` とリクエストの `packageId` が違えば 400、省略されていれば登録されている `packageId` を使う（`characterId` とパッケージの対応の検証。F-010）。
+- **キャラクターの持ち主の確認:** 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が `"true"` のとき（`infra/cdk.json` の `context.enforceCharacterOwnership.<stage>`。stg は 2026-09-19 に `true` にした）、4つのエンドポイントは、テスターがその `characterId` の持ち主であることを確かめる（`src/lib/apiHandler.ts`）。`x-tester-id` が無い・持ち主でない・存在しない `characterId` は `403 { "error": "forbidden" }`。登録されている `packageId` とリクエストの `packageId` が違えば 400、省略されていれば登録されている `packageId` を使う（`characterId` とパッケージの対応の検証。F-010）。
 - 構成は `infra/lib/api-entrance.ts`、関数の仕様は `infra/functions/README.md`。
 
 ### エラーレスポンス（全エンドポイント共通）
