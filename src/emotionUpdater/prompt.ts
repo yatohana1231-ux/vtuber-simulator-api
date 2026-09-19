@@ -1,0 +1,88 @@
+// -------------------------------------------------------
+// emotionUpdater のシステムプロンプトの組み立て
+//
+// プロンプトキャッシュ（D-017・D-022）のため、変わる頻度ごとに層を分けて
+// テンプレートファイルも分割している。
+// - ① 固定部（emotionUpdater.fixed.mustache）: 同じパッケージなら process によらず毎回まったく同じ文字列。
+//   感情・記憶・入力・process 固有のルールは入れない。
+// - ③ 可変部（emotionUpdater.variable.mustache）: 現在の感情状態・関係値・更新のインプット・
+//   process ごとの関係値のルールなど、毎回変わる入力。
+// emotionUpdater には②（セッション部）は無い（process=1 の入力は最新の不在期間の記録の
+// テキストとして③に入る）。
+// -------------------------------------------------------
+
+import Mustache from "mustache";
+
+import FIXED_TEMPLATE from "./prompts/emotionUpdater.fixed.mustache";
+import VARIABLE_TEMPLATE from "./prompts/emotionUpdater.variable.mustache";
+import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
+import type { CharacterDefinition, Mood, Perception, World } from "../types.js";
+
+export interface EmotionUpdaterPromptInput {
+  world: World;
+  character: CharacterDefinition;
+  process: 1 | 2;
+  currentMood: Mood;
+  currentPerception: Perception;
+  inputText: string; // 更新のインプット（process1: 不在中の出来事・行動、process2: プレイヤーの発言）
+}
+
+/** emotionUpdater のシステムプロンプトを、層ごとの文字列の配列 [固定部, 可変部] で返す（D-017・D-022） */
+export function buildEmotionUpdaterPromptLayers(input: EmotionUpdaterPromptInput): string[] {
+  const { world, character, process, currentMood, currentPerception, inputText } = input;
+
+  const fixed = Mustache.render(FIXED_TEMPLATE, buildPromptContext(world, character), PROMPT_PARTIALS);
+
+  const perceptionRule =
+    process === 1
+      ? "- 関係値（perception）はプレイヤー不在中の出来事なので、大きく変化しないよう差分を小さく抑えること（目安: ±0〜3）"
+      : "- 関係値（perception）もプレイヤーの発言に応じて適切に更新する（目安: ±1〜5）";
+
+  const variable = Mustache.render(VARIABLE_TEMPLATE, {
+    moodText: formatState(currentMood as unknown as Record<string, number>, MOOD_LABELS as Record<string, string>),
+    perceptionText: formatState(
+      currentPerception as unknown as Record<string, number>,
+      PERCEPTION_LABELS as Record<string, string>
+    ),
+    inputText,
+    perceptionRule,
+  });
+
+  return [fixed, variable];
+}
+
+// -------------------------------------------------------
+// ラベルマップ・整形ヘルパー
+// -------------------------------------------------------
+
+const MOOD_LABELS: Record<keyof Mood, string> = {
+  joy: "喜び",
+  anxiety: "不安",
+  angry: "怒り",
+  fatigue: "疲労",
+  confidence: "自信",
+  loneliness: "孤独感",
+};
+
+const PERCEPTION_LABELS: Record<keyof Perception, string> = {
+  trust: "信頼",
+  affection: "好感",
+  respect: "尊敬",
+  fear: "恐れ",
+  dependence: "依存",
+  familiarity: "親しみ",
+};
+
+function toLabel(value: number): string {
+  if (value <= 20) return "ほとんど感じない";
+  if (value <= 40) return "低い";
+  if (value <= 60) return "標準";
+  if (value <= 80) return "自覚している";
+  return "強く感じる";
+}
+
+function formatState(obj: Record<string, number>, labels: Record<string, string>): string {
+  return Object.entries(obj)
+    .map(([k, v]) => `・${labels[k] ?? k}：${v}（${toLabel(v)}）`)
+    .join("\n");
+}

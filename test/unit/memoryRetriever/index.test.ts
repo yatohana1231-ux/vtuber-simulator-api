@@ -6,6 +6,7 @@ vi.mock("../../../src/lib/bedrock.js", () => ({
 
 vi.mock("../../../src/lib/dynamo.js", () => ({
   getRelevantMemories: vi.fn(),
+  getLatestAbsenceRecord: vi.fn(),
   getLogsForMemoryJudge: vi.fn(),
   markLogsAsJudged: vi.fn(),
   saveMemory: vi.fn(),
@@ -15,11 +16,14 @@ import { runMemoryRetriever } from "../../../src/memoryRetriever/index.js";
 import { invokeModelJson } from "../../../src/lib/bedrock.js";
 import {
   getRelevantMemories,
+  getLatestAbsenceRecord,
   getLogsForMemoryJudge,
   markLogsAsJudged,
   saveMemory,
 } from "../../../src/lib/dynamo.js";
+import { formatLocalDateTime } from "../../../src/lib/timezone.js";
 import type {
+  AbsenceRecord,
   CharacterDefinition,
   ConversationLogItem,
   MemoryCandidate,
@@ -30,6 +34,7 @@ import type {
 
 const mockedInvokeModelJson = vi.mocked(invokeModelJson);
 const mockedGetRelevantMemories = vi.mocked(getRelevantMemories);
+const mockedGetLatestAbsenceRecord = vi.mocked(getLatestAbsenceRecord);
 const mockedGetLogsForMemoryJudge = vi.mocked(getLogsForMemoryJudge);
 const mockedMarkLogsAsJudged = vi.mocked(markLogsAsJudged);
 const mockedSaveMemory = vi.mocked(saveMemory);
@@ -59,8 +64,6 @@ function process1Req(overrides: Partial<MemoryRetrieverRequest> = {}): MemoryRet
     world,
     character,
     process: 1,
-    events: [],
-    actions: [],
     ...overrides,
   } as MemoryRetrieverRequest;
 }
@@ -73,6 +76,27 @@ function process2Req(overrides: Partial<MemoryRetrieverRequest> = {}): MemoryRet
     process: 2,
     ...overrides,
   } as MemoryRetrieverRequest;
+}
+
+function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
+  return {
+    event_id: "event-1",
+    characterId: "char-1",
+    createdAt: "2026-08-11T08:00:00.000Z",
+    startDatetime: "2026-08-11T00:00:00.000Z",
+    endDatetime: "2026-08-11T08:00:00.000Z",
+    events: [{ kind: "daily", summary: "雨が降った", detail: "傘を忘れて濡れた" }],
+    actions: [
+      {
+        startDatetime: "2026-08-11T06:00:00.000Z",
+        endDatetime: "2026-08-11T07:00:00.000Z",
+        action: "散歩した",
+        memo: "",
+      },
+    ],
+    threads: [],
+    ...overrides,
+  };
 }
 
 function candidate(overrides: Partial<MemoryCandidate & { memoryLabel: string }> = {}): MemoryCandidate & { memoryLabel: string } {
@@ -114,41 +138,78 @@ function tenUnjudgedLogs(): ConversationLogItem[] {
   );
 }
 
+/** invokeModelJson に渡ったシステムプロンプト（層の配列）を1つの文字列に結合して返す */
+function joinedPrompt(callIndex = 0): string {
+  const systemPrompt = mockedInvokeModelJson.mock.calls[callIndex][0];
+  return Array.isArray(systemPrompt) ? systemPrompt.join("\n") : systemPrompt;
+}
+
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 
   mockedGetRelevantMemories.mockResolvedValue([]);
+  mockedGetLatestAbsenceRecord.mockResolvedValue(absenceRecord());
   mockedGetLogsForMemoryJudge.mockResolvedValue([]);
   mockedMarkLogsAsJudged.mockResolvedValue(undefined);
   mockedSaveMemory.mockResolvedValue(undefined);
   mockedInvokeModelJson.mockImplementation(async (_systemPrompt, _userMessage, fallback) => fallback);
 });
 
-describe("process1: イベント・行動の有無による分岐", () => {
-  it("eventsもactionsも空 → モデルもDynamoDBも呼ばない", async () => {
-    await runMemoryRetriever(process1Req({ events: [], actions: [] }));
+describe("process1: 最新の不在期間の記録（D-022）", () => {
+  it("記録が無い → モデルもDynamoDBも呼ばない", async () => {
+    mockedGetLatestAbsenceRecord.mockResolvedValue(null);
+
+    await runMemoryRetriever(process1Req());
 
     expect(mockedInvokeModelJson).not.toHaveBeenCalled();
     expect(mockedGetRelevantMemories).not.toHaveBeenCalled();
     expect(mockedSaveMemory).not.toHaveBeenCalled();
   });
 
-  it("eventsのみある → モデルを呼ぶ", async () => {
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"], actions: [] }));
+  it("記録がある → characterIdでgetLatestAbsenceRecordが呼ばれ、モデルを呼ぶ", async () => {
+    await runMemoryRetriever(process1Req({ characterId: "char-xyz" }));
 
+    expect(mockedGetLatestAbsenceRecord).toHaveBeenCalledWith("char-xyz");
     expect(mockedInvokeModelJson).toHaveBeenCalledTimes(1);
   });
 
-  it("actionsのみある → モデルを呼ぶ", async () => {
-    await runMemoryRetriever(
-      process1Req({
-        events: [],
-        actions: [{ startDatetime: "a", endDatetime: "b", action: "散歩", memo: "" }],
-      })
+  it("記録の出来事のsummary・detailがプロンプトに入る", async () => {
+    mockedGetLatestAbsenceRecord.mockResolvedValue(
+      absenceRecord({ events: [{ kind: "daily", summary: "雨が降った", detail: "傘を忘れて濡れた" }] })
     );
 
-    expect(mockedInvokeModelJson).toHaveBeenCalledTimes(1);
+    await runMemoryRetriever(process1Req());
+
+    const prompt = joinedPrompt();
+    expect(prompt).toContain("雨が降った");
+    expect(prompt).toContain("傘を忘れて濡れた");
+  });
+
+  it("記録の行動の日時が、世界観のタイムゾーン表記で入る（UTCのslice(0,16)ではない）", async () => {
+    const action = {
+      startDatetime: "2026-08-11T06:00:00.000Z",
+      endDatetime: "2026-08-11T07:00:00.000Z",
+      action: "散歩した",
+      memo: "",
+    };
+    mockedGetLatestAbsenceRecord.mockResolvedValue(absenceRecord({ actions: [action] }));
+
+    await runMemoryRetriever(process1Req());
+
+    const prompt = joinedPrompt();
+    const start = formatLocalDateTime(new Date(action.startDatetime), world.timezone);
+    const end = formatLocalDateTime(new Date(action.endDatetime), world.timezone);
+    expect(prompt).toContain(`${start}〜${end} ${action.action}`);
+    expect(prompt).not.toContain(action.startDatetime.slice(0, 16));
+  });
+
+  it("invokeModelJsonに層の配列（[固定部, 可変部]）が渡る", async () => {
+    await runMemoryRetriever(process1Req());
+
+    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
+    expect(Array.isArray(systemPrompt)).toBe(true);
+    expect(systemPrompt).toHaveLength(2);
   });
 });
 
@@ -184,9 +245,9 @@ describe("process2: 会話ログの件数・判定済みフラグによる分岐
     await runMemoryRetriever(process2Req());
 
     expect(mockedInvokeModelJson).toHaveBeenCalledTimes(1);
-    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
-    expect(systemPrompt).toContain("プレイヤー: 配信見たよ");
-    expect(systemPrompt).toContain("テストキャラ子: ありがとうございます！");
+    const prompt = joinedPrompt();
+    expect(prompt).toContain("プレイヤー: 配信見たよ");
+    expect(prompt).toContain("テストキャラ子: ありがとうございます！");
   });
 
   it("10件そろって未判定 → markLogsAsJudgedに全ログのindexが渡る", async () => {
@@ -207,6 +268,12 @@ describe("process2: 会話ログの件数・判定済みフラグによる分岐
 
     expect(mockedGetLogsForMemoryJudge).toHaveBeenCalledWith("char-xyz", 5);
   });
+
+  it("getLatestAbsenceRecordを呼ばない", async () => {
+    await runMemoryRetriever(process2Req());
+
+    expect(mockedGetLatestAbsenceRecord).not.toHaveBeenCalled();
+  });
 });
 
 describe("保存対象の絞り込み", () => {
@@ -214,7 +281,7 @@ describe("保存対象の絞り込み", () => {
     const result: MemoryRetrieverResult = { candidates: [candidate({ memoryLabel: "CREATE" })] };
     mockedInvokeModelJson.mockResolvedValueOnce(result);
 
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req());
 
     expect(mockedSaveMemory).toHaveBeenCalledTimes(1);
   });
@@ -223,7 +290,7 @@ describe("保存対象の絞り込み", () => {
     const result: MemoryRetrieverResult = { candidates: [candidate({ shouldRemember: false })] };
     mockedInvokeModelJson.mockResolvedValueOnce(result);
 
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req());
 
     expect(mockedSaveMemory).not.toHaveBeenCalled();
   });
@@ -232,7 +299,7 @@ describe("保存対象の絞り込み", () => {
     const result: MemoryRetrieverResult = { candidates: [candidate({ memoryLabel: "IGNORE" })] };
     mockedInvokeModelJson.mockResolvedValueOnce(result);
 
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req());
 
     expect(mockedSaveMemory).not.toHaveBeenCalled();
   });
@@ -240,13 +307,13 @@ describe("保存対象の絞り込み", () => {
   it("candidatesが配列でない → 何も保存しない", async () => {
     mockedInvokeModelJson.mockResolvedValueOnce({ candidates: "not-an-array" } as never);
 
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req());
 
     expect(mockedSaveMemory).not.toHaveBeenCalled();
   });
 
   it("fallback（invokeModelJsonが第3引数をそのまま返す） → 何も保存しない", async () => {
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req());
 
     expect(mockedSaveMemory).not.toHaveBeenCalled();
   });
@@ -259,7 +326,7 @@ describe("保存対象の絞り込み", () => {
     });
     mockedInvokeModelJson.mockResolvedValueOnce({ candidates: [c] });
 
-    await runMemoryRetriever(process1Req({ characterId: "char-xyz", events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req({ characterId: "char-xyz" }));
 
     expect(mockedSaveMemory).toHaveBeenCalledTimes(1);
     const item = mockedSaveMemory.mock.calls[0][0];
@@ -274,7 +341,7 @@ describe("保存対象の絞り込み", () => {
 
 describe("getRelevantMemoriesの呼び出し条件", () => {
   it("queryText・topK:20・minImportance:10で呼ばれる", async () => {
-    await runMemoryRetriever(process1Req({ events: ["雨が降った"] }));
+    await runMemoryRetriever(process1Req());
 
     expect(mockedGetRelevantMemories).toHaveBeenCalledTimes(1);
     const [characterId, options] = mockedGetRelevantMemories.mock.calls[0];
@@ -288,7 +355,7 @@ describe("getRelevantMemoriesの呼び出し条件", () => {
 describe("型と実装の食い違い（現状の挙動）", () => {
   // MemoryCandidate 型（src/types.ts）には memoryLabel フィールドが定義されていないが、
   // 実装（src/memoryRetriever/index.ts）は `(c as MemoryCandidate & { memoryLabel?: string }).memoryLabel`
-  // というキャストで参照している。プロンプト（memoryRetriever.mustache）はモデルに
+  // というキャストで参照している。プロンプト（memoryRetriever.fixed.mustache）はモデルに
   // memoryLabel を出力させる指示をしているため実行時には動作するが、型定義上は
   // MemoryCandidate に memoryLabel が存在せず、型チェックだけでは保存フィルタの実際の
   // 条件（IGNORE 除外）を追跡できない。

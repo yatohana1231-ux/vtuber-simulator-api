@@ -11,6 +11,7 @@ vi.mock("../../../src/lib/dynamo.js", async (importOriginal) => {
     getCharacterState: vi.fn(),
     getRelevantMemories: vi.fn(),
     getRecentLogs: vi.fn(),
+    getLatestAbsenceRecord: vi.fn(),
     saveConversationLog: vi.fn(),
   };
 });
@@ -21,11 +22,13 @@ import {
   getCharacterState,
   getRelevantMemories,
   getRecentLogs,
+  getLatestAbsenceRecord,
   saveConversationLog,
   DEFAULT_MOOD,
   DEFAULT_PERCEPTION,
 } from "../../../src/lib/dynamo.js";
 import type {
+  AbsenceRecord,
   CharacterDefinition,
   ConversationLogItem,
   DialogueGeneratorRequest,
@@ -36,6 +39,7 @@ const mockedInvokeModel = vi.mocked(invokeModel);
 const mockedGetCharacterState = vi.mocked(getCharacterState);
 const mockedGetRelevantMemories = vi.mocked(getRelevantMemories);
 const mockedGetRecentLogs = vi.mocked(getRecentLogs);
+const mockedGetLatestAbsenceRecord = vi.mocked(getLatestAbsenceRecord);
 const mockedSaveConversationLog = vi.mocked(saveConversationLog);
 
 const world: World = {
@@ -86,6 +90,32 @@ function log(overrides: Partial<ConversationLogItem>): ConversationLogItem {
   };
 }
 
+function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
+  return {
+    event_id: "event-1",
+    characterId: "char-1",
+    createdAt: "2026-08-11T10:00:00.000Z",
+    startDatetime: "2026-08-10T22:00:00.000Z",
+    endDatetime: "2026-08-11T10:00:00.000Z",
+    events: [{ kind: "daily", summary: "雨が降ったマーカー要約", detail: "傘を忘れたマーカー詳細" }],
+    actions: [
+      {
+        startDatetime: "2026-08-10T22:00:00.000Z",
+        endDatetime: "2026-08-10T22:30:00.000Z",
+        action: "散歩マーカー行動",
+        memo: "",
+      },
+    ],
+    threads: [],
+    ...overrides,
+  };
+}
+
+/** invokeModel に渡ったシステムプロンプト（層の配列）を、内容確認用に1つの文字列に結合する */
+function promptText(callIndex = 0): string {
+  return (mockedInvokeModel.mock.calls[callIndex][0] as string[]).join("\n");
+}
+
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -93,6 +123,7 @@ beforeEach(() => {
   mockedGetCharacterState.mockResolvedValue({ mood: { ...DEFAULT_MOOD }, perception: { ...DEFAULT_PERCEPTION } });
   mockedGetRelevantMemories.mockResolvedValue([]);
   mockedGetRecentLogs.mockResolvedValue([]);
+  mockedGetLatestAbsenceRecord.mockResolvedValue(null);
   mockedSaveConversationLog.mockResolvedValue(undefined);
   mockedInvokeModel.mockResolvedValue("セリフの返答");
 });
@@ -150,8 +181,7 @@ describe("mood/perceptionの省略", () => {
     await runDialogueGenerator(baseReq({ mood: undefined }));
 
     expect(mockedGetCharacterState).toHaveBeenCalledTimes(1);
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("喜び：1（ほとんど感じない）");
+    expect(promptText()).toContain("喜び：1（ほとんど感じない）");
   });
 
   it("perceptionのみ欠けている → getCharacterStateを呼び、その値を使う", async () => {
@@ -161,8 +191,7 @@ describe("mood/perceptionの省略", () => {
     await runDialogueGenerator(baseReq({ perception: undefined }));
 
     expect(mockedGetCharacterState).toHaveBeenCalledTimes(1);
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("信頼：11（ほとんど感じない）");
+    expect(promptText()).toContain("信頼：11（ほとんど感じない）");
   });
 });
 
@@ -225,11 +254,36 @@ describe("直近ログの末尾（今保存したuserログ）を会話履歴か
 
     await runDialogueGenerator(baseReq({ message: "こんにちは" }));
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("古い発言");
-    expect(systemPrompt).toContain("古い返答");
+    const prompt = promptText();
+    expect(prompt).toContain("古い発言");
+    expect(prompt).toContain("古い返答");
     // 末尾の「こんにちは」は会話履歴（historyText）ではなく別の目的（現在のuserメッセージ）でのみ登場するべきだが、
     // ここでは少なくとも「古い発言」「古い返答」の2件が履歴に含まれることを確認する
+  });
+});
+
+describe("最新の不在期間の記録（getLatestAbsenceRecord）", () => {
+  it("characterIdで呼ばれる", async () => {
+    await runDialogueGenerator(baseReq({ characterId: "char-xyz" }));
+
+    expect(mockedGetLatestAbsenceRecord).toHaveBeenCalledWith("char-xyz");
+  });
+
+  it("記録がある場合 → プロンプトに出来事の内容が入る", async () => {
+    mockedGetLatestAbsenceRecord.mockResolvedValue(absenceRecord());
+
+    await runDialogueGenerator(baseReq());
+
+    expect(promptText()).toContain("雨が降ったマーカー要約");
+  });
+
+  it("記録が無い場合 → invokeModelに渡るセッション部（層の2番目）が空文字になる", async () => {
+    mockedGetLatestAbsenceRecord.mockResolvedValue(null);
+
+    await runDialogueGenerator(baseReq());
+
+    const layers = mockedInvokeModel.mock.calls[0][0] as string[];
+    expect(layers[1]).toBe("");
   });
 });
 
@@ -237,22 +291,19 @@ describe("プロンプトに含まれる情報", () => {
   it("世界観の説明文が入る", async () => {
     await runDialogueGenerator(baseReq());
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("dialogueGeneratorテスト用の世界観マーカー");
+    expect(promptText()).toContain("dialogueGeneratorテスト用の世界観マーカー");
   });
 
   it("キャラクター名が入る", async () => {
     await runDialogueGenerator(baseReq());
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("テストキャラ子");
+    expect(promptText()).toContain("テストキャラ子");
   });
 
   it("speechExamplesがある場合 → 口調の例文が入る", async () => {
     await runDialogueGenerator(baseReq({ character: characterWithSpeechExamples }));
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("元気だよ、ありがとう！というマーカー返答");
+    expect(promptText()).toContain("元気だよ、ありがとう！というマーカー返答");
   });
 
   it("speechExamplesが無い場合 → speechExamplesパーシャルの本文が入らない", async () => {
@@ -260,8 +311,7 @@ describe("プロンプトに含まれる情報", () => {
     // パーシャル固有の文言（口調の手本です、という説明文）で判定する
     await runDialogueGenerator(baseReq({ character }));
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).not.toContain("の口調の手本です");
+    expect(promptText()).not.toContain("の口調の手本です");
   });
 
   it("記憶がある場合 → 記憶の内容が入る", async () => {
@@ -271,8 +321,7 @@ describe("プロンプトに含まれる情報", () => {
 
     await runDialogueGenerator(baseReq());
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("文化祭を手伝った");
+    expect(promptText()).toContain("文化祭を手伝った");
   });
 
   it("mood/perceptionのラベルが入る（境界値 40/41）", async () => {
@@ -282,9 +331,9 @@ describe("プロンプトに含まれる情報", () => {
       })
     );
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("喜び：40（低い）");
-    expect(systemPrompt).toContain("不安：41（標準）");
+    const prompt = promptText();
+    expect(prompt).toContain("喜び：40（低い）");
+    expect(prompt).toContain("不安：41（標準）");
   });
 
   it("mood/perceptionのラベルが入る（境界値 80/81）", async () => {
@@ -294,52 +343,34 @@ describe("プロンプトに含まれる情報", () => {
       })
     );
 
-    const systemPrompt = mockedInvokeModel.mock.calls[0][0];
-    expect(systemPrompt).toContain("信頼：80（自覚している）");
-    expect(systemPrompt).toContain("好感：81（強く感じる）");
+    const prompt = promptText();
+    expect(prompt).toContain("信頼：80（自覚している）");
+    expect(prompt).toContain("好感：81（強く感じる）");
   });
 
-  it("eventsがある場合のみ【発生イベント】が入る", async () => {
-    const withEvents = await runDialogueGeneratorAndGetPrompt(baseReq({ events: ["雨が降った"] }));
-    expect(withEvents).toContain("【発生イベント】");
-    expect(withEvents).toContain("雨が降った");
-
-    const without = await runDialogueGeneratorAndGetPrompt(baseReq({ events: undefined }));
-    expect(without).not.toContain("【発生イベント】");
+  it("longTimeFlagが1のとき「さみしさ」の記述が入る", async () => {
+    await runDialogueGenerator(baseReq({ longTimeFlag: 1 }));
+    expect(promptText()).toContain("さみしさ");
   });
 
-  it("actionsがある場合のみ【直近の行動履歴】が入る", async () => {
-    const withActions = await runDialogueGeneratorAndGetPrompt(
-      baseReq({ actions: [{ startDatetime: "a", endDatetime: "b", action: "散歩", memo: "" }] })
-    );
-    expect(withActions).toContain("【直近の行動履歴】");
-    expect(withActions).toContain("散歩");
-
-    const without = await runDialogueGeneratorAndGetPrompt(baseReq({ actions: undefined }));
-    expect(without).not.toContain("【直近の行動履歴】");
-  });
-
-  it("longTimeFlagが1のとき「さみしさ」「よろこび」の記述が入る", async () => {
-    const withFlag = await runDialogueGeneratorAndGetPrompt(baseReq({ longTimeFlag: 1 }));
-    expect(withFlag).toContain("さみしさ");
-
-    const without = await runDialogueGeneratorAndGetPrompt(baseReq({ longTimeFlag: 0 }));
-    expect(without).not.toContain("さみしさ");
+  it("longTimeFlagが0（省略）のとき「さみしさ」の記述が入らない", async () => {
+    await runDialogueGenerator(baseReq({ longTimeFlag: 0 }));
+    expect(promptText()).not.toContain("さみしさ");
   });
 });
 
 describe("invokeModelの呼び出し", () => {
+  it("systemPromptは3要素の配列で渡る", async () => {
+    await runDialogueGenerator(baseReq());
+
+    const layers = mockedInvokeModel.mock.calls[0][0];
+    expect(Array.isArray(layers)).toBe(true);
+    expect((layers as string[])).toHaveLength(3);
+  });
+
   it("maxTokensは500", async () => {
     await runDialogueGenerator(baseReq());
 
     expect(mockedInvokeModel.mock.calls[0][2]).toBe(500);
   });
 });
-
-async function runDialogueGeneratorAndGetPrompt(req: DialogueGeneratorRequest): Promise<string> {
-  mockedInvokeModel.mockClear();
-  await runDialogueGenerator(req);
-  // invokeModel の systemPrompt は string | string[] だが、dialogueGenerator は現状文字列で渡している
-  // （層の配列にするのは absence-simulation-roadmap.md のフェーズ6）
-  return mockedInvokeModel.mock.calls[0][0] as string;
-}

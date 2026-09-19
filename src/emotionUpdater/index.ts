@@ -1,16 +1,15 @@
 // -------------------------------------------------------
 // emotionUpdater
-// イベント・アクション（プロセス1）またはプレイヤー発言（プロセス2）を
-// インプットとしてキャラクターの感情値・関係値を更新する。
+// process=1 は最新の不在期間の記録（DynamoDB から読む。D-022）、
+// process=2 はプレイヤー発言をインプットとしてキャラクターの感情値・関係値を更新する。
 // -------------------------------------------------------
 
-import Mustache from "mustache";
-
-import PROMPT_TEMPLATE from "./prompts/emotionUpdater.mustache";
+import { buildEmotionUpdaterPromptLayers } from "./prompt.js";
 import { invokeModelJson } from "../lib/bedrock.js";
-import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
+import { formatAbsenceRecordForPrompt } from "../lib/absenceRecordText.js";
 import {
   getCharacterState,
+  getLatestAbsenceRecord,
   saveCharacterState,
   DEFAULT_MOOD,
   DEFAULT_PERCEPTION,
@@ -22,45 +21,6 @@ import type {
   Mood,
   Perception,
 } from "../types.js";
-
-// -------------------------------------------------------
-// ラベルマップ
-// -------------------------------------------------------
-
-const MOOD_LABELS: Record<keyof Mood, string> = {
-  joy: "喜び",
-  anxiety: "不安",
-  angry: "怒り",
-  fatigue: "疲労",
-  confidence: "自信",
-  loneliness: "孤独感",
-};
-
-const PERCEPTION_LABELS: Record<keyof Perception, string> = {
-  trust: "信頼",
-  affection: "好感",
-  respect: "尊敬",
-  fear: "恐れ",
-  dependence: "依存",
-  familiarity: "親しみ",
-};
-
-function toLabel(value: number): string {
-  if (value <= 20) return "ほとんど感じない";
-  if (value <= 40) return "低い";
-  if (value <= 60) return "標準";
-  if (value <= 80) return "自覚している";
-  return "強く感じる";
-}
-
-function formatState(
-  obj: Record<string, number>,
-  labels: Record<string, string>
-): string {
-  return Object.entries(obj)
-    .map(([k, v]) => `・${labels[k] ?? k}：${v}（${toLabel(v)}）`)
-    .join("\n");
-}
 
 // -------------------------------------------------------
 // 公開関数
@@ -75,50 +35,31 @@ export async function runEmotionUpdater(
   const { mood: currentMood, perception: currentPerception } =
     await getCharacterState(characterId);
 
-  // インプットテキストを組み立てる
   let inputText: string;
-  let perceptionRule: string;
 
   if (req.process === 1) {
-    // プロセス1: イベント・アクションがインプット
-    const eventsText =
-      req.events.length > 0
-        ? req.events.map((e, i) => `${i + 1}. ${e}`).join("\n")
-        : "（なし）";
-    const actionsText =
-      req.actions.length > 0
-        ? req.actions
-            .map(
-              (a) =>
-                `・${a.startDatetime.slice(0, 16)} 〜 ${a.endDatetime.slice(0, 16)}: ${a.action}（${a.memo}）`
-            )
-            .join("\n")
-        : "（なし）";
+    // process=1: 最新の不在期間の記録を読む（D-022）。記録が無ければ LLM を呼ばず現在の状態を返す
+    const record = await getLatestAbsenceRecord(characterId);
+    if (!record) {
+      console.log(`[emotionUpdater] no absence record for characterId=${characterId}, skip`);
+      return { mood: currentMood, perception: currentPerception };
+    }
 
-    inputText = `【不在中の出来事】\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
-    perceptionRule =
-      "- 関係値（perception）はプレイヤー不在中の出来事なので、大きく変化しないよう差分を小さく抑えること（目安: ±0〜3）";
+    const { periodText, eventsText, actionsText } = formatAbsenceRecordForPrompt(record, world.timezone);
+    inputText = `【不在中の出来事】（期間: ${periodText}）\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
   } else {
-    // プロセス2: プレイヤー発言がインプット
+    // process=2: プレイヤー発言がインプット
     inputText = `【プレイヤーの発言】\n${req.playerMessage}`;
-    perceptionRule =
-      "- 関係値（perception）もプレイヤーの発言に応じて適切に更新する（目安: ±1〜5）";
   }
 
-  const moodText = formatState(currentMood as unknown as Record<string, number>, MOOD_LABELS as Record<string, string>);
-  const perceptionText = formatState(currentPerception as unknown as Record<string, number>, PERCEPTION_LABELS as Record<string, string>);
-
-  const systemPrompt = Mustache.render(
-    PROMPT_TEMPLATE,
-    {
-      ...buildPromptContext(world, character),
-      moodText,
-      perceptionText,
-      inputText,
-      perceptionRule,
-    },
-    PROMPT_PARTIALS
-  );
+  const systemPrompt = buildEmotionUpdaterPromptLayers({
+    world,
+    character,
+    process: req.process,
+    currentMood,
+    currentPerception,
+    inputText,
+  });
 
   const fallback = { moodDelta: {}, perceptionDelta: {} };
   const delta = await invokeModelJson<{

@@ -137,7 +137,7 @@ describe("run*への引数の詰め替え", () => {
     expect(req.perception).toEqual(perception);
   });
 
-  it("eventsとactionsが配列 → そのまま渡る", async () => {
+  it("eventsとactionsを送っても、runDialogueGeneratorへの引数に含まれない（D-022で廃止）", async () => {
     const events = ["イベントA"];
     const actions = [
       { startDatetime: "s", endDatetime: "e", action: "行動", memo: "メモ" },
@@ -146,16 +146,8 @@ describe("run*への引数の詰め替え", () => {
     await handler(makeEvent({ characterId: "c1", events, actions }));
 
     const req = mockedRun.mock.calls[0][0] as DialogueGeneratorRequest;
-    expect(req.events).toEqual(events);
-    expect(req.actions).toEqual(actions);
-  });
-
-  it("eventsとactionsが配列でない（省略） → undefinedのまま渡る", async () => {
-    await handler(makeEvent({ characterId: "c1" }));
-
-    const req = mockedRun.mock.calls[0][0] as DialogueGeneratorRequest;
-    expect(req.events).toBeUndefined();
-    expect(req.actions).toBeUndefined();
+    expect(req).not.toHaveProperty("events");
+    expect(req).not.toHaveProperty("actions");
   });
 
   it("longTimeFlagを渡す → そのまま渡る", async () => {

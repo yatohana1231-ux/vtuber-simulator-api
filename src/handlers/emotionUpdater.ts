@@ -6,7 +6,7 @@
 import { runEmotionUpdater } from "../emotionUpdater/index.js";
 import { loadRequestedPackage } from "../lib/packages.js";
 import { createResponse, parseRequestBody } from "../lib/utils.js";
-import type { Action, EmotionUpdaterRequest } from "../types.js";
+import type { EmotionUpdaterRequest } from "../types.js";
 
 export const handler = async (event: unknown): Promise<unknown> => {
   console.log("Received event:", JSON.stringify(event));
@@ -37,8 +37,6 @@ export const handler = async (event: unknown): Promise<unknown> => {
             world,
             character,
             process: 1,
-            events: Array.isArray(body.events) ? (body.events as string[]) : [],
-            actions: Array.isArray(body.actions) ? (body.actions as Action[]) : [],
           }
         : {
             characterId,

@@ -4,7 +4,8 @@
 
 | テストファイル | 対象 | 内容 |
 |---|---|---|
-| `utils.test.ts` | `src/lib/utils.ts` | `formatDatetimeJST` / `parseRequestBody` / `clamp` / `createResponse` |
+| `utils.test.ts` | `src/lib/utils.ts` | `parseRequestBody` / `clamp` / `createResponse` |
+| `absenceRecordText.test.ts` | `src/lib/absenceRecordText.ts` | `formatAbsenceRecordForPrompt`: 期間の表記（タイムゾーンの変換・日付またぎ）、出来事の2行形式と番号（`kind`・`threadId` は出さない）、行動の `memo` あり/なし、open の話題だけを出すこと、各項目が0件のときの「（なし）」、`/` がエスケープされないこと |
 | `timezone.test.ts` | `src/lib/timezone.ts` | `getLocalParts`（Asia/Tokyo での日付の繰り上がりと曜日）、`localTimeToInstant`（JST→UTC、`day` の範囲外〔月末・前月末・年末〕の繰り上がり/繰り下がり、往復変換、America/New_York の冬時間・夏時間）、`formatLocalDateTime`（曜日・ゼロ埋め・日付の繰り上がり） |
 | `random.test.ts` | `src/lib/random.ts` | `weightedPick`: 乱数の境界（0 → 先頭、1未満の最大付近 → 末尾）、重みの比に応じた区間、重み0・負の要素を選ばないこと、浮動小数の誤差時のフォールバック、空配列・重みの合計が0以下で例外 |
 | `bedrock.test.ts` | `src/lib/bedrock.ts` | `invokeModel`（`BedrockRuntimeClient.prototype.send` を `vi.spyOn` で差し替え。content の連結・trim、output なしの空文字、`ConverseCommand` の input）と `invokeModelJson`（フェンス付き／裸／説明文付き裸の JSON のパース、JSON なし・壊れた JSON での fallback）。システムプロンプトを層の配列で渡したときの `cachePoint` の位置（2層・3層、空の層、最大4つ）、`PROMPT_CACHE_ENABLED=false` で区切りなし、`invokeModelJson` でも同じ、usage のログ（無い応答でも落ちない） |

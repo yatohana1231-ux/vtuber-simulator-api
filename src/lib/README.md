@@ -7,8 +7,9 @@
 | `bedrock.ts` | Bedrock Converse API のラッパー。`invokeModel`（テキスト）と `invokeModelJson`（応答から JSON を抽出し、失敗時は既定値）。システムプロンプトは文字列1つか、変わりにくい順の層の配列で渡す。配列のときは層の境目にプロンプトキャッシュの区切り（`cachePoint`、最大4つ）を入れる（D-017。環境変数 `PROMPT_CACHE_ENABLED=false` で無効）。応答のトークン数（キャッシュの読み書きを含む）をログに出す |
 | `dynamo.ts` | DynamoDB（会話ログ／キャラクター記憶・状態／イベント）へのアクセスを集約。重要記憶は `getRelevantMemories(characterId, ...)` で重要度・新しさ・タグ一致により上位件数だけを返す。不在期間の記録は `saveAbsenceRecord`（イベントテーブルの履歴とキャラクター記憶テーブルの `absence-latest` をトランザクションで同時に保存）・`getLatestAbsenceRecord`（強い整合性で最新1件）・`getRecentAbsenceRecords`（GSI から直近 N 件、旧形式は読み飛ばす）。不在期間の記録の関数は、まだどのエンドポイントからも使っていない |
 | `packages.ts` | `packageId` からキャラクター×世界観×生活様式パッケージ（`api/content/`）を読み込む。ID 検証、コンテナ内キャッシュ、口調の例文の件数制限（最大5件）、`world.timezone`・`lifestyle`（生活リズム・出来事の種類）の形式検証を行う |
-| `utils.ts` | リクエストボディのパース、レスポンス生成、JST 日時整形、値のクランプ |
+| `utils.ts` | リクエストボディのパース、レスポンス生成、値のクランプ（日時の表記は `timezone.ts` の `formatLocalDateTime`。2026-09-19 に `formatDatetimeJST` を削除） |
 | `timezone.ts` | IANA タイムゾーンでの壁時計と瞬間の相互変換（`getLocalParts` / `localTimeToInstant`）。`Intl.DateTimeFormat` だけで実装し、DST のあるタイムゾーンにも対応する。`localTimeToInstant` の `day` は範囲外（0 や 32）でも暦を繰り上げ/繰り下げて扱う。`formatLocalDateTime` はプロンプト用の表記（`2026/09/18(金) 07:00`） |
+| `absenceRecordText.ts` | `formatAbsenceRecordForPrompt(record, timeZone)` — 不在期間の記録を、後段の3機能（`dialogueGenerator`・`emotionUpdater`・`memoryRetriever`）のプロンプト用の文章（期間・出来事・行動・続いている話題）にする（D-022） |
 | `random.ts` | `weightedPick(items, weightOf)` — 重み付きで1つ選ぶ（`Math.random` を使う。重み0以下の要素は選ばない。空配列・重みの合計が0以下なら例外） |
 
 ## 注意

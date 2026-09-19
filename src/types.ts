@@ -246,13 +246,12 @@ export interface AbsenceSimulatorResult {
   actions: Action[];
 }
 
+/** process=1（ログイン時）。入力は最新の不在期間の記録で、DynamoDB から読む（D-022） */
 export interface EmotionUpdaterRequestProcess1 {
   characterId: string;
   world: World;
   character: CharacterDefinition;
   process: 1;
-  events: string[];
-  actions: Action[];
 }
 
 export interface EmotionUpdaterRequestProcess2 {
@@ -272,13 +271,12 @@ export interface EmotionUpdaterResponse {
   perception: Perception;
 }
 
+/** process=1（ログイン時）。入力は最新の不在期間の記録で、DynamoDB から読む（D-022） */
 export interface MemoryRetrieverRequestProcess1 {
   characterId: string;
   world: World;
   character: CharacterDefinition;
   process: 1;
-  events: string[];
-  actions: Action[];
 }
 
 export interface MemoryRetrieverRequestProcess2 {
@@ -300,9 +298,7 @@ export interface DialogueGeneratorRequest {
   message: string; // 空文字の場合はプレイヤー不在時の代替テキストを内部で使用
   mood?: Mood; // 未指定時は DynamoDB から取得
   perception?: Perception; // 未指定時は DynamoDB から取得
-  events?: string[];
-  actions?: Action[];
-  longTimeFlag?: 0 | 1;
+  longTimeFlag?: 0 | 1; // 不在期間の出来事・行動は最新の記録を DynamoDB から読む（D-022）
 }
 
 export interface DialogueGeneratorResponse {

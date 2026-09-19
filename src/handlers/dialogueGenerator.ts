@@ -6,12 +6,7 @@
 import { runDialogueGenerator } from "../dialogueGenerator/index.js";
 import { loadRequestedPackage } from "../lib/packages.js";
 import { createResponse, parseRequestBody } from "../lib/utils.js";
-import type {
-  Action,
-  DialogueGeneratorRequest,
-  Mood,
-  Perception,
-} from "../types.js";
+import type { DialogueGeneratorRequest, Mood, Perception } from "../types.js";
 
 export const handler = async (event: unknown): Promise<unknown> => {
   console.log("Received event:", JSON.stringify(event));
@@ -42,8 +37,6 @@ export const handler = async (event: unknown): Promise<unknown> => {
       message: (body.message as string) ?? "",
       mood: body.mood as Mood | undefined,
       perception: body.perception as Perception | undefined,
-      events: Array.isArray(body.events) ? (body.events as string[]) : undefined,
-      actions: Array.isArray(body.actions) ? (body.actions as Action[]) : undefined,
       longTimeFlag: body.longTimeFlag as 0 | 1 | undefined,
     };
 

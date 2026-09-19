@@ -4,9 +4,9 @@
 
 | ファイル | 内容 | 使っているテンプレート |
 |---|---|---|
-| `world.mustache` | 世界観（説明・ルール・存在しない要素） | 5つすべて（`{{> world}}`） |
-| `speechExamples.mustache` | 口調の例文（few-shot）。例文が0件ならブロックごと出力しない | `dialogueGenerator/prompts/conversation.mustache`（`{{> speechExamples}}`） |
-| `index.ts` | `PROMPT_PARTIALS`（`Mustache.render` の第3引数に渡すパーシャル一覧）と `buildPromptContext(world, character)`（テンプレートの view に展開する値） | 5つの機能の `index.ts` |
+| `world.mustache` | 世界観（説明・ルール・存在しない要素） | 各機能の固定部のテンプレートすべて（`{{> world}}`） |
+| `speechExamples.mustache` | 口調の例文（few-shot）。例文が0件ならブロックごと出力しない | `dialogueGenerator/prompts/conversation.fixed.mustache`（`{{> speechExamples}}`） |
+| `index.ts` | `PROMPT_PARTIALS`（`Mustache.render` の第3引数に渡すパーシャル一覧）と `buildPromptContext(world, character)`（テンプレートの view に展開する値） | 各機能の `prompt.ts`（プロンプトの層を組み立てる処理） |
 
 ## 使い方
 

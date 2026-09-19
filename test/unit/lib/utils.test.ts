@@ -1,28 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  formatDatetimeJST,
   parseRequestBody,
   clamp,
   createResponse,
 } from "../../../src/lib/utils.js";
-
-describe("formatDatetimeJST", () => {
-  it("UTCのISO文字列を渡す → JST(+9h)のyyyy/mm/dd hh:mmになる", () => {
-    expect(formatDatetimeJST("2026-08-10T10:00:00.000Z")).toBe(
-      "2026/08/10 19:00"
-    );
-  });
-
-  it("UTCで日付をまたぐ時刻を渡す → JSTで日付が繰り上がる", () => {
-    expect(formatDatetimeJST("2026-08-10T20:00:00.000Z")).toBe(
-      "2026/08/11 05:00"
-    );
-  });
-
-  it("空文字を渡す → （日時不明）になる", () => {
-    expect(formatDatetimeJST("")).toBe("（日時不明）");
-  });
-});
 
 describe("parseRequestBody", () => {
   it("API Gateway形式（bodyがJSON文字列）を渡す → パース済みのオブジェクトを返す", () => {

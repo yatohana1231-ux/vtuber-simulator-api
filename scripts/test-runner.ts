@@ -6,14 +6,17 @@
  *
  * プロセス:
  *   absenceSimulator   - 不在期間のシミュレーション（出来事・行動・続きの話題の生成）
- *   emotionUpdater     - 感情更新（プロセス1 or 2）
- *   memoryRetriever    - 重要記憶判定（プロセス1 or 2）
+ *   emotionUpdater     - 感情更新（プロセス1 or 2）。プロセス1は DynamoDB の最新の不在期間の記録を読む
+ *                        （D-022）。単独ステージで実行したとき、記録が無ければ何もしない（LLM を呼ばず
+ *                        現在の状態を返す。事前に absenceSimulator ステージを実行しておくこと）
+ *   memoryRetriever    - 重要記憶判定（プロセス1 or 2）。プロセス1は DynamoDB の最新の不在期間の記録を読む
+ *                        （D-022）。単独ステージで実行したとき、記録が無ければ何もしない
  *   dialogueGenerator  - 会話生成
  *   all                - プロセス1相当の全パイプライン
  *                        （absenceSimulator→emotionUpdater→memoryRetriever→dialogueGenerator）
  *                        ※エンドポイント分割後、この呼び出し順序を決めるのはフロント側の責務になる。
- *                          このコマンドは各エンドポイント間で受け渡すデータの流れをテストするために、
- *                          その順序を関数直呼びで再現している。
+ *                          後段の3機能は DB に保存された最新の不在期間の記録を読むので、
+ *                          absenceSimulator → 後段の順に呼ぶだけでよい（events/actions の中継は不要）。
  *
  * 環境変数（.env or 直接指定）:
  *   BEDROCK_MODEL_ID, CHARACTER_MEMORY_TABLE, CONVERSATION_LOGS_TABLE, EVENTS_TABLE, AWS_REGION,
@@ -43,7 +46,7 @@ import { runEmotionUpdater } from "../src/emotionUpdater/index.js";
 import { runMemoryRetriever } from "../src/memoryRetriever/index.js";
 import { runDialogueGenerator } from "../src/dialogueGenerator/index.js";
 import { DEFAULT_PACKAGE_ID, loadPackage } from "../src/lib/packages.js";
-import type { AbsenceSimulatorRequest, AbsenceSimulatorResult } from "../src/types.js";
+import type { AbsenceSimulatorRequest } from "../src/types.js";
 
 // -------------------------------------------------------
 // CLI 引数パース
@@ -71,8 +74,9 @@ Usage: npx tsx scripts/test-runner.ts <process> [options]
 
 Processes:
   absenceSimulator   不在期間のシミュレーション（出来事・行動・続きの話題の生成）
-  emotionUpdater     感情更新
-  memoryRetriever    重要記憶判定
+  emotionUpdater     感情更新。プロセス1は DynamoDB の最新の不在期間の記録を読む（無ければ何もしない。
+                     先に absenceSimulator ステージを実行しておくこと）
+  memoryRetriever    重要記憶判定。プロセス1は DynamoDB の最新の不在期間の記録を読む（無ければ何もしない）
   dialogueGenerator  会話生成
   all                プロセス1相当の全パイプライン（フロント側オーケストレーションの再現）
 
@@ -120,15 +124,6 @@ function buildAbsenceSimulatorRequest(): AbsenceSimulatorRequest {
   };
 }
 
-/**
- * absenceSimulator の結果（events: AbsenceEvent[]）を、emotionUpdater/memoryRetriever が
- * まだ受け取る「events: string[]」形式につなぐ（summary と detail をつないだ文字列）。
- * 次のフェーズで後段が最新の記録を DB から読むようになったら削除する。
- */
-function toLegacyEventTexts(events: AbsenceSimulatorResult["events"]): string[] {
-  return events.map((e) => `${e.summary} ${e.detail}`);
-}
-
 // -------------------------------------------------------
 // 実行
 // -------------------------------------------------------
@@ -153,15 +148,16 @@ async function main() {
     case "emotionUpdater": {
       const proc = parseInt(values.process!, 10) as 1 | 2;
       if (proc === 1) {
-        console.log("[test-runner] running absenceSimulator first...");
-        const absenceResult = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
+        console.log(
+          "[test-runner] process1 reads the latest absence record from DynamoDB. " +
+            "If none exists for this characterId, run the absenceSimulator stage first " +
+            "(it will do nothing here otherwise)."
+        );
         const result = await runEmotionUpdater({
           characterId,
           world,
           character,
           process: 1,
-          events: toLegacyEventTexts(absenceResult.events),
-          actions: absenceResult.actions,
         });
         console.log("\n[RESULT] emotionUpdater (process1):");
         console.log(JSON.stringify(result, null, 2));
@@ -183,15 +179,16 @@ async function main() {
     case "memoryRetriever": {
       const proc = parseInt(values.process!, 10) as 1 | 2;
       if (proc === 1) {
-        console.log("[test-runner] running absenceSimulator first...");
-        const absenceResult = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
+        console.log(
+          "[test-runner] process1 reads the latest absence record from DynamoDB. " +
+            "If none exists for this characterId, run the absenceSimulator stage first " +
+            "(it will do nothing here otherwise)."
+        );
         await runMemoryRetriever({
           characterId,
           world,
           character,
           process: 1,
-          events: toLegacyEventTexts(absenceResult.events),
-          actions: absenceResult.actions,
         });
         console.log("\n[RESULT] memoryRetriever (process1): done (check DynamoDB)");
       } else {
@@ -209,8 +206,6 @@ async function main() {
         character,
         now: nowIso,
         message: values.message!,
-        events: [],
-        actions: [],
         longTimeFlag,
       });
       console.log("\n[RESULT] dialogueGenerator:");
@@ -222,16 +217,15 @@ async function main() {
       console.log("\n--- [1/4] absenceSimulator ---");
       const absenceResult = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
       console.log(JSON.stringify(absenceResult, null, 2));
-      const legacyEvents = toLegacyEventTexts(absenceResult.events);
 
+      // absenceSimulator が保存した最新の記録を、後段の3機能が DynamoDB から読む（D-022）。
+      // events/actions をここで中継する必要はない。
       console.log("\n--- [2/4] emotionUpdater ---");
       const { mood, perception } = await runEmotionUpdater({
         characterId,
         world,
         character,
         process: 1,
-        events: legacyEvents,
-        actions: absenceResult.actions,
       });
       console.log(JSON.stringify({ mood, perception }, null, 2));
 
@@ -241,8 +235,6 @@ async function main() {
         world,
         character,
         process: 1,
-        events: legacyEvents,
-        actions: absenceResult.actions,
       });
       console.log("done");
 
@@ -256,8 +248,6 @@ async function main() {
         message: values.message!,
         mood,
         perception,
-        events: legacyEvents,
-        actions: absenceResult.actions,
         longTimeFlag,
       });
       console.log(reply);

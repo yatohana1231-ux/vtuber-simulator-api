@@ -10,14 +10,22 @@ vi.mock("../../../src/lib/dynamo.js", async (importOriginal) => {
     ...actual,
     getCharacterState: vi.fn(),
     saveCharacterState: vi.fn(),
+    getLatestAbsenceRecord: vi.fn(),
   };
 });
 
 import { runEmotionUpdater } from "../../../src/emotionUpdater/index.js";
 import { invokeModelJson } from "../../../src/lib/bedrock.js";
-import { getCharacterState, saveCharacterState, DEFAULT_MOOD, DEFAULT_PERCEPTION } from "../../../src/lib/dynamo.js";
+import {
+  getCharacterState,
+  saveCharacterState,
+  getLatestAbsenceRecord,
+  DEFAULT_MOOD,
+  DEFAULT_PERCEPTION,
+} from "../../../src/lib/dynamo.js";
+import { formatLocalDateTime } from "../../../src/lib/timezone.js";
 import type {
-  Action,
+  AbsenceRecord,
   CharacterDefinition,
   EmotionUpdaterRequest,
   Mood,
@@ -28,6 +36,7 @@ import type {
 const mockedInvokeModelJson = vi.mocked(invokeModelJson);
 const mockedGetCharacterState = vi.mocked(getCharacterState);
 const mockedSaveCharacterState = vi.mocked(saveCharacterState);
+const mockedGetLatestAbsenceRecord = vi.mocked(getLatestAbsenceRecord);
 
 const world: World = {
   key: "test-world",
@@ -54,8 +63,6 @@ function process1Req(overrides: Partial<EmotionUpdaterRequest> = {}): EmotionUpd
     world,
     character,
     process: 1,
-    events: [],
-    actions: [],
     ...overrides,
   } as EmotionUpdaterRequest;
 }
@@ -71,12 +78,40 @@ function process2Req(overrides: Partial<EmotionUpdaterRequest> = {}): EmotionUpd
   } as EmotionUpdaterRequest;
 }
 
+function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
+  return {
+    event_id: "event-1",
+    characterId: "char-1",
+    createdAt: "2026-08-11T08:00:00.000Z",
+    startDatetime: "2026-08-11T00:00:00.000Z",
+    endDatetime: "2026-08-11T08:00:00.000Z",
+    events: [{ kind: "daily", summary: "雨が降った", detail: "傘を忘れて濡れた" }],
+    actions: [
+      {
+        startDatetime: "2026-08-11T06:00:00.000Z",
+        endDatetime: "2026-08-11T07:00:00.000Z",
+        action: "朝食を食べた",
+        memo: "眠そう",
+      },
+    ],
+    threads: [],
+    ...overrides,
+  };
+}
+
+/** invokeModelJson に渡ったシステムプロンプト（層の配列）を1つの文字列に結合して返す */
+function joinedPrompt(callIndex = 0): string {
+  const systemPrompt = mockedInvokeModelJson.mock.calls[callIndex][0];
+  return Array.isArray(systemPrompt) ? systemPrompt.join("\n") : systemPrompt;
+}
+
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 
   mockedGetCharacterState.mockResolvedValue({ mood: { ...DEFAULT_MOOD }, perception: { ...DEFAULT_PERCEPTION } });
   mockedSaveCharacterState.mockResolvedValue(undefined);
+  mockedGetLatestAbsenceRecord.mockResolvedValue(absenceRecord());
   mockedInvokeModelJson.mockImplementation(async (_systemPrompt, _userMessage, fallback) => fallback);
 });
 
@@ -217,25 +252,64 @@ describe("saveCharacterStateへの保存", () => {
   });
 });
 
-describe("process1: イベント・行動と変化幅のルール", () => {
-  it("eventsとactionsの内容、「±0〜3」のルールがプロンプトに入る", async () => {
-    const actions: Action[] = [
-      { startDatetime: "2026-08-11T06:00:00.000Z", endDatetime: "2026-08-11T07:00:00.000Z", action: "朝食を食べた", memo: "眠そう" },
-    ];
-    await runEmotionUpdater(process1Req({ events: ["雨が降った"], actions }));
+describe("process1: 最新の不在期間の記録（D-022）", () => {
+  it("記録が無い → LLMを呼ばず、保存もせず、現在の状態をそのまま返す", async () => {
+    mockedGetLatestAbsenceRecord.mockResolvedValue(null);
+    const currentMood: Mood = { joy: 35, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 };
+    const currentPerception: Perception = { trust: 72, affection: 55, respect: 80, fear: 12, dependence: 30, familiarity: 65 };
+    mockedGetCharacterState.mockResolvedValue({ mood: currentMood, perception: currentPerception });
 
-    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
-    expect(systemPrompt).toContain("雨が降った");
-    expect(systemPrompt).toContain("朝食を食べた");
-    expect(systemPrompt).toContain("±0〜3");
+    const result = await runEmotionUpdater(process1Req());
+
+    expect(mockedInvokeModelJson).not.toHaveBeenCalled();
+    expect(mockedSaveCharacterState).not.toHaveBeenCalled();
+    expect(result.mood).toEqual(currentMood);
+    expect(result.perception).toEqual(currentPerception);
   });
 
-  it("eventsもactionsも空 → 「（なし）」が入る", async () => {
-    await runEmotionUpdater(process1Req({ events: [], actions: [] }));
+  it("記録がある → characterIdでgetLatestAbsenceRecordが呼ばれる", async () => {
+    await runEmotionUpdater(process1Req({ characterId: "char-xyz" }));
+
+    expect(mockedGetLatestAbsenceRecord).toHaveBeenCalledWith("char-xyz");
+  });
+
+  it("記録の出来事のsummary・detailと、「±0〜3」のルールがプロンプトに入る", async () => {
+    mockedGetLatestAbsenceRecord.mockResolvedValue(
+      absenceRecord({ events: [{ kind: "daily", summary: "雨が降った", detail: "傘を忘れて濡れた" }] })
+    );
+
+    await runEmotionUpdater(process1Req());
+
+    const prompt = joinedPrompt();
+    expect(prompt).toContain("雨が降った");
+    expect(prompt).toContain("傘を忘れて濡れた");
+    expect(prompt).toContain("±0〜3");
+  });
+
+  it("記録の行動の日時が、世界観のタイムゾーン表記で入る（UTCのslice(0,16)ではない）", async () => {
+    const action = {
+      startDatetime: "2026-08-11T06:00:00.000Z",
+      endDatetime: "2026-08-11T07:00:00.000Z",
+      action: "朝食を食べた",
+      memo: "眠そう",
+    };
+    mockedGetLatestAbsenceRecord.mockResolvedValue(absenceRecord({ actions: [action] }));
+
+    await runEmotionUpdater(process1Req());
+
+    const prompt = joinedPrompt();
+    const start = formatLocalDateTime(new Date(action.startDatetime), world.timezone);
+    const end = formatLocalDateTime(new Date(action.endDatetime), world.timezone);
+    expect(prompt).toContain(`${start}〜${end} ${action.action}（${action.memo}）`);
+    expect(prompt).not.toContain(action.startDatetime.slice(0, 16));
+  });
+
+  it("invokeModelJsonに層の配列（[固定部, 可変部]）が渡る", async () => {
+    await runEmotionUpdater(process1Req());
 
     const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
-    expect(systemPrompt).toContain("【不在中の出来事】\n（なし）");
-    expect(systemPrompt).toContain("【不在中の行動】\n（なし）");
+    expect(Array.isArray(systemPrompt)).toBe(true);
+    expect(systemPrompt).toHaveLength(2);
   });
 });
 
@@ -243,9 +317,15 @@ describe("process2: プレイヤー発言と変化幅のルール", () => {
   it("プレイヤーの発言、「±1〜5」のルールがプロンプトに入る", async () => {
     await runEmotionUpdater(process2Req({ playerMessage: "今日は調子どう？" }));
 
-    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
-    expect(systemPrompt).toContain("今日は調子どう？");
-    expect(systemPrompt).toContain("±1〜5");
+    const prompt = joinedPrompt();
+    expect(prompt).toContain("今日は調子どう？");
+    expect(prompt).toContain("±1〜5");
+  });
+
+  it("getLatestAbsenceRecordを呼ばない", async () => {
+    await runEmotionUpdater(process2Req());
+
+    expect(mockedGetLatestAbsenceRecord).not.toHaveBeenCalled();
   });
 });
 
@@ -258,9 +338,9 @@ describe("mood/perceptionのラベルと段階", () => {
 
     await runEmotionUpdater(process1Req());
 
-    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
-    expect(systemPrompt).toContain("喜び：20（ほとんど感じない）");
-    expect(systemPrompt).toContain("不安：21（低い）");
+    const prompt = joinedPrompt();
+    expect(prompt).toContain("喜び：20（ほとんど感じない）");
+    expect(prompt).toContain("不安：21（低い）");
   });
 
   it("境界値 60/61 → 「標準」から「自覚している」に切り替わる", async () => {
@@ -271,9 +351,9 @@ describe("mood/perceptionのラベルと段階", () => {
 
     await runEmotionUpdater(process1Req());
 
-    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0];
-    expect(systemPrompt).toContain("喜び：60（標準）");
-    expect(systemPrompt).toContain("不安：61（自覚している）");
+    const prompt = joinedPrompt();
+    expect(prompt).toContain("喜び：60（標準）");
+    expect(prompt).toContain("不安：61（自覚している）");
   });
 });
 

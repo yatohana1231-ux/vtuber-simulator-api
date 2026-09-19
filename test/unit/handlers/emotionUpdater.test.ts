@@ -108,7 +108,7 @@ describe("run*への引数の詰め替え", () => {
   });
 
   describe("process 1", () => {
-    it("eventsとactionsが配列 → そのまま渡る", async () => {
+    it("eventsとactionsが送られても、runEmotionUpdaterへの引数に渡らない", async () => {
       const events = ["イベントA"];
       const actions = [
         { startDatetime: "s", endDatetime: "e", action: "行動", memo: "メモ" },
@@ -118,16 +118,9 @@ describe("run*への引数の詰め替え", () => {
       );
 
       const req = mockedRun.mock.calls[0][0] as EmotionUpdaterRequestProcess1;
-      expect(req.events).toEqual(events);
-      expect(req.actions).toEqual(actions);
-    });
-
-    it("eventsとactionsが配列でない（省略） → 空配列が渡る", async () => {
-      await handler(makeEvent({ characterId: "c1", process: 1 }));
-
-      const req = mockedRun.mock.calls[0][0] as EmotionUpdaterRequestProcess1;
-      expect(req.events).toEqual([]);
-      expect(req.actions).toEqual([]);
+      expect(req).not.toHaveProperty("events");
+      expect(req).not.toHaveProperty("actions");
+      expect(req.process).toBe(1);
     });
   });
 

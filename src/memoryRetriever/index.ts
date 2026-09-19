@@ -1,7 +1,7 @@
 // -------------------------------------------------------
 // memoryRetriever
-// イベント・アクション（プロセス1）または会話ログ（プロセス2）を
-// Bedrock で重要度判定し、character_memory テーブルに保存する。
+// process=1 は最新の不在期間の記録（DynamoDB から読む。D-022）、
+// process=2 は会話ログを Bedrock で重要度判定し、character_memory テーブルに保存する。
 //
 // プロセス2では5往復ごとに判定。
 // 5往復未満の場合はスキップ。
@@ -9,19 +9,18 @@
 // -------------------------------------------------------
 
 import { randomUUID } from "crypto";
-import Mustache from "mustache";
 
-import PROMPT_TEMPLATE from "./prompts/memoryRetriever.mustache";
+import { buildMemoryRetrieverPromptLayers } from "./prompt.js";
 import { invokeModelJson } from "../lib/bedrock.js";
-import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
+import { formatAbsenceRecordForPrompt } from "../lib/absenceRecordText.js";
 import {
   getRelevantMemories,
+  getLatestAbsenceRecord,
   getLogsForMemoryJudge,
   markLogsAsJudged,
   saveMemory,
 } from "../lib/dynamo.js";
 import type {
-  Action,
   CharacterDefinition,
   MemoryCandidate,
   MemoryRetrieverRequest,
@@ -43,44 +42,29 @@ export async function runMemoryRetriever(
   const { characterId, world, character } = req;
 
   if (req.process === 1) {
-    await judgeProcess1(characterId, world, character, req.events, req.actions);
+    await judgeProcess1(characterId, world, character);
   } else {
     await judgeProcess2(characterId, world, character);
   }
 }
 
 // -------------------------------------------------------
-// プロセス1: イベント・アクションを判定
+// プロセス1: 最新の不在期間の記録を判定（D-022）
 // -------------------------------------------------------
 
 async function judgeProcess1(
   characterId: string,
   world: World,
-  character: CharacterDefinition,
-  events: string[],
-  actions: Action[]
+  character: CharacterDefinition
 ): Promise<void> {
-  if (events.length === 0 && actions.length === 0) {
-    console.log("[memoryRetriever] no events/actions to judge");
+  const record = await getLatestAbsenceRecord(characterId);
+  if (!record) {
+    console.log(`[memoryRetriever] no absence record for characterId=${characterId}, skip`);
     return;
   }
 
-  const eventsText =
-    events.length > 0
-      ? events.map((e, i) => `${i + 1}. ${e}`).join("\n")
-      : "（なし）";
-
-  const actionsText =
-    actions.length > 0
-      ? actions
-          .map(
-            (a) =>
-              `・${a.startDatetime.slice(0, 16)} 〜 ${a.endDatetime.slice(0, 16)}: ${a.action}（${a.memo}）`
-          )
-          .join("\n")
-      : "（なし）";
-
-  const inputText = `【不在中の出来事】\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
+  const { periodText, eventsText, actionsText } = formatAbsenceRecordForPrompt(record, world.timezone);
+  const inputText = `【不在中の出来事】（期間: ${periodText}）\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
 
   await runJudgement(characterId, world, character, inputText);
 }
@@ -154,15 +138,12 @@ async function runJudgement(
           .join("\n")
       : "（なし）";
 
-  const systemPrompt = Mustache.render(
-    PROMPT_TEMPLATE,
-    {
-      ...buildPromptContext(world, character),
-      existingMemoriesText,
-      inputText,
-    },
-    PROMPT_PARTIALS
-  );
+  const systemPrompt = buildMemoryRetrieverPromptLayers({
+    world,
+    character,
+    existingMemoriesText,
+    inputText,
+  });
 
   const fallback: MemoryRetrieverResult = { candidates: [] };
   const result = await invokeModelJson<MemoryRetrieverResult>(
