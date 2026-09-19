@@ -94,8 +94,6 @@ async function callRunFunction(
         character,
         now: req.now ?? new Date().toISOString(),
         message: req.message,
-        mood: req.mood,
-        perception: req.perception,
         longTimeFlag: req.longTimeFlag,
       });
     }

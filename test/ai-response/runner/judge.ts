@@ -190,8 +190,9 @@ function buildAbsenceSimulatorSection(scenario: Scenario, result: RunResult, con
 function buildDialogueGeneratorSection(scenario: Scenario, result: RunResult, context: CheckContext): UserMessageSection {
   const req = scenario.request as Extract<ScenarioRequest, { message: string }>;
   const tz = context.world.timezone;
-  const mood = req.mood ?? scenario.state?.mood ?? DEFAULT_MOOD;
-  const perception = req.perception ?? scenario.state?.perception ?? DEFAULT_PERCEPTION;
+  // mood/perceptionはリクエストでは受け取らない（D-032）。初期値はscenario.stateで与える。
+  const mood = scenario.state?.mood ?? DEFAULT_MOOD;
+  const perception = scenario.state?.perception ?? DEFAULT_PERCEPTION;
   const memories = scenario.state?.memories ?? [];
   const logs = scenario.state?.conversationLogs ?? [];
   const absenceRecords = scenario.state?.absenceRecords ?? [];

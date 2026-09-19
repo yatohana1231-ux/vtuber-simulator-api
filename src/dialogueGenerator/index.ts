@@ -5,6 +5,8 @@
 //
 // D-022: リクエストの events/actions は廃止し、不在期間の出来事・行動は
 // 会話のたびに DynamoDB から最新の記録（getLatestAbsenceRecord）を読んで使う。
+// D-032: mood/perception もリクエストでは受け取らず、常に getCharacterState で
+// DynamoDB から読む（値はフロントが中継していたものと同じで、中継を無くしただけ）。
 // システムプロンプトは [固定部, セッション部, 可変部] の3層に分け、
 // 層の配列のまま invokeModel に渡す（プロンプトキャッシュ、D-017）。
 // -------------------------------------------------------
@@ -37,15 +39,6 @@ export async function runDialogueGenerator(
   const now = new Date(req.now);
   const longTimeFlag = req.longTimeFlag ?? 0;
 
-  // 感情・関係値を取得（引数未指定の場合は DynamoDB から）
-  let mood = req.mood;
-  let perception = req.perception;
-  if (!mood || !perception) {
-    const state = await getCharacterState(characterId);
-    mood = state.mood ?? { ...DEFAULT_MOOD };
-    perception = state.perception ?? { ...DEFAULT_PERCEPTION };
-  }
-
   // プレイヤーメッセージ（空欄の場合は代替テキスト）
   const playerMessage =
     req.message === "" ? "（プレイヤーが来た）" : req.message;
@@ -53,14 +46,17 @@ export async function runDialogueGenerator(
   // プレイヤー発言を会話ログに保存
   await saveConversationLog(characterId, "user", playerMessage, 0);
 
-  // 直近会話・重要記憶・最新の不在期間の記録を並行して取得
-  const [recentLogs, memories, latestAbsenceRecord] = await Promise.all([
+  // 感情・関係値・直近会話・重要記憶・最新の不在期間の記録を並行して取得
+  const [state, recentLogs, memories, latestAbsenceRecord] = await Promise.all([
+    getCharacterState(characterId),
     getRecentLogs(characterId, RECENT_LOG_LIMIT),
     getRelevantMemories(characterId, {
       queryText: req.message !== "" ? req.message : undefined,
     }),
     getLatestAbsenceRecord(characterId),
   ]);
+  const mood = state.mood ?? { ...DEFAULT_MOOD };
+  const perception = state.perception ?? { ...DEFAULT_PERCEPTION };
 
   // 直近会話の末尾は今保存した user ログなので除く
   const historyLogs = recentLogs.slice(0, -1);

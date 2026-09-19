@@ -73,8 +73,6 @@ function baseReq(overrides: Partial<DialogueGeneratorRequest> = {}): DialogueGen
     character,
     now: "2026-08-11T14:30:00.000Z",
     message: "こんにちは",
-    mood: { joy: 50, anxiety: 50, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
-    perception: { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
     ...overrides,
   };
 }
@@ -167,31 +165,28 @@ describe("messageがある場合", () => {
   });
 });
 
-describe("mood/perceptionの省略", () => {
-  it("両方指定 → getCharacterStateを呼ばない", async () => {
-    await runDialogueGenerator(baseReq());
-
-    expect(mockedGetCharacterState).not.toHaveBeenCalled();
-  });
-
-  it("moodのみ欠けている → getCharacterStateを呼び、その値を使う", async () => {
+describe("mood/perception（D-032: リクエストでは受け取らず常にDBから読む）", () => {
+  it("常にgetCharacterStateをcharacterIdで呼び、その値がプロンプトに入る", async () => {
     const stateMood = { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 };
-    mockedGetCharacterState.mockResolvedValue({ mood: stateMood, perception: { ...DEFAULT_PERCEPTION } });
+    const statePerception = { trust: 11, affection: 12, respect: 13, fear: 14, dependence: 15, familiarity: 16 };
+    mockedGetCharacterState.mockResolvedValue({ mood: stateMood, perception: statePerception });
 
-    await runDialogueGenerator(baseReq({ mood: undefined }));
+    await runDialogueGenerator(baseReq({ characterId: "char-xyz" }));
 
+    expect(mockedGetCharacterState).toHaveBeenCalledWith("char-xyz");
     expect(mockedGetCharacterState).toHaveBeenCalledTimes(1);
     expect(promptText()).toContain("喜び：1（ほとんど感じない）");
+    expect(promptText()).toContain("信頼：11（ほとんど感じない）");
   });
 
-  it("perceptionのみ欠けている → getCharacterStateを呼び、その値を使う", async () => {
-    const statePerception = { trust: 11, affection: 12, respect: 13, fear: 14, dependence: 15, familiarity: 16 };
-    mockedGetCharacterState.mockResolvedValue({ mood: { ...DEFAULT_MOOD }, perception: statePerception });
+  it("getCharacterStateがmood/perceptionを返さない場合 → 既定値(DEFAULT_MOOD/DEFAULT_PERCEPTION)が使われる", async () => {
+    mockedGetCharacterState.mockResolvedValue({} as unknown as Awaited<ReturnType<typeof getCharacterState>>);
 
-    await runDialogueGenerator(baseReq({ perception: undefined }));
+    await runDialogueGenerator(baseReq());
 
-    expect(mockedGetCharacterState).toHaveBeenCalledTimes(1);
-    expect(promptText()).toContain("信頼：11（ほとんど感じない）");
+    const prompt = promptText();
+    expect(prompt).toContain(`喜び：${DEFAULT_MOOD.joy}`);
+    expect(prompt).toContain(`信頼：${DEFAULT_PERCEPTION.trust}`);
   });
 });
 
@@ -325,11 +320,12 @@ describe("プロンプトに含まれる情報", () => {
   });
 
   it("mood/perceptionのラベルが入る（境界値 40/41）", async () => {
-    await runDialogueGenerator(
-      baseReq({
-        mood: { joy: 40, anxiety: 41, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
-      })
-    );
+    mockedGetCharacterState.mockResolvedValue({
+      mood: { joy: 40, anxiety: 41, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
+      perception: { ...DEFAULT_PERCEPTION },
+    });
+
+    await runDialogueGenerator(baseReq());
 
     const prompt = promptText();
     expect(prompt).toContain("喜び：40（低い）");
@@ -337,11 +333,12 @@ describe("プロンプトに含まれる情報", () => {
   });
 
   it("mood/perceptionのラベルが入る（境界値 80/81）", async () => {
-    await runDialogueGenerator(
-      baseReq({
-        perception: { trust: 80, affection: 81, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
-      })
-    );
+    mockedGetCharacterState.mockResolvedValue({
+      mood: { ...DEFAULT_MOOD },
+      perception: { trust: 80, affection: 81, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
+    });
+
+    await runDialogueGenerator(baseReq());
 
     const prompt = promptText();
     expect(prompt).toContain("信頼：80（自覚している）");

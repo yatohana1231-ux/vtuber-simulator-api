@@ -127,7 +127,7 @@ api/
 
 | 状況 | 条件 | 呼び出し順 |
 |---------|------|---------|
-| ログイン時・通常不在 | `message=""` かつ 3h <= 経過 < 2週間 | `/absence-simulator` → `/emotion-updater`(process=1) → `/memory-retriever`(process=1) → `/dialogue-generator` |
+| ログイン時・通常不在 | `message=""` かつ 3h <= 経過 < 2週間 | `/absence-simulator` → `/emotion-updater`(process=1) → `/dialogue-generator` → セリフを表示 → `/memory-retriever`(process=1)（セリフの生成は `/memory-retriever` の結果を使わないので、表示の後に回して待ち時間を縮める。D-032） |
 | ログイン時・長期不在 | `message=""` かつ 経過 >= 2週間 | 同上 + `longTimeFlag=1` を `/dialogue-generator` に渡す（孤独感・喜び表現を追加） |
 | ログイン時・短時間不在 | `message=""` かつ 経過 < 3h | どのAPIも呼ばない。固定挨拶をローカル表示 |
 | 会話メッセージ送信 | `message` に内容あり | `/dialogue-generator` → `/emotion-updater`(process=2) → `/memory-retriever`(process=2)（重要記憶判定は内部で5往復ごとにスキップ判定）。`/dialogue-generator` は毎回、最新の不在期間の記録を読むので、会話の途中でも不在中の出来事について話せる |
@@ -300,20 +300,20 @@ sequenceDiagram
     EU->>DB: saveCharacterState(updated)
     EU-->>Front: { mood, perception }
 
+    Front->>DG: POST { characterId, packageId, now, message:"", longTimeFlag }
+    DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
+    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories / getLatestAbsenceRecord（並行）
+    DG->>BK: invokeModel([固定部, 最新の記録, 可変部], "（プレイヤーが来た）")
+    DG->>DB: saveConversationLog(assistant, reply)
+    DG-->>Front: { reply }
+
+    Note over Front: reply を表示する（mood/perception は /emotion-updater の応答を使う。events/actions は表示に使ってもよい）
+
     Front->>MR: POST { characterId, packageId, process:1 }
     MR->>DB: getLatestAbsenceRecord / getRelevantMemories(広め)
     MR->>BK: invokeModelJson([固定部, 可変部], "重要度を判定")
     MR->>DB: saveMemory(重要記憶) [shouldRemember=true のみ]
     MR-->>Front: { ok: true }
-
-    Front->>DG: POST { characterId, packageId, now, message:"", mood, perception, longTimeFlag }
-    DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
-    DG->>DB: getRecentLogs(10) / getRelevantMemories / getLatestAbsenceRecord
-    DG->>BK: invokeModel([固定部, 最新の記録, 可変部], "（プレイヤーが来た）")
-    DG->>DB: saveConversationLog(assistant, reply)
-    DG-->>Front: { reply }
-
-    Note over Front: { reply, mood, perception } を画面表示用に組み立てる（events/actions は表示に使ってもよい）
 ```
 
 ### 会話メッセージ送信時の呼び出しシーケンス
@@ -328,10 +328,8 @@ sequenceDiagram
     participant DB as DynamoDB
 
     Front->>DG: POST { characterId, packageId, now, message }
-    Note over DG: mood/perception 省略時は DynamoDB から取得
-    DG->>DB: getCharacterState（mood/perception 省略時）
     DG->>DB: saveConversationLog(user, message)
-    DG->>DB: getRecentLogs(10) / getRelevantMemories(queryText=message) / getLatestAbsenceRecord
+    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories(queryText=message) / getLatestAbsenceRecord（並行）
     DG->>BK: invokeModel([固定部, 最新の記録, 可変部], message)
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
@@ -641,8 +639,6 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
   "packageId": "yui-modern-tokyo",
   "now": "2026-08-11T14:30:00",
   "message": "今日の配信、すごく良かったよ！",
-  "mood": { "...": "..." },
-  "perception": { "...": "..." },
   "longTimeFlag": 0
 }
 ```
@@ -650,9 +646,10 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 | フィールド | 型 | 必須 | 説明 |
 |-----------|------|------|------|
 | `message` | string | No | `""` の場合は「プレイヤーが来た」という代替テキストで生成（ログイン時のセリフ生成に使う） |
-| `mood` / `perception` | object | No | 省略時は DynamoDB の現在値を使用（会話メッセージ送信時、`emotion-updater` 呼び出し前に使うのが典型パターン） |
 | `longTimeFlag` | 0 or 1 | No | 省略時 0 |
 | `now` | string (ISO8601) | No | 現在日時（プロンプトの現在時刻）。省略時はサーバー現在時刻 |
+
+感情値・関係値（`mood`/`perception`）は、常に DynamoDB の現在値を使う。2026-09-19 にリクエストの `mood`/`perception` を廃止した（D-032。送られてきても無視する）。
 
 **レスポンス**: `{ "reply": "え、本当ですか！？ありがとうございます！実は結構緊張してたんですけど..." }`
 
@@ -669,10 +666,10 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 呼び出し順序の詳細は「リクエスト処理フロー」を参照。実装上の注意点:
 
-1. 前段のレスポンスを後段に渡す必要はない。不在期間の記録は `/absence-simulator` が保存し、後段が DynamoDB から読む（`mood`/`perception` だけは `/dialogue-generator` に渡すこともできる。省略時は DynamoDB から読む）
+1. 前段のレスポンスを後段に渡す必要はない。不在期間の記録は `/absence-simulator` が保存し、後段が DynamoDB から読む（`mood`/`perception` も同じで、`/dialogue-generator` は常に DynamoDB から読む。D-032）
 2. `characterId` はフロントが「ユーザー×パッケージ」ごとに発番し、そのパッケージで遊ぶ間はすべてのリクエストで使い回す。パッケージを切り替えるときは新しい `characterId` を発番する。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない
 3. アプリ終了時の時刻を `lastLoginAt` としてローカル保存し、次回起動時に送信する
-4. ログイン時（不在3時間以上）は4回のAPI呼び出しが直列に発生するため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
+4. ログイン時（不在3時間以上）はセリフの表示までに3回のAPI呼び出しが直列に発生する（`/memory-retriever` はセリフの表示の後）ため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
 5. 不在3時間未満の場合はどのエンドポイントも呼ばず、直前に表示していた mood/perception をそのまま維持する（固定デフォルト値を返す挙動は廃止）
 
 ## ビルド・デプロイ

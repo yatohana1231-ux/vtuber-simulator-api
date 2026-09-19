@@ -18,7 +18,7 @@
 | `absenceSimulator.test.ts` | `src/handlers/absenceSimulator.ts` | `characterId` 未指定・`lastLoginAt`/`now` の日時フォーマット不正・不明な `packageId`（存在しない ID／形式不正）で 400、`packageId` 省略時の既定パッケージの受け渡し、`lastLoginAt` 省略時は `now` と同値、両方が ISO8601 文字列に正規化されて渡ること、`now` 省略時はサーバー現在時刻、成功時は `runAbsenceSimulator` の結果がそのまま 200 の body になること、例外時は 500 で `errorName`/`errorMessage`。加えて、`now` が `lastLoginAt` より前なら 400（同時刻は 200）、`lastLoginAt` だけ指定して `now` 省略時に `lastLoginAt` が未来なら 400、`run*` に既定パッケージの `lifestyle` と `timezone` を持つ `world` が渡ること |
 | `emotionUpdater.test.ts` | `src/handlers/emotionUpdater.ts` | `characterId` 未指定・`process` が 1/2 以外（未指定・3・文字列 `"1"`）で 400、process1 では `events`/`actions` が送られても `run*` に渡らないこと（記録は DB から読む。D-022）、process2 での `playerMessage`（省略時は空文字）、成功時 body は `{ mood, perception }` |
 | `memoryRetriever.test.ts` | `src/handlers/memoryRetriever.ts` | `characterId`/`process` の入力チェックは同上、process1・process2 とも `events`/`actions` が送られても `run*` に渡らないこと、成功時 body は常に `{ ok: true }`（`runMemoryRetriever` の戻り値は使わない） |
-| `dialogueGenerator.test.ts` | `src/handlers/dialogueGenerator.ts` | `characterId` 未指定・`now` の日時フォーマット不正・不明な `packageId` で 400、`message` 省略時は空文字、`mood`/`perception` 省略時は `undefined` のまま渡る（DynamoDB 参照は `run*` 側の責務のため未検証）、`events`/`actions` は送られても `run*` に渡らないこと、`longTimeFlag` の受け渡し、成功時 body は `{ reply }` |
+| `dialogueGenerator.test.ts` | `src/handlers/dialogueGenerator.ts` | `characterId` 未指定・`now` の日時フォーマット不正・不明な `packageId` で 400、`message` 省略時は空文字、`mood`/`perception`（D-032 で廃止）と `events`/`actions`（D-022 で廃止）は送られても `run*` に渡らないこと、`longTimeFlag` の受け渡し、成功時 body は `{ reply }` |
 
 ## 入力チェック（F-018）
 

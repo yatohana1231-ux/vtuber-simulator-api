@@ -239,6 +239,8 @@ async function main() {
       console.log("done");
 
       console.log("\n--- [4/4] dialogueGenerator ---");
+      // mood/perceptionはここでは渡さない（D-032）。emotionUpdaterが保存した値を
+      // runDialogueGeneratorがDynamoDBから読むので、結果はmood/perceptionを渡していたときと同じ。
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const reply = await runDialogueGenerator({
         characterId,
@@ -246,8 +248,6 @@ async function main() {
         character,
         now: nowIso,
         message: values.message!,
-        mood,
-        perception,
         longTimeFlag,
       });
       console.log(reply);

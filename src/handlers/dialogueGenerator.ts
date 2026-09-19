@@ -11,7 +11,7 @@ import {
   requirePackage,
 } from "../lib/apiHandler.js";
 import { createResponse } from "../lib/utils.js";
-import type { DialogueGeneratorRequest, Mood, Perception } from "../types.js";
+import type { DialogueGeneratorRequest } from "../types.js";
 
 export const handler = async (event: unknown) =>
   handleApiRequest(event, async (body) => {
@@ -30,8 +30,6 @@ export const handler = async (event: unknown) =>
       character: pkg.character,
       now: nowDate.toISOString(),
       message: (body.message as string) ?? "",
-      mood: body.mood as Mood | undefined,
-      perception: body.perception as Perception | undefined,
       longTimeFlag: body.longTimeFlag as 0 | 1 | undefined,
     };
 

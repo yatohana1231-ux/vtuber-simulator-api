@@ -140,23 +140,15 @@ describe("run*への引数の詰め替え", () => {
     expect(req.message).toBe("");
   });
 
-  it("mood/perception省略 → undefinedのまま渡る", async () => {
-    await handler(makeEvent({ characterId: "c1" }));
-
-    const req = mockedRun.mock.calls[0][0] as DialogueGeneratorRequest;
-    expect(req.mood).toBeUndefined();
-    expect(req.perception).toBeUndefined();
-  });
-
-  it("mood/perceptionを渡す → そのまま渡る", async () => {
+  it("mood/perceptionを送っても、runDialogueGeneratorへの引数に含まれない（D-032で廃止）", async () => {
     const mood = { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 };
     const perception = { trust: 1, affection: 2, respect: 3, fear: 4, dependence: 5, familiarity: 6 };
 
     await handler(makeEvent({ characterId: "c1", mood, perception }));
 
     const req = mockedRun.mock.calls[0][0] as DialogueGeneratorRequest;
-    expect(req.mood).toEqual(mood);
-    expect(req.perception).toEqual(perception);
+    expect(req).not.toHaveProperty("mood");
+    expect(req).not.toHaveProperty("perception");
   });
 
   it("eventsとactionsを送っても、runDialogueGeneratorへの引数に含まれない（D-022で廃止）", async () => {

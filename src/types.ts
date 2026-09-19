@@ -296,8 +296,7 @@ export interface DialogueGeneratorRequest {
   character: CharacterDefinition;
   now: string; // ISO8601
   message: string; // 空文字の場合はプレイヤー不在時の代替テキストを内部で使用
-  mood?: Mood; // 未指定時は DynamoDB から取得
-  perception?: Perception; // 未指定時は DynamoDB から取得
+  // mood/perception はリクエストで渡さず、常に DynamoDB から取得する（D-032）
   longTimeFlag?: 0 | 1; // 不在期間の出来事・行動は最新の記録を DynamoDB から読む（D-022）
 }
 

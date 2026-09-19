@@ -53,7 +53,7 @@ export interface ScenarioState {
 /** 機能ごとのリクエストの値（world / character / lifestyle はパッケージから仕組みが埋める） */
 export type ScenarioRequest =
   | { lastLoginAt: ScenarioDatetime; now: ScenarioDatetime } // absenceSimulator
-  | { message: string; now?: ScenarioDatetime; mood?: Mood; perception?: Perception; longTimeFlag?: 0 | 1 } // dialogueGenerator
+  | { message: string; now?: ScenarioDatetime; longTimeFlag?: 0 | 1 } // dialogueGenerator（mood/perceptionはD-032で廃止。初期値はstate.moodで与える）
   | { process: 1 } // emotionUpdater / memoryRetriever（process=1）
   | { process: 2; playerMessage: string } // emotionUpdater（process=2）
   | { process: 2 }; // memoryRetriever（process=2）
