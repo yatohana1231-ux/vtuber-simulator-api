@@ -34,7 +34,7 @@ api/
 ├── infra/                              # CDK インフラ定義
 │   ├── bin/                            # CDK エントリーポイント
 │   ├── lib/
-│   │   ├── vtuber-simulator-stack.ts   # メインスタック（Lambda x5, API GW, DynamoDB）
+│   │   ├── vtuber-simulator-stack.ts   # メインスタック（Lambda x4, API GW, DynamoDB）
 │   │   └── github-oidc-stack.ts        # GitHub OIDC 認証スタック
 │   ├── cdk.json / package.json / tsconfig.json
 ├── scripts/
@@ -43,21 +43,17 @@ api/
 │   └── test-runner.ts                  # 実AWS向けの手動実行スクリプト
 ├── src/
 │   ├── handlers/                       # Lambda エントリーポイント（機能ごとに1ファイル）
-│   │   ├── absenceSimulator.ts         # 未公開（フェーズ5でビルド対象・CDK に追加）
-│   │   ├── eventResolver.ts
-│   │   ├── actionPlanner.ts
+│   │   ├── absenceSimulator.ts
 │   │   ├── emotionUpdater.ts
 │   │   ├── memoryRetriever.ts
 │   │   └── dialogueGenerator.ts
 │   ├── types.ts                        # 型定義
-│   ├── eventResolver/{index.ts, prompts/eventResolver.mustache}      # イベント生成
-│   ├── actionPlanner/{index.ts, prompts/actionPlanner.mustache}      # 行動履歴生成
-│   ├── emotionUpdater/{index.ts, prompts/emotionUpdater.mustache}    # 感情値更新
-│   ├── memoryRetriever/{index.ts, prompts/memoryRetriever.mustache}  # 重要記憶管理
-│   ├── dialogueGenerator/{index.ts, prompts/conversation.mustache}   # セリフ生成
-│   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 5テンプレート共有のパーシャル
-│   ├── absenceSimulator/{index.ts, skeleton.ts, actionSlots.ts, eventKindSelection.ts, prompt.ts, modelOutput.ts, prompts/}  # 不在期間のシミュレーション（実装途中。ハンドラー handlers/absenceSimulator.ts はあるが、まだエンドポイントとして公開していない）
-│   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts}
+│   ├── absenceSimulator/{index.ts, skeleton.ts, actionSlots.ts, eventKindSelection.ts, prompt.ts, modelOutput.ts, prompts/}  # 不在期間のシミュレーション
+│   ├── emotionUpdater/{index.ts, prompt.ts, prompts/}      # 感情値更新
+│   ├── memoryRetriever/{index.ts, prompt.ts, prompts/}     # 重要記憶管理
+│   ├── dialogueGenerator/{index.ts, prompt.ts, prompts/}   # セリフ生成
+│   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 各テンプレート共有のパーシャル
+│   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts, absenceRecordText.ts}
 ├── test/
 │   ├── events/                         # Lambda コンソール用のテストイベント（廃止済み `/chat` 前提のまま古い）
 │   └── unit/                           # Vitest の単体テストコード（src/ と同じフォルダ構成）
@@ -67,30 +63,48 @@ api/
 
 ## アーキテクチャ
 
-機能（`eventResolver`/`actionPlanner`/`emotionUpdater`/`memoryRetriever`/`dialogueGenerator`）ごとに独立した Lambda + API エンドポイントを公開する構成。**「どの処理をどの順で呼ぶか」を決めるオーケストレーションはバックエンドではなくフロントエンド（Unity、未実装）の責務**であり、バックエンド側にはもうプロセス分岐ロジックは存在しない（旧 `processChat.ts`/単一 `POST /chat` は廃止済み）。各 Lambda は「リクエストを受け取り、対応する機能を実行し、結果を返す」だけの薄いエンドポイントになっている。
+機能（`absenceSimulator`/`emotionUpdater`/`memoryRetriever`/`dialogueGenerator`）ごとに独立した Lambda + API エンドポイントを公開する構成。**「どの処理をどの順で呼ぶか」を決めるオーケストレーションはバックエンドではなくフロントエンド（Unity、未実装）の責務**であり、バックエンド側にはもうプロセス分岐ロジックは存在しない（旧 `processChat.ts`/単一 `POST /chat` は廃止済み）。各 Lambda は「リクエストを受け取り、対応する機能を実行し、結果を返す」だけの薄いエンドポイントになっている。
+
+ただし、エンドポイント間で受け渡すデータ（不在期間の出来事・行動）は DynamoDB に保存し、後段が読む。フロントは前段の出力を後段に中継しない（2026-09-19 から。経緯は [`.notes/absence-simulation-roadmap.md`](../.notes/absence-simulation-roadmap.md)）。
 
 ### 主要コンポーネント
 
 | モジュール | 役割 |
 |-----------|------|
 | `handlers/*.ts` | Lambda エントリーポイント（機能ごとに1ファイル）。リクエスト解析・正規化・レスポンス生成のみを行う薄いアダプタ |
-| `eventResolver` | 不在期間中にキャラクターが経験したイベントを LLM で生成 |
-| `actionPlanner` | イベントに基づくキャラクターの行動履歴を LLM で生成 |
-| `emotionUpdater` | イベント/プレイヤー発言を元に感情・関係値を LLM で更新 |
-| `memoryRetriever` | 重要な出来事・会話を LLM で判定し長期記憶として保存 |
-| `dialogueGenerator` | 全情報を統合しキャラクターのセリフを LLM で生成 |
-| `lib/packages.ts` | リクエストの `packageId` から、`content/` の世界観とキャラクターを読み込む |
-| `promptPartials` | 世界観・口調の例文を描画する共有パーシャル。5つのテンプレートから読み込む |
+| `absenceSimulator` | 不在期間のシミュレーション。骨格（行動の枠・出来事の種類・続きの話題）をサーバーが決め、内容を LLM が書き、記録として保存する（旧 `eventResolver`・`actionPlanner` を統合） |
+| `emotionUpdater` | 最新の不在期間の記録（process=1）／プレイヤー発言（process=2）を元に感情・関係値を LLM で更新 |
+| `memoryRetriever` | 最新の不在期間の記録（process=1）／直近の会話（process=2）を LLM で判定し、重要な出来事を長期記憶として保存 |
+| `dialogueGenerator` | 感情・関係値、重要記憶、直近の会話、最新の不在期間の記録を統合し、キャラクターのセリフを LLM で生成 |
+| `lib/packages.ts` | リクエストの `packageId` から、`content/` の世界観・キャラクター・生活様式を読み込む |
+| `lib/absenceRecordText.ts` | 不在期間の記録を、後段3機能のプロンプト用の文章にする |
+| `promptPartials` | 世界観・口調の例文を描画する共有パーシャル。各機能の固定部のテンプレートから読み込む |
 
 ### キャラクター×世界観パッケージ
 
-キャラクター固有・世界観固有の文面はテンプレートに直書きせず、`content/` の JSON として持つ。フロントは `packageId`（世界観×キャラクターの組み合わせ）を選んで渡すだけで、キャラクターや世界観を個別に指定することはできない。
+キャラクター固有・世界観固有の文面はテンプレートに直書きせず、`content/` の JSON として持つ。フロントは `packageId`（世界観×キャラクター×生活様式の組み合わせ）を選んで渡すだけで、キャラクターや世界観を個別に指定することはできない。
 
-1. ハンドラーが `lib/packages.ts` の `loadRequestedPackage(packageId)` でパッケージを読み込み、世界観（`World`）とキャラクター（`CharacterDefinition`）を解決する（コンテナ内でキャッシュ）
-2. 各機能の `run*` は `promptPartials/index.ts` の `buildPromptContext(world, character)` を view に展開し、`PROMPT_PARTIALS` を渡して `Mustache.render` する
-3. 5つのテンプレートは `{{> world}}` で世界観を、`conversation.mustache` はさらに `{{> speechExamples}}` で口調の例文を差し込む。キャラクターの `background`（設定）は5つすべてに入る
+1. ハンドラーが `lib/packages.ts` の `loadRequestedPackage(packageId)` でパッケージを読み込み、世界観（`World`、タイムゾーンを含む）・キャラクター（`CharacterDefinition`）・生活様式（`Lifestyle`。`absenceSimulator` だけが使う）を解決する（コンテナ内でキャッシュ）
+2. 各機能の `prompt.ts` は `promptPartials/index.ts` の `buildPromptContext(world, character)` を view に展開し、`PROMPT_PARTIALS` を渡して `Mustache.render` する
+3. 各機能の固定部のテンプレートは `{{> world}}` で世界観を、`conversation.fixed.mustache`（`dialogueGenerator`）はさらに `{{> speechExamples}}` で口調の例文を差し込む。キャラクターの `background`（設定）はすべての機能のプロンプトに入る
+4. プロンプトに出す日時は、世界観のタイムゾーンでの表記（`2026/09/18(金) 07:00`）にする
 
 世界観やキャラクターを追加するときは JSON を足すだけで、テンプレートとコードの変更は不要（再デプロイは必要）。データの書式は [`content/README.md`](content/README.md)、パーシャルは [`src/promptPartials/README.md`](src/promptPartials/README.md) を参照。
+
+### プロンプトの層とキャッシュ
+
+各機能のシステムプロンプトは、変わる頻度ごとの層に分けたテンプレートから組み立て（各機能の `prompt.ts`）、`lib/bedrock.ts` が層の境目に Bedrock のプロンプトキャッシュの区切り（`cachePoint`）を入れる。キャッシュはプロンプトの先頭から一致する部分にしか効かないため、変わりにくい層から順に並べる（`.notes/decision-history.md` の D-017・D-020・D-022）。
+
+| 層 | 内容 | 変わるタイミング | 使う機能 |
+|---|---|---|---|
+| ① 固定部 | 役割と指示（制約事項・出力フォーマット・思考手順）、キャラクター設定、世界観、口調の例 | パッケージやテンプレートを変えたときだけ | 全機能 |
+| ② セッション部 | 最新の不在期間の記録（期間・出来事・行動・続いている話題） | 不在期間のシミュレーションを実行したとき（ログイン時）だけ | `dialogueGenerator` |
+| ③ 可変部 | 現在時刻、感情・関係値、重要記憶、最近の会話、入力、出力の形式を守るよう促す一文 | 毎回 | 全機能 |
+
+- ①には日時・感情・記録など毎回変わる値を入れない（単体テストで、入力を変えても①が同じ文字列になることを確かめている）。
+- 環境変数 `PROMPT_CACHE_ENABLED=false` で区切りを入れなくなる（明示のキャッシュに対応しないモデルに変える場合のため）。
+- Bedrock の応答の使用量（入力・出力・キャッシュの読み出し/書き込みのトークン数）を `[bedrock] usage ...` としてログに出す。
+- 現行モデル（Nova Lite）のキャッシュの TTL は5分。区切りまでが最低トークン数（1K）に届かなくても、`absenceSimulator` の固定部（約850トークン）でキャッシュの読み出しを確認した（2026-09-19）。
 
 ### フロントが組み立てる呼び出しパターン
 
@@ -98,10 +112,10 @@ api/
 
 | 状況 | 条件 | 呼び出し順 |
 |---------|------|---------|
-| ログイン時・通常不在 | `message=""` かつ 3h <= 経過 < 2週間 | `/event-resolver` → `/action-planner` → `/emotion-updater`(process=1) → `/memory-retriever`(process=1) → `/dialogue-generator` |
+| ログイン時・通常不在 | `message=""` かつ 3h <= 経過 < 2週間 | `/absence-simulator` → `/emotion-updater`(process=1) → `/memory-retriever`(process=1) → `/dialogue-generator` |
 | ログイン時・長期不在 | `message=""` かつ 経過 >= 2週間 | 同上 + `longTimeFlag=1` を `/dialogue-generator` に渡す（孤独感・喜び表現を追加） |
 | ログイン時・短時間不在 | `message=""` かつ 経過 < 3h | どのAPIも呼ばない。固定挨拶をローカル表示 |
-| 会話メッセージ送信 | `message` に内容あり | `/dialogue-generator` → `/emotion-updater`(process=2) → `/memory-retriever`(process=2)（重要記憶判定は内部で5往復ごとにスキップ判定） |
+| 会話メッセージ送信 | `message` に内容あり | `/dialogue-generator` → `/emotion-updater`(process=2) → `/memory-retriever`(process=2)（重要記憶判定は内部で5往復ごとにスキップ判定）。`/dialogue-generator` は毎回、最新の不在期間の記録を読むので、会話の途中でも不在中の出来事について話せる |
 
 ### システム構成図（AWS インフラ）
 
@@ -113,19 +127,18 @@ graph TB
 
     subgraph AWS["AWS (ap-northeast-1)"]
         subgraph APILayer["API Layer"]
-            APIGW[API Gateway<br/>REST API<br/>機能ごとに5リソース]
+            APIGW[API Gateway<br/>REST API<br/>機能ごとに4リソース]
         end
         subgraph ComputeLayer["Compute Layer（機能ごとに独立したLambda）"]
-            L1[event-resolver]
-            L2[action-planner]
+            L1[absence-simulator]
             L3[emotion-updater]
             L4[memory-retriever]
             L5[dialogue-generator]
         end
         subgraph DataLayer["Data Layer (DynamoDB)"]
             CONV_LOG[vtuber-simu-conversation-log<br/>会話ログテーブル]
-            CHAR_MEM[v-simu-characters-memory<br/>キャラクター記憶テーブル]
-            EVENTS[v-simu-events<br/>イベントテーブル]
+            CHAR_MEM[v-simu-characters-memory<br/>キャラクター記憶テーブル<br/>状態・重要記憶・最新の不在期間の記録]
+            EVENTS[v-simu-events<br/>イベントテーブル<br/>不在期間の記録の履歴]
         end
         subgraph AILayer["AI Layer"]
             BEDROCK[Amazon Bedrock<br/>Converse API<br/>apac.amazon.nova-lite-v1:0]
@@ -133,32 +146,31 @@ graph TB
     end
 
     UNITY -->|HTTPS POST 順次呼び出し| APIGW
-    APIGW --> L1 & L2 & L3 & L4 & L5
+    APIGW --> L1 & L3 & L4 & L5
     L1 --> CHAR_MEM
     L1 --> EVENTS
-    L2 --> CHAR_MEM
     L3 --> CHAR_MEM
     L4 --> CHAR_MEM
     L4 --> CONV_LOG
     L5 --> CHAR_MEM
     L5 --> CONV_LOG
-    L1 & L2 & L3 & L4 & L5 -->|InvokeModel| BEDROCK
+    L1 & L3 & L4 & L5 -->|InvokeModel| BEDROCK
 ```
+
+DynamoDB の権限は、`/absence-simulator` だけ実際に使う操作（キャラクター記憶テーブルの GetItem・Query・PutItem、イベントテーブルの PutItem・GSI の Query）に絞っている（D-021）。ほかの3つは CDK の `grantReadData`/`grantReadWriteData` で広めに付けたまま（`.notes/_followup.md` の F-022）。
 
 ### アプリケーション内部コンポーネント構成図
 
 ```mermaid
 graph TB
     subgraph EntryPoints["Entry Points（機能ごとの薄いアダプタ）"]
-        H1[handlers/eventResolver.ts]
-        H2[handlers/actionPlanner.ts]
+        H1[handlers/absenceSimulator.ts]
         H3[handlers/emotionUpdater.ts]
         H4[handlers/memoryRetriever.ts]
         H5[handlers/dialogueGenerator.ts]
     end
     subgraph DomainModules["Domain Modules"]
-        ER[eventResolver]
-        AP[actionPlanner]
+        AS[absenceSimulator<br/>骨格・プロンプト・突き合わせ]
         EU[emotionUpdater]
         MR[memoryRetriever]
         DG[dialogueGenerator]
@@ -168,35 +180,35 @@ graph TB
         DB[dynamo.ts]
         UT[utils.ts]
         PK[packages.ts]
+        TZ[timezone.ts / random.ts]
+        RT[absenceRecordText.ts]
     end
     subgraph Content["Content (content/*.json)"]
         CW[worlds]
         CC[characters]
+        CL[lifestyles]
         CP[packages]
     end
-    subgraph Templates["Prompt Templates (.mustache)"]
-        T1[eventResolver.mustache]
-        T2[actionPlanner.mustache]
-        T3[emotionUpdater.mustache]
-        T4[memoryRetriever.mustache]
-        T5[conversation.mustache]
+    subgraph Templates["Prompt Templates (.mustache、層ごとに分割)"]
+        T1[absenceSimulator.fixed / .variable]
+        T3[emotionUpdater.fixed / .variable]
+        T4[memoryRetriever.fixed / .variable]
+        T5[conversation.fixed / .session / .variable]
         PP[promptPartials<br/>world / speechExamples]
     end
 
-    H1 --> ER
-    H2 --> AP
+    H1 --> AS
     H3 --> EU
     H4 --> MR
     H5 --> DG
-    H1 & H2 & H3 & H4 & H5 --> UT
-    H1 & H2 & H3 & H4 & H5 --> PK
-    PK --> CP & CW & CC
-    T1 & T2 & T3 & T4 & T5 --> PP
-    ER --> BK & DB & T1
-    AP --> BK & DB & T2
-    EU --> BK & DB & T3
-    MR --> BK & DB & T4
-    DG --> BK & DB & T5
+    H1 & H3 & H4 & H5 --> UT
+    H1 & H3 & H4 & H5 --> PK
+    PK --> CP & CW & CC & CL
+    T1 & T3 & T4 & T5 --> PP
+    AS --> BK & DB & TZ & T1
+    EU --> BK & DB & RT & T3
+    MR --> BK & DB & RT & T4
+    DG --> BK & DB & RT & T5
 ```
 
 ### CI/CD パイプライン構成図
@@ -250,8 +262,7 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant Front as フロント（Unity・未実装）
-    participant ER as /event-resolver
-    participant AP as /action-planner
+    participant AS as /absence-simulator
     participant EU as /emotion-updater
     participant MR as /memory-retriever
     participant DG as /dialogue-generator
@@ -260,38 +271,34 @@ sequenceDiagram
 
     Note over Front: elapsedHours >= 3h（フロントが算出済み）
 
-    Front->>ER: POST { characterId, packageId, lastLoginAt, now }
-    ER->>DB: getRelevantMemories(characterId)
-    ER->>BK: invokeModelJson(prompt, "不在期間中の出来事を生成")
-    ER->>DB: saveEvent(eventItem)
-    ER-->>Front: { events }
+    Front->>AS: POST { characterId, packageId, lastLoginAt, now }
+    Note over AS: 骨格を作る（行動の枠・出来事の種類）
+    AS->>DB: getLatestAbsenceRecord / getRecentAbsenceRecords(3) / getRelevantMemories
+    AS->>BK: invokeModelJson([固定部, 可変部], ...)
+    Note over AS: 骨格と突き合わせて記録を組み立てる（失敗時は生活リズムの文面で補う）
+    AS->>DB: saveAbsenceRecord(record)（イベントテーブル＋最新の記録をトランザクションで）
+    AS-->>Front: { startDatetime, endDatetime, events, actions }
 
-    Front->>AP: POST { characterId, packageId, lastLoginAt, now, events }
-    AP->>DB: getRelevantMemories(characterId)
-    AP->>BK: invokeModelJson(prompt, "行動履歴を生成")
-    AP-->>Front: { actions }
-
-    Front->>EU: POST { characterId, packageId, process:1, events, actions }
-    EU->>DB: getCharacterState(characterId)
-    EU->>BK: invokeModelJson(prompt, "感情値の差分を算出")
+    Front->>EU: POST { characterId, packageId, process:1 }
+    EU->>DB: getCharacterState / getLatestAbsenceRecord
+    EU->>BK: invokeModelJson([固定部, 可変部], "感情値の差分を算出")
     EU->>DB: saveCharacterState(updated)
     EU-->>Front: { mood, perception }
 
-    Front->>MR: POST { characterId, packageId, process:1, events, actions }
-    MR->>DB: getRelevantMemories(characterId, queryText/topK/minImportance広め)
-    MR->>BK: invokeModelJson(prompt, "重要度を判定")
+    Front->>MR: POST { characterId, packageId, process:1 }
+    MR->>DB: getLatestAbsenceRecord / getRelevantMemories(広め)
+    MR->>BK: invokeModelJson([固定部, 可変部], "重要度を判定")
     MR->>DB: saveMemory(重要記憶) [shouldRemember=true のみ]
     MR-->>Front: { ok: true }
 
-    Front->>DG: POST { characterId, packageId, now, message:"", mood, perception, events, actions, longTimeFlag }
-    DG->>DB: getRelevantMemories(characterId, queryText=playerMessage)
+    Front->>DG: POST { characterId, packageId, now, message:"", mood, perception, longTimeFlag }
     DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
-    DG->>DB: getRecentLogs(characterId, 10)
-    DG->>BK: invokeModel(systemPrompt, "（プレイヤーが来た）")
+    DG->>DB: getRecentLogs(10) / getRelevantMemories / getLatestAbsenceRecord
+    DG->>BK: invokeModel([固定部, 最新の記録, 可変部], "（プレイヤーが来た）")
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
-    Note over Front: { reply, mood, perception, actions } を画面表示用に組み立てる
+    Note over Front: { reply, mood, perception } を画面表示用に組み立てる（events/actions は表示に使ってもよい）
 ```
 
 ### 会話メッセージ送信時の呼び出しシーケンス
@@ -307,10 +314,10 @@ sequenceDiagram
 
     Front->>DG: POST { characterId, packageId, now, message }
     Note over DG: mood/perception 省略時は DynamoDB から取得
-    DG->>DB: getCharacterState / getRelevantMemories(queryText=message)
+    DG->>DB: getCharacterState（mood/perception 省略時）
     DG->>DB: saveConversationLog(user, message)
-    DG->>DB: getRecentLogs(characterId, 10)
-    DG->>BK: invokeModel(systemPrompt, message)
+    DG->>DB: getRecentLogs(10) / getRelevantMemories(queryText=message) / getLatestAbsenceRecord
+    DG->>BK: invokeModel([固定部, 最新の記録, 可変部], message)
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
@@ -335,17 +342,37 @@ sequenceDiagram
     Note over Front: { reply, mood, perception } を画面表示用に組み立てる
 ```
 
+### absenceSimulator 内部処理フロー
+
+```mermaid
+flowchart TD
+    START([開始]) --> SKEL[骨格を作る<br/>生活様式の生活リズムから行動の枠（直近12時間まで）<br/>不在時間から出来事の件数と種類を重み付き抽選]
+    SKEL --> READ[DynamoDB から読む<br/>最新の記録（続きの話題）・直近3件の記録（出来事の要約）・重要記憶]
+    READ --> PROMPT[プロンプトの層を構築<br/>固定部 + 可変部]
+    PROMPT --> LLM{Bedrock 呼び出し<br/>JSON のパース}
+    LLM -->|成功| MERGE[骨格と突き合わせ<br/>出来事: 正しい要素を骨格の件数まで・種類は骨格の値<br/>行動: 番号で枠に対応・時刻は骨格の値<br/>話題: 14日で自動クローズ・新規は2件まで・同時に3件まで]
+    LLM -->|例外 / パース失敗| FALLBACK[出来事は空・行動は生活リズムの文面<br/>話題は前回のまま（自動クローズのみ）]
+    MERGE --> SAVE[記録を保存<br/>イベントテーブル＋キャラクター記憶テーブル（最新）]
+    FALLBACK --> SAVE
+    SAVE --> END_([完了: 期間・出来事・行動を返却])
+```
+
+生成規則の詳細は `.notes/decision-history.md` の D-018（骨格）・D-020（突き合わせ）、実装は [`src/absenceSimulator/README.md`](src/absenceSimulator/README.md) を参照。
+
 ### emotionUpdater 内部処理フロー
 
 ```mermaid
 flowchart TD
     START([開始]) --> GET_STATE[DynamoDB から現在の<br/>mood / perception 取得]
     GET_STATE --> BUILD_INPUT{process 判定}
-    BUILD_INPUT -->|process=1| INPUT1[インプット:<br/>不在中の出来事 + 行動]
+    BUILD_INPUT -->|process=1| GET_REC[DynamoDB から<br/>最新の不在期間の記録を取得]
+    GET_REC --> HAS_REC{記録あり?}
+    HAS_REC -->|なし| SKIP([LLM を呼ばず<br/>現在の mood/perception を返却])
+    HAS_REC -->|あり| INPUT1[インプット:<br/>記録の出来事 + 行動]
     BUILD_INPUT -->|process=2| INPUT2[インプット:<br/>プレイヤーの発言]
     INPUT1 --> RULE1[制約: perception ±0~3]
     INPUT2 --> RULE2[制約: perception ±1~5]
-    RULE1 --> PROMPT[Mustache テンプレートで<br/>システムプロンプト構築]
+    RULE1 --> PROMPT[固定部・可変部のテンプレートで<br/>システムプロンプトの層を構築]
     RULE2 --> PROMPT
     PROMPT --> BEDROCK[Bedrock 呼び出し<br/>moodDelta + perceptionDelta 取得]
     BEDROCK --> APPLY[差分を適用<br/>clamp 1~100]
@@ -358,11 +385,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     START([開始]) --> CHECK_PROCESS{process 判定}
-    CHECK_PROCESS -->|process=1| P1_CHECK{events/actions<br/>あり?}
+    CHECK_PROCESS -->|process=1| P1_CHECK{最新の不在期間の<br/>記録あり?}
     CHECK_PROCESS -->|process=2| P2_LOGS[直近5往復のログ取得]
 
     P1_CHECK -->|なし| SKIP1([スキップ])
-    P1_CHECK -->|あり| P1_INPUT[イベント+アクションを<br/>テキスト化]
+    P1_CHECK -->|あり| P1_INPUT[記録の出来事+行動を<br/>テキスト化]
 
     P2_LOGS --> P2_COUNT{10件以上?}
     P2_COUNT -->|いいえ| SKIP2([スキップ: 往復数不足])
@@ -386,7 +413,7 @@ flowchart TD
 |-----------|------|---------|
 | `vtuber-simu-conversation-log-{stage}` | 会話ログ | 既存（CDK でインポート） |
 | `v-simu-characters-memory-{stage}` | キャラクター記憶・状態 | 既存（CDK でインポート） |
-| `v-simu-events-{stage}` | イベント履歴 | CDK で新規作成 |
+| `v-simu-events-{stage}` | 不在期間の記録の履歴 | CDK で新規作成 |
 
 ```mermaid
 erDiagram
@@ -399,7 +426,7 @@ erDiagram
     }
     CHARACTER_MEMORY {
         string memory_id PK "characterId"
-        string index SK "state | タイムスタンプ_UUID"
+        string index SK "state | absence-latest | タイムスタンプ_UUID"
         object mood "感情値 (state レコードのみ)"
         object perception "関係値 (state レコードのみ)"
         string eventSummary "記憶: 出来事の要約"
@@ -410,16 +437,18 @@ erDiagram
         object relationshipChanges "記憶: 関係値変化"
         string emotion "記憶: 感情"
         string reason "記憶: 記憶理由"
+        object record "最新の不在期間の記録 (absence-latest レコードのみ)"
         string updatedAt "更新日時"
     }
     EVENTS {
         string event_id PK "UUID"
         string characterId "キャラクターID (GSI PK)"
-        string startDatetime "不在開始日時"
-        string endDatetime "不在終了日時"
-        string elapsed "経過時間テキスト"
-        string[] events "生成されたイベント一覧"
         string createdAt "作成日時 (GSI SK)"
+        string startDatetime "不在期間の開始"
+        string endDatetime "不在期間の終了"
+        object[] events "出来事 { kind, summary, detail, threadId? }"
+        object[] actions "行動 { startDatetime, endDatetime, action, memo }"
+        object[] threads "続きの話題 { id, topic, status, openedAt }"
     }
     CHARACTER_MEMORY ||--o{ CONVERSATION_LOG : "characterId で関連"
     CHARACTER_MEMORY ||--o{ EVENTS : "characterId で関連"
@@ -439,7 +468,7 @@ erDiagram
 |-------------|-------------|-----------------|------|
 | 状態レコード | `"state"` | characterId (UUID) | 感情値・関係値の現在値（`mood`, `perception`, `updatedAt`） |
 | 記憶レコード | `{ISO8601}_{UUID8桁}` | characterId | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
-| 最新の不在期間の記録 | `"absence-latest"` | characterId | 最新の不在期間の記録（`record`: イベントテーブルに保存した `AbsenceRecord` と同じ内容、`updatedAt`）。書き込み直後でも確実に読めるよう、強い整合性の GetItem で読む（`.notes/decision-history.md` の D-019）。**2026-09-18 時点では書き込み・読み出しの関数（`lib/dynamo.ts`）だけがあり、まだどのエンドポイントからも使っていない** |
+| 最新の不在期間の記録 | `"absence-latest"` | characterId | 最新の不在期間の記録（`record`: イベントテーブルに保存した `AbsenceRecord` と同じ内容、`updatedAt`）。書き込み直後でも確実に読めるよう、強い整合性の GetItem で読む（`.notes/decision-history.md` の D-019）。`absenceSimulator`（続きの話題の引き継ぎ）と、後段の3機能（`dialogueGenerator` は会話のたびに、`emotionUpdater`・`memoryRetriever` は process=1 で）が読む |
 
 アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)` / `getLatestAbsenceRecord(characterId)`（`saveAbsenceRecord` はイベントテーブルとこのテーブルにトランザクションで同時に書き込む）
 
@@ -447,7 +476,7 @@ erDiagram
 
 | 呼び出し元 | `queryText` | `topK` | `minImportance` |
 |---|---|---|---|
-| `eventResolver` / `actionPlanner` | なし | 8（既定） | 20（既定） |
+| `absenceSimulator` | なし | 8（既定） | 20（既定） |
 | `dialogueGenerator` | プレイヤー発言（空文字時はなし） | 8（既定） | 20（既定） |
 | `memoryRetriever`（重複記憶チェック用） | 判定対象テキスト | 20 | 10 |
 
@@ -456,8 +485,9 @@ erDiagram
 ### イベントテーブル
 
 - キー: PK `event_id`（UUID）。GSI `characterId-index`: PK `characterId` / SK `createdAt`（射影は ALL）
-- 旧形式（現行の `/event-resolver` が書き込む）: `startDatetime`, `endDatetime`, `elapsed`, `events`（3〜7件のテキスト配列）, `createdAt`。アクセスパターン: `saveEvent(item)`（書き込みのみ）
-- 新形式（不在期間の記録 `AbsenceRecord`。`absence-simulation-roadmap.md` で導入中）: `characterId`, `createdAt`, `startDatetime`, `endDatetime`, `events`（`{ kind, summary, detail, threadId? }` の配列）, `actions`（`{ startDatetime, endDatetime, action, memo }` の配列）, `threads`（続きの話題 `{ id, topic, status: "open" | "closed", openedAt }` の配列）。アクセスパターン: `saveAbsenceRecord(record)`（キャラクター記憶テーブルの `absence-latest` と同時に書き込む）/ `getRecentAbsenceRecords(characterId, limit)`（GSI を新しい順に読み、旧形式は読み飛ばす。足りなければ最大5ページまで続けて読む）。**2026-09-18 時点では関数だけがあり、まだどのエンドポイントからも使っていない**
+- 属性（不在期間の記録 `AbsenceRecord`）: `characterId`, `createdAt`（サーバーの現在時刻）, `startDatetime`, `endDatetime`, `events`（`{ kind, summary, detail, threadId? }` の配列。`kind` は生活様式の出来事の種類、`summary` は1文の要約、`detail` は聞かれたときに話せる内容）, `actions`（`{ startDatetime, endDatetime, action, memo }` の配列）, `threads`（続きの話題 `{ id, topic, status: "open" | "closed", openedAt }` の配列。その時点で続いている話題と、今回閉じた話題）
+- アクセスパターン: `saveAbsenceRecord(record)`（キャラクター記憶テーブルの `absence-latest` と同時にトランザクションで書き込む）/ `getRecentAbsenceRecords(characterId, limit)`（GSI を新しい順に読み、旧形式は読み飛ばす。足りなければ最大5ページまで続けて読む。`absenceSimulator` が「最近の出来事を繰り返さない」ために直近3件を読む）
+- 旧形式（2026-09-19 に削除した `/event-resolver` が書き込んでいた `elapsed`・`events: string[]` のフラットな形）の既存データは stg に残っているが、読むときに読み飛ばす
 - 容量: PAY_PER_REQUEST、削除ポリシーは stg=DESTROY / prod=RETAIN
 
 ### Mood（内面感情・6次元、1〜100）
@@ -494,20 +524,20 @@ erDiagram
 | 認証 | なし（CORS で制御、`Access-Control-Allow-Origin: *`） |
 | タイムアウト | API Gateway: 29秒 / Lambda: 120秒 |
 
-5つの独立したエンドポイントを提供する。すべて `POST`、リクエスト/レスポンスは JSON。呼び出し順序は「リクエスト処理フロー」を参照。
+4つの独立したエンドポイントを提供する。すべて `POST`、リクエスト/レスポンスは JSON。呼び出し順序は「リクエスト処理フロー」を参照。
 
 全エンドポイント共通のフィールド:
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|------|------|------|
-| `characterId` | string | Yes | キャラクターの識別子。**「ユーザー×パッケージ」で一意**。発番はフロントの責務で、別のパッケージに切り替えるときは新しい `characterId` を発番する（重要記憶・感情状態・会話ログはすべて `characterId` 単位で保存されるため）。サーバーは `characterId` と `packageId` の対応を検証しない |
+| `characterId` | string | Yes | キャラクターの識別子。**「ユーザー×パッケージ」で一意**。発番はフロントの責務で、別のパッケージに切り替えるときは新しい `characterId` を発番する（重要記憶・感情状態・会話ログ・不在期間の記録はすべて `characterId` 単位で保存されるため）。サーバーは `characterId` と `packageId` の対応を検証しない |
 | `packageId` | string | No | キャラクター×世界観パッケージの ID（`content/packages/` 参照）。省略時は `yui-modern-tokyo`。形式が不正または存在しない場合は 400（`{"error": "unknown packageId"}`） |
 
 キャラクターの性格・話し方・設定や世界観はパッケージ側で定義されており、リクエストで個別に指定することはできない（旧 `characterProfile` は廃止）。
 
-### `POST /event-resolver`
+### `POST /absence-simulator`
 
-不在期間中のイベントを生成する。
+前回ログインから今回までの不在期間に、キャラクターが過ごした時間（出来事・行動・続きの話題）を生成し、記録として DynamoDB に保存する。旧 `/event-resolver`・`/action-planner` を統合したもの（2026-09-19）。
 
 **リクエスト**
 
@@ -515,8 +545,8 @@ erDiagram
 {
   "characterId": "550e8400-e29b-41d4-a716-446655440000",
   "packageId": "yui-modern-tokyo",
-  "lastLoginAt": "2026-08-10T10:00:00",
-  "now": "2026-08-11T14:30:00"
+  "lastLoginAt": "2026-09-18T13:00:00Z",
+  "now": "2026-09-19T01:00:00Z"
 }
 ```
 
@@ -524,44 +554,36 @@ erDiagram
 |-----------|------|------|------|
 | `characterId` | string | Yes | キャラクター識別子 |
 | `packageId` | string | No | 共通フィールド参照 |
-| `lastLoginAt` | string (ISO8601) | No | 前回ログイン日時。省略時は `now` と同値 |
+| `lastLoginAt` | string (ISO8601) | No | 前回ログイン日時。省略時は `now` と同値。`now` より後なら 400 |
 | `now` | string (ISO8601) | No | 現在日時。省略時はサーバー現在時刻 |
 
-**レスポンス**（`EventResolverResult`）
+- 行動は、今回ログインまでの直近12時間を上限に、パッケージの生活様式（平日・休日の生活リズム）から時刻の枠を決め、LLM が中身を書く。出来事の件数（1〜5件）は不在期間全体の長さで決まる。
+- LLM の呼び出しが失敗しても 500 にはせず、出来事を空、行動を生活リズムの文面にして記録を保存する（DynamoDB のエラーは 500）。
+
+**レスポンス**（`AbsenceSimulatorResult`）
 
 ```json
 {
-  "UUID": "b3f1...",
-  "startDatetime": "2026-08-10T10:00:00.000Z",
-  "endDatetime": "2026-08-11T14:30:00.000Z",
-  "elapsed": "28時間30分",
-  "events": ["テストで赤点を取って補修が大変だった"]
-}
-```
-
-### `POST /action-planner`
-
-`event-resolver` の出力（`events`）を受け取り、不在期間分（上限12時間）の行動履歴を生成する。
-
-**リクエスト**: `event-resolver` と同じ4フィールド（`characterId` / `packageId` / `lastLoginAt` / `now`） + `events: string[]`（`event-resolver` のレスポンスの `events` をそのまま渡す）
-
-**レスポンス**（`ActionPlannerResult`）
-
-```json
-{
+  "startDatetime": "2026-09-18T13:00:00.000Z",
+  "endDatetime": "2026-09-19T01:00:00.000Z",
+  "events": [
+    { "kind": "small-joy", "summary": "配信のアーカイブに初めて長文の感想がついた", "detail": "寝る前に見返していたら、…" }
+  ],
   "actions": [
-    { "startDatetime": "2026-08-11T08:00:00", "endDatetime": "2026-08-11T09:30:00", "action": "歌の練習", "memo": "新曲のサビを重点的に練習した" }
+    { "startDatetime": "2026-09-18T13:00:00.000Z", "endDatetime": "2026-09-18T14:00:00.000Z", "action": "配信の振り返り", "memo": "…" }
   ]
 }
 ```
 
+フロントは表示に使ってもよいが、後段のエンドポイントに渡す必要はない（後段は保存された記録を DynamoDB から読む）。続きの話題（`threads`）はレスポンスに含めない。
+
 ### `POST /emotion-updater`
 
-`process` フィールドで process1（不在中のイベント/行動が入力）と process2（プレイヤー発言が入力）を切り替える判別ユニオン。
+`process` フィールドで process1（最新の不在期間の記録が入力）と process2（プレイヤー発言が入力）を切り替える判別ユニオン。
 
 ```json
-// process = 1
-{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1, "events": [...], "actions": [...] }
+// process = 1（最新の不在期間の記録を DynamoDB から読む。記録が無ければ LLM を呼ばず、現在の値をそのまま返す）
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1 }
 
 // process = 2
 { "characterId": "...", "packageId": "yui-modern-tokyo", "process": 2, "playerMessage": "今日の配信、すごく良かったよ！" }
@@ -576,15 +598,15 @@ erDiagram
 }
 ```
 
-process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に抑えるようプロンプトで指示している（詳細は「データモデル」の更新ルール参照）。
+process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に抑えるようプロンプトで指示している（詳細は「データモデル」の更新ルール参照）。2026-09-19 以前の process1 はリクエストで `events`/`actions` を受け取っていたが、廃止した（送られても無視する）。
 
 ### `POST /memory-retriever`
 
 会話・出来事を重要度判定し、該当すれば DynamoDB に記憶として保存する（副作用のみのエンドポイント）。
 
 ```json
-// process = 1
-{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1, "events": [...], "actions": [...] }
+// process = 1（最新の不在期間の記録を DynamoDB から読む。記録が無ければ何もしない）
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1 }
 
 // process = 2（内部で直近5往復のログを見て、10件未満または判定済みならスキップする）
 { "characterId": "...", "packageId": "yui-modern-tokyo", "process": 2 }
@@ -594,7 +616,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 ### `POST /dialogue-generator`
 
-会話履歴・記憶・感情/関係値を踏まえてキャラクターのセリフを生成する。
+会話履歴・記憶・感情/関係値・最新の不在期間の記録を踏まえてキャラクターのセリフを生成する。最新の不在期間の記録は呼び出しのたびに DynamoDB から読むので、会話の途中でも不在中の出来事について話せる。
 
 **リクエスト**
 
@@ -606,8 +628,6 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
   "message": "今日の配信、すごく良かったよ！",
   "mood": { "...": "..." },
   "perception": { "...": "..." },
-  "events": [],
-  "actions": [],
   "longTimeFlag": 0
 }
 ```
@@ -616,24 +636,24 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 |-----------|------|------|------|
 | `message` | string | No | `""` の場合は「プレイヤーが来た」という代替テキストで生成（ログイン時のセリフ生成に使う） |
 | `mood` / `perception` | object | No | 省略時は DynamoDB の現在値を使用（会話メッセージ送信時、`emotion-updater` 呼び出し前に使うのが典型パターン） |
-| `events` / `actions` | array | No | ログイン時のみ渡す。省略時は空配列扱い |
 | `longTimeFlag` | 0 or 1 | No | 省略時 0 |
+| `now` | string (ISO8601) | No | 現在日時（プロンプトの現在時刻）。省略時はサーバー現在時刻 |
 
 **レスポンス**: `{ "reply": "え、本当ですか！？ありがとうございます！実は結構緊張してたんですけど..." }`
 
 ### エラーレスポンス（全エンドポイント共通）
 
-- **400** — `characterId` 未指定 / `process` が 1,2 以外 / 日時フォーマット不正: `{ "error": "..." }`
+- **400** — `characterId` 未指定 / `process` が 1,2 以外 / 日時フォーマット不正 / `now` が `lastLoginAt` より前（`/absence-simulator`） / 不明な `packageId`: `{ "error": "..." }`
 - **500** — サーバー内部エラー（Bedrock呼び出し失敗、DynamoDBエラー等）: `{ "error": "Failed to generate a response", "errorName": "...", "errorMessage": "..." }`
 
 ### フロント実装ガイド
 
 呼び出し順序の詳細は「リクエスト処理フロー」を参照。実装上の注意点:
 
-1. `event-resolver` の `events` は `action-planner`・`emotion-updater`(process1)・`memory-retriever`(process1)・`dialogue-generator` に、`action-planner` の `actions` は後続の3エンドポイントに、それぞれそのまま渡す（バックエンドはステップ間の状態を保持しない）
+1. 前段のレスポンスを後段に渡す必要はない。不在期間の記録は `/absence-simulator` が保存し、後段が DynamoDB から読む（`mood`/`perception` だけは `/dialogue-generator` に渡すこともできる。省略時は DynamoDB から読む）
 2. `characterId` はフロントが「ユーザー×パッケージ」ごとに発番し、そのパッケージで遊ぶ間はすべてのリクエストで使い回す。パッケージを切り替えるときは新しい `characterId` を発番する。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない
 3. アプリ終了時の時刻を `lastLoginAt` としてローカル保存し、次回起動時に送信する
-4. ログイン時（不在3時間以上）は最大5回のAPI呼び出しが直列に発生するため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
+4. ログイン時（不在3時間以上）は4回のAPI呼び出しが直列に発生するため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
 5. 不在3時間未満の場合はどのエンドポイントも呼ばず、直前に表示していた mood/perception をそのまま維持する（固定デフォルト値を返す挙動は廃止）
 
 ## ビルド・デプロイ
@@ -647,7 +667,7 @@ npm run build:bundle   # esbuild でバンドル（下記）
 npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-content.mjs）
 
 # build:bundle の中身
-# esbuild src/handlers/eventResolver.ts src/handlers/actionPlanner.ts src/handlers/emotionUpdater.ts \
+# esbuild src/handlers/absenceSimulator.ts src/handlers/emotionUpdater.ts \
 #   src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts \
 #   --bundle --platform=node --target=node24 --format=esm \
 #   --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text
@@ -673,4 +693,4 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 
 企画当初のドキュメントには書かれていたが、現在のコードには反映されていない設計意図。詳細と優先度は [`.notes/_followup.md`](../.notes/_followup.md) を参照。
 
-- **AI障害時のフォールバック**（F-001）: 「Bedrock 呼び出し失敗時はデフォルトのテキストを返す」という設計意図があったが、実装は各 `handlers/*.ts` が例外を捕捉して 500 エラーを返すのみで、固定文言へのフォールバックは無い。
+- **AI障害時のフォールバック**（F-001）: 「Bedrock 呼び出し失敗時はデフォルトのテキストを返す」という設計意図があったが、`/absence-simulator` 以外は、各 `handlers/*.ts` が例外を捕捉して 500 エラーを返すのみで、固定文言へのフォールバックは無い（`/absence-simulator` は生活リズムの文面で記録を作って保存する。D-020）。
