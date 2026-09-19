@@ -1,0 +1,7 @@
+{
+  "note": "LLM による採点に使うモデル。比較の候補より強いモデルを1つ固定する（D-023）。変えたら基準（baseline/）を取り直す。Claude Opus 5 はアカウントのサービスクォータの引き上げを申請中（2026-09-19）のため、通るまでは暫定で Claude Sonnet 4.6 を使う。",
+  "modelId": "jp.anthropic.claude-sonnet-4-6",
+  "plannedModelId": "global.anthropic.claude-opus-5",
+  "temperature": 0,
+  "maxTokens": 1500
+}

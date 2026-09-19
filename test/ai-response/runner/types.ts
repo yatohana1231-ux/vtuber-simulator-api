@@ -129,6 +129,8 @@ export interface RunResult {
   modelCalls: ModelCallRecord[];
   writes: DynamoWriteRecord[];
   checks: CheckResult[];
+  /** LLM による採点（採点しなかった実行〔例外・Bedrock を呼ばないシナリオ・--no-judge〕では無い） */
+  judge?: JudgeResult;
   metrics: {
     /** run* の開始から終了まで */
     totalLatencyMs: number;
@@ -157,6 +159,12 @@ export interface SummaryRow {
   avgOutputTokens: number;
   /** キャッシュから読んだ入力トークンの割合（cacheRead / (input + cacheRead + cacheWrite)） */
   cacheReadRatio: number;
+  /** 採点した実行の数 */
+  judgedRuns: number;
+  /** 観点の id → 採点の平均（採点できた実行だけで平均。1件も無ければ null） */
+  avgJudgeScores: Record<string, number | null>;
+  /** 全観点の平均（avgJudgeScores の null を除いた平均。無ければ null） */
+  avgJudgeScoreOverall: number | null;
 }
 
 export interface RunSummary {
@@ -167,9 +175,47 @@ export interface RunSummary {
     models: string[];
     repeat: number;
     maxCostUsd: number;
+    /** 採点に使ったモデル（採点しなかったときは null） */
+    judgeModelId: string | null;
   };
+  /** 実行と採点を合わせた料金 */
   totalCostUsd: number;
+  /** そのうち採点の料金 */
+  judgeCostUsd: number;
   rows: SummaryRow[];
+}
+
+/** 評価基準（rubrics/<機能名>.md）の観点1つ */
+export interface RubricCriterion {
+  /** 観点の id（`### id: 名前` の id） */
+  id: string;
+  name: string;
+  description: string;
+  /** 5・3・1 の目安 */
+  anchors: { 5: string; 3: string; 1: string };
+}
+
+/** LLM による採点の結果（1回の実行ごと） */
+export interface JudgeResult {
+  /** 採点に使ったモデル（推論プロファイルの ID） */
+  judgeModelId: string;
+  /** 観点の id → 1〜5 の整数。採点できなかった観点と、対象外（notApplicable）の観点は null */
+  scores: Record<string, number | null>;
+  /**
+   * そのシナリオでは当てはまらない（評価する材料が無い）と採点者が判断した観点の id。
+   * 例: 続いている話題が無いシナリオの「話題の扱い」、何も保存しないのが正しいシナリオの「要約の正確さ」。
+   * scores は null になり、平均には含めない。
+   */
+  notApplicable: string[];
+  /** 観点の id → 採点の理由 */
+  reasons: Record<string, string>;
+  /** 全体の短い所見 */
+  comment?: string;
+  /** 採点にかかった料金（USD）。料金表に無いモデルは null */
+  costUsd: number | null;
+  latencyMs: number;
+  /** 採点の呼び出しや、応答の解釈に失敗したとき */
+  error?: string;
 }
 
 /** models.json の1件 */

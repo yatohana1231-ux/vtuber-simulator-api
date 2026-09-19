@@ -16,11 +16,28 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { estimateCost, loadEstimates, loadPricing, type CostEstimateResult, type CostPlanItem } from "./cost.js";
+import {
+  estimateCost,
+  estimateJudgeCost,
+  loadEstimates,
+  loadJudgeEstimate,
+  loadPricing,
+  type CostEstimateResult,
+  type CostPlanItem,
+  type JudgeCostEstimateResult,
+} from "./cost.js";
 import { createFakeDynamo } from "./fakeDynamo.js";
 import { executeRun, type ProductionModules } from "./execute.js";
 import { loadScenarios, resolveScenarioDatetimes } from "./scenarios.js";
-import { TARGET_FUNCTIONS, type ModelEntry, type RunResult, type RunSummary, type Scenario, type TargetFunction } from "./types.js";
+import {
+  TARGET_FUNCTIONS,
+  type ModelEntry,
+  type RubricCriterion,
+  type RunResult,
+  type RunSummary,
+  type Scenario,
+  type TargetFunction,
+} from "./types.js";
 
 // このファイルは esbuild で api/test/ai-response/.build/cli.mjs にバンドルされて実行される。
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +48,13 @@ const DEFAULT_CONTENT_DIR = path.join(API_DIR, "content");
 const RESULTS_DIR = path.join(AI_RESPONSE_DIR, "results");
 const BASELINE_DIR = path.join(AI_RESPONSE_DIR, "baseline");
 const MODELS_JSON_PATH = path.join(AI_RESPONSE_DIR, "models.json");
+const JUDGE_JSON_PATH = path.join(AI_RESPONSE_DIR, "judge.json");
+
+interface JudgeConfig {
+  modelId: string;
+  temperature: number;
+  maxTokens: number;
+}
 
 // -------------------------------------------------------
 // CLI 引数
@@ -47,6 +71,10 @@ interface CliArgs {
   out: string;
   saveBaseline: boolean;
   compareToBaseline: boolean;
+  /** LLM による採点をするか（既定: する） */
+  judge: boolean;
+  /** judge.json の modelId を上書きする */
+  judgeModelId?: string;
 }
 
 function requireValue(argv: string[], index: number, key: string): string {
@@ -71,6 +99,8 @@ function parseArgs(argv: string[], now: Date): CliArgs {
     out: path.join(RESULTS_DIR, timestampForDir(now)),
     saveBaseline: false,
     compareToBaseline: false,
+    judge: true,
+    judgeModelId: undefined,
   };
 
   const validFunctions = new Set<string>(TARGET_FUNCTIONS);
@@ -112,6 +142,12 @@ function parseArgs(argv: string[], now: Date): CliArgs {
         break;
       case "--compare-to-baseline":
         args.compareToBaseline = true;
+        break;
+      case "--no-judge":
+        args.judge = false;
+        break;
+      case "--judge-model":
+        args.judgeModelId = requireValue(argv, ++i, key);
         break;
       default:
         console.warn(`[cli] 未知の引数を無視します: ${key}`);
@@ -168,7 +204,13 @@ async function loadProductionModules(): Promise<ProductionModules> {
 // 計画・見積もりの表示
 // -------------------------------------------------------
 
-function printPlan(args: CliArgs, scenarios: Scenario[], estimate: CostEstimateResult): void {
+function printPlan(
+  args: CliArgs,
+  scenarios: Scenario[],
+  estimate: CostEstimateResult,
+  judgeModelId: string | null,
+  judgeEstimate: JudgeCostEstimateResult | null
+): void {
   console.log("[cli] === 実行計画 ===");
   console.log(`  functions:   ${args.functions.join(", ")}`);
   console.log(`  models:      ${args.models.join(", ")}`);
@@ -178,17 +220,32 @@ function printPlan(args: CliArgs, scenarios: Scenario[], estimate: CostEstimateR
   console.log(`  repeat:      ${args.repeat}`);
   console.log(`  concurrency: ${args.concurrency}（同じモデル内）`);
   console.log(`  max-cost:    $${args.maxCostUsd}`);
+  console.log(`  judge:       ${judgeModelId ? `する（${judgeModelId}）` : "しない（--no-judge）"}`);
   console.log(`  out:         ${args.out}`);
   console.log("");
-  console.log("[cli] === 見積もり（機能 × モデル） ===");
+  console.log("[cli] === 実行の見積もり（機能 × モデル） ===");
   for (const row of estimate.rows) {
     const costText = row.estimatedCostUsd === null ? "不明（料金表に無いモデル）" : `$${row.estimatedCostUsd.toFixed(4)}`;
     console.log(`  ${row.function.padEnd(20)} ${row.modelKey.padEnd(20)} calls=${row.calls} ${costText}`);
   }
-  console.log(`  合計（料金表にあるモデルのみ）: $${estimate.totalUsd.toFixed(4)}`);
+  console.log(`  実行の合計（料金表にあるモデルのみ）: $${estimate.totalUsd.toFixed(4)}`);
   if (estimate.missingPricingModelIds.length > 0) {
     console.log(`  料金表に無いモデル: ${estimate.missingPricingModelIds.join(", ")}`);
   }
+
+  console.log("");
+  if (judgeEstimate) {
+    const costText =
+      judgeEstimate.estimatedCostUsd === null ? "不明（料金表に無い採点用モデル）" : `$${judgeEstimate.estimatedCostUsd.toFixed(4)}`;
+    console.log("[cli] === 採点の見積もり ===");
+    console.log(`  calls=${judgeEstimate.calls}（採点対象になりうる実行の回数） ${costText}`);
+  } else {
+    console.log("[cli] === 採点の見積もり: --no-judge のため無し ===");
+  }
+
+  const combinedTotal = estimate.totalUsd + (judgeEstimate?.estimatedCostUsd ?? 0);
+  console.log("");
+  console.log(`  合計（実行＋採点、料金表にあるモデルのみ）: $${combinedTotal.toFixed(4)}`);
 }
 
 // -------------------------------------------------------
@@ -269,11 +326,30 @@ async function main(): Promise<void> {
   }
 
   const estimate = estimateCost(plan, estimates, pricing);
-  printPlan(args, resolvedScenarios, estimate);
 
-  if (estimate.totalUsd > args.maxCostUsd) {
+  // 採点の見積もり（--no-judge なら無し）。judge.json はモデル ID を上書きしないぶんには
+  // --dry-run でも読める軽いファイルなので、ここで読んでしまう。
+  let judgeConfig: JudgeConfig | null = null;
+  let judgeModelId: string | null = null;
+  if (args.judge) {
+    const judgeRaw = await readFile(JUDGE_JSON_PATH, "utf8");
+    judgeConfig = JSON.parse(judgeRaw) as JudgeConfig;
+    judgeModelId = args.judgeModelId ?? judgeConfig.modelId;
+  }
+
+  let judgeEstimate: JudgeCostEstimateResult | null = null;
+  if (args.judge && judgeModelId) {
+    const judgeTokens = await loadJudgeEstimate();
+    const totalRunCalls = estimate.rows.reduce((sum, row) => sum + row.calls, 0);
+    judgeEstimate = estimateJudgeCost(totalRunCalls, judgeTokens, judgeModelId, pricing);
+  }
+
+  printPlan(args, resolvedScenarios, estimate, judgeModelId, judgeEstimate);
+
+  const combinedTotalUsd = estimate.totalUsd + (judgeEstimate?.estimatedCostUsd ?? 0);
+  if (combinedTotalUsd > args.maxCostUsd) {
     console.error(
-      `\n[cli] 見積もり $${estimate.totalUsd.toFixed(4)} が上限 $${args.maxCostUsd} を超えています。実行しません（--max-cost で上限を変更できます）。`
+      `\n[cli] 見積もり（実行＋採点） $${combinedTotalUsd.toFixed(4)} が上限 $${args.maxCostUsd} を超えています。実行しません（--max-cost で上限を変更できます）。`
     );
     process.exitCode = 2;
     return;
@@ -374,12 +450,98 @@ async function main(): Promise<void> {
     });
   }
 
+  // -------------------------------------------------------
+  // LLM による採点（判定〔checks〕の後。--no-judge なら行わない）
+  //
+  // 採点は judgeModelId を明示して呼ぶ（bedrock.ts の options.modelId）ので、
+  // BEDROCK_MODEL_ID の切り替え（実行本体が使うモデル）とは関係なく並行してよい。
+  // -------------------------------------------------------
+  if (args.judge && judgeConfig && judgeModelId) {
+    const config = judgeConfig;
+    const modelIdForJudge = judgeModelId;
+
+    const { loadRubric } = await import("./rubrics.js");
+    const { judgeRun, shouldJudge } = await import("./judge.js");
+
+    const rubricCache = new Map<TargetFunction, RubricCriterion[]>();
+    async function getRubric(fn: TargetFunction): Promise<RubricCriterion[]> {
+      const cached = rubricCache.get(fn);
+      if (cached) return cached;
+      const criteria = await loadRubric(fn);
+      rubricCache.set(fn, criteria);
+      return criteria;
+    }
+
+    const toJudge = results.filter((r) => shouldJudge(r));
+    let nextJudgeIndex = 0;
+
+    const judgeWorker = async (): Promise<void> => {
+      for (;;) {
+        if (budgetExceeded) return;
+        const jobIndex = nextJudgeIndex++;
+        if (jobIndex >= toJudge.length) return;
+        const result = toJudge[jobIndex];
+
+        const scenario = scenarioByKey.get(`${result.function}::${result.scenarioId}`);
+        if (!scenario) continue;
+
+        const packageId = scenario.packageId ?? modules.DEFAULT_PACKAGE_ID;
+        let pkg = packageCache.get(packageId);
+        if (pkg === undefined) {
+          pkg = await modules.loadPackage(packageId);
+          packageCache.set(packageId, pkg);
+        }
+        if (!pkg) continue;
+
+        const criteria = await getRubric(result.function);
+        const judge = await judgeRun({
+          scenario,
+          result,
+          criteria,
+          context: {
+            world: pkg.world,
+            character: pkg.character,
+            lifestyle: pkg.lifestyle,
+            resolvedScenario: scenario,
+          },
+          judgeModelId: modelIdForJudge,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          pricing,
+        });
+        result.judge = judge;
+
+        const costText = judge.costUsd === null ? "不明" : `$${judge.costUsd.toFixed(5)}`;
+        console.log(
+          `[cli] judge ${result.function}/${result.scenarioId} #${result.repeatIndex} ` +
+            (judge.error ? `ERROR: ${judge.error}` : `OK (${judge.latencyMs}ms, ${costText})`)
+        );
+
+        if (judge.costUsd !== null) actualCostUsd += judge.costUsd;
+        if (actualCostUsd > args.maxCostUsd) {
+          console.warn(`[cli] 実際の料金が上限 $${args.maxCostUsd} を超えました。残りの実行・採点を打ち切ります。`);
+          budgetExceeded = true;
+          return;
+        }
+      }
+    };
+
+    const judgeWorkerCount = Math.max(1, Math.min(args.concurrency, toJudge.length));
+    await Promise.all(Array.from({ length: judgeWorkerCount }, () => judgeWorker()));
+  }
+
   const finishedAt = new Date().toISOString();
   const { summarize, renderReport, compareToBaseline } = await import("./report.js");
 
   const summary = summarize(
     results,
-    { functions: args.functions, models: args.models, repeat: args.repeat, maxCostUsd: args.maxCostUsd },
+    {
+      functions: args.functions,
+      models: args.models,
+      repeat: args.repeat,
+      maxCostUsd: args.maxCostUsd,
+      judgeModelId: args.judge ? judgeModelId : null,
+    },
     startedAtDate.toISOString(),
     finishedAt
   );

@@ -40,6 +40,12 @@ export async function loadEstimates(estimatesPath: string = DEFAULT_ESTIMATES_PA
   return data.functions;
 }
 
+/** estimates.json を読み、採点1回あたりの想定トークン数（judge）を返す */
+export async function loadJudgeEstimate(estimatesPath: string = DEFAULT_ESTIMATES_PATH): Promise<FunctionEstimate> {
+  const data = await readJson<{ judge: FunctionEstimate }>(estimatesPath);
+  return data.judge;
+}
+
 // -------------------------------------------------------
 // 実際の使用量からの料金計算
 // -------------------------------------------------------
@@ -138,4 +144,35 @@ export function estimateCost(
   }
 
   return { rows, totalUsd, missingPricingModelIds: [...missingPricingModelIds] };
+}
+
+// -------------------------------------------------------
+// 採点（judge）の見積もり
+//
+// 採点は実行（RunResult）ごとに高々1回、採点用のモデル（judgeModelId、固定）で行う。
+// 見積もりでは「対象になりうる実行の回数（= 実行の見積もりの calls の合計）すべてが
+// 採点される」という上限寄りの想定をする（result.error や modelCalls が空の実行は
+// 実際には採点されないため、実際の料金はこれ以下になる）。
+// -------------------------------------------------------
+
+export interface JudgeCostEstimateResult {
+  /** 採点される想定の回数（実行の見積もりの calls の合計） */
+  calls: number;
+  /** null は料金表に無い採点用モデル */
+  estimatedCostUsd: number | null;
+}
+
+export function estimateJudgeCost(
+  totalRunCalls: number,
+  judgeEstimate: FunctionEstimate,
+  judgeModelId: string,
+  pricing: Record<string, ModelPrice>
+): JudgeCostEstimateResult {
+  const price = pricing[judgeModelId] ?? null;
+  if (!price) {
+    return { calls: totalRunCalls, estimatedCostUsd: null };
+  }
+  const perCallCostUsd =
+    (judgeEstimate.inputTokens / 1_000_000) * price.input + (judgeEstimate.outputTokens / 1_000_000) * price.output;
+  return { calls: totalRunCalls, estimatedCostUsd: perCallCostUsd * totalRunCalls };
 }

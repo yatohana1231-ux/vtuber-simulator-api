@@ -8,7 +8,9 @@ import {
   calculateCallCost,
   calculateRunCost,
   estimateCost,
+  estimateJudgeCost,
   loadEstimates,
+  loadJudgeEstimate,
   loadPricing,
   type CostPlanItem,
   type EstimatesConfig,
@@ -122,6 +124,32 @@ describe("loadPricing / loadEstimates", () => {
     expect(estimates.emotionUpdater).toEqual({ inputTokens: 1100, outputTokens: 120 });
     expect(estimates.memoryRetriever).toEqual({ inputTokens: 1300, outputTokens: 500 });
   });
+
+  it("loadJudgeEstimate はjudgeの中身を返す", async () => {
+    const estimatesPath = path.join(dir, "estimates.json");
+    await writeFile(
+      estimatesPath,
+      JSON.stringify({
+        functions: {
+          absenceSimulator: { inputTokens: 1, outputTokens: 2 },
+          dialogueGenerator: { inputTokens: 3, outputTokens: 4 },
+          emotionUpdater: { inputTokens: 5, outputTokens: 6 },
+          memoryRetriever: { inputTokens: 7, outputTokens: 8 },
+        },
+        judge: { inputTokens: 3000, outputTokens: 500 },
+      }),
+      "utf8"
+    );
+
+    const judgeEstimate = await loadJudgeEstimate(estimatesPath);
+
+    expect(judgeEstimate).toEqual({ inputTokens: 3000, outputTokens: 500 });
+  });
+
+  it("既定のパスのjudgeを読み込める", async () => {
+    const judgeEstimate = await loadJudgeEstimate();
+    expect(judgeEstimate).toEqual({ inputTokens: 3000, outputTokens: 500 });
+  });
 });
 
 describe("estimateCost", () => {
@@ -157,5 +185,31 @@ describe("estimateCost", () => {
     expect(result.rows[0].estimatedCostUsd).toBeNull();
     expect(result.totalUsd).toBe(0);
     expect(result.missingPricingModelIds).toEqual(["unknown-model"]);
+  });
+});
+
+describe("estimateJudgeCost", () => {
+  const judgeEstimate = { inputTokens: 3000, outputTokens: 500 };
+  const pricing: Record<string, ModelPrice> = {
+    "judge-model": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  };
+
+  it("採点1回あたりの想定トークン数×呼び出し回数×単価で見積もる", () => {
+    // 1回あたり: (3000/1e6)*5 + (500/1e6)*25 = 0.015 + 0.0125 = 0.0275
+    const result = estimateJudgeCost(10, judgeEstimate, "judge-model", pricing);
+
+    expect(result.calls).toBe(10);
+    expect(result.estimatedCostUsd).toBeCloseTo(0.0275 * 10);
+  });
+
+  it("料金表に採点用モデルが無い → estimatedCostUsdはnull", () => {
+    const result = estimateJudgeCost(10, judgeEstimate, "unknown-judge-model", pricing);
+    expect(result.estimatedCostUsd).toBeNull();
+    expect(result.calls).toBe(10);
+  });
+
+  it("呼び出し回数が0 → 0円", () => {
+    const result = estimateJudgeCost(0, judgeEstimate, "judge-model", pricing);
+    expect(result.estimatedCostUsd).toBe(0);
   });
 });

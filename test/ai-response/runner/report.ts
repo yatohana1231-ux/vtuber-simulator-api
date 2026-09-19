@@ -52,6 +52,10 @@ function formatNumber(value: number): string {
   return Math.round(value).toLocaleString("ja-JP");
 }
 
+function formatJudgeScore(value: number | null): string {
+  return value === null ? "-" : value.toFixed(1);
+}
+
 function truncate(text: string, maxLength = 200): string {
   const chars = Array.from(text);
   if (chars.length <= maxLength) return text;
@@ -104,6 +108,34 @@ export function summarize(
     const totalCacheWrite = sum(group.map((r) => r.metrics.cacheWriteInputTokens));
     const cacheDenominator = totalInput + totalCacheRead + totalCacheWrite;
 
+    // 採点した実行（judge があり、採点自体がエラーになっていない実行）だけを「採点した実行」として数える。
+    const judgedRuns = group.filter((r) => r.judge && !r.judge.error).length;
+
+    // 観点の id は、このグループ（機能 × モデル）の実行に出てきたものすべてを集める
+    // （採点がエラーの実行の scores も、値が全て null なだけで id 自体は含まれ得る）。
+    const criterionIds = new Set<string>();
+    for (const r of group) {
+      if (r.judge) {
+        for (const id of Object.keys(r.judge.scores)) criterionIds.add(id);
+      }
+    }
+
+    const avgJudgeScores: Record<string, number | null> = {};
+    for (const id of criterionIds) {
+      const values: number[] = [];
+      for (const r of group) {
+        const score = r.judge?.scores[id];
+        if (typeof score === "number") values.push(score);
+      }
+      avgJudgeScores[id] = values.length > 0 ? average(values) : null;
+    }
+
+    const nonNullCriterionAverages = Object.values(avgJudgeScores).filter(
+      (v): v is number => v !== null
+    );
+    const avgJudgeScoreOverall =
+      nonNullCriterionAverages.length > 0 ? average(nonNullCriterionAverages) : null;
+
     rows.push({
       function: first.function,
       modelKey: first.modelKey,
@@ -117,6 +149,9 @@ export function summarize(
       avgInputTokens: average(group.map((r) => r.metrics.inputTokens)),
       avgOutputTokens: average(group.map((r) => r.metrics.outputTokens)),
       cacheReadRatio: cacheDenominator > 0 ? totalCacheRead / cacheDenominator : 0,
+      judgedRuns,
+      avgJudgeScores,
+      avgJudgeScoreOverall,
     });
   }
 
@@ -124,11 +159,15 @@ export function summarize(
     (a, b) => a.function.localeCompare(b.function) || a.modelKey.localeCompare(b.modelKey)
   );
 
-  const totalCostUsd = sum(
+  // 実行（run*）自体の料金。採点の料金は含めない（avgCostUsd と同じ考え方）。
+  const executionCostUsd = sum(
     results.map((r) => r.metrics.costUsd).filter((c): c is number => c !== null)
   );
+  // 採点の料金（null は0扱い）。
+  const judgeCostUsd = sum(results.map((r) => r.judge?.costUsd ?? 0));
+  const totalCostUsd = executionCostUsd + judgeCostUsd;
 
-  return { startedAt, finishedAt, options, totalCostUsd, rows };
+  return { startedAt, finishedAt, options, totalCostUsd, judgeCostUsd, rows };
 }
 
 // -------------------------------------------------------
@@ -145,6 +184,8 @@ function renderConditionsSection(summary: RunSummary): string {
     `- モデル: ${options.models.join(", ") || "(なし)"}`,
     `- 繰り返し回数: ${options.repeat}`,
     `- 料金の上限: $${options.maxCostUsd}`,
+    `- 採点に使ったモデル: ${options.judgeModelId ?? "採点なし"}`,
+    `- 採点の料金: ${formatCostUsd(summary.judgeCostUsd)}`,
     `- 総料金: ${formatCostUsd(summary.totalCostUsd)}`,
   ];
   return lines.join("\n");
@@ -152,17 +193,93 @@ function renderConditionsSection(summary: RunSummary): string {
 
 function renderSummaryTable(summary: RunSummary): string {
   const header =
-    "| 機能 | モデル | 実行数 | エラー | ルールの合格率 | 1回あたりの料金 | 平均所要時間 | 平均入力/出力トークン | キャッシュの読み出し率 |\n" +
-    "|---|---|---|---|---|---|---|---|---|";
+    "| 機能 | モデル | 実行数 | エラー | ルールの合格率 | 1回あたりの料金 | 平均所要時間 | 平均入力/出力トークン | キャッシュの読み出し率 | 採点の平均（全観点） |\n" +
+    "|---|---|---|---|---|---|---|---|---|---|";
   const rows = summary.rows.map((row) => {
     return (
       `| ${row.function} | ${row.modelKey} | ${row.runs} | ${row.errors} | ` +
       `${formatPercent(row.checksPassed, row.checksTotal)} | ${formatCostUsd(row.avgCostUsd)} | ` +
       `${formatMs(row.avgLatencyMs)} | ${formatNumber(row.avgInputTokens)} / ${formatNumber(row.avgOutputTokens)} | ` +
-      `${(row.cacheReadRatio * 100).toFixed(1)}% |`
+      `${(row.cacheReadRatio * 100).toFixed(1)}% | ${formatJudgeScore(row.avgJudgeScoreOverall)} |`
     );
   });
   return ["## 機能ごとの集計", "", header, ...rows].join("\n");
+}
+
+interface JudgeCriterionTally {
+  /** 点数が付いた実行の数 */
+  scored: number;
+  /** 対象外と判定された実行の数 */
+  notApplicable: number;
+}
+
+/**
+ * 機能 × モデル × 観点ごとに、点数が付いた実行の数と対象外になった実行の数を数える。
+ * 採点自体がエラーだった実行は数えない（scores が全て null で、対象外かどうか判断できないため）。
+ */
+function tallyJudgeCriteria(results: RunResult[]): Map<string, JudgeCriterionTally> {
+  const tallies = new Map<string, JudgeCriterionTally>();
+  for (const r of results) {
+    if (!r.judge || r.judge.error) continue;
+    for (const [id, score] of Object.entries(r.judge.scores)) {
+      const key = `${r.function}::${r.modelKey}::${id}`;
+      const existing = tallies.get(key) ?? { scored: 0, notApplicable: 0 };
+      if (score !== null) {
+        existing.scored += 1;
+      } else if (r.judge.notApplicable.includes(id)) {
+        existing.notApplicable += 1;
+      }
+      tallies.set(key, existing);
+    }
+  }
+  return tallies;
+}
+
+function renderJudgeScoresByCriterionSection(summary: RunSummary, results: RunResult[]): string {
+  const byFunction = new Map<TargetFunction, SummaryRow[]>();
+  for (const row of summary.rows) {
+    const list = byFunction.get(row.function);
+    if (list) {
+      list.push(row);
+    } else {
+      byFunction.set(row.function, [row]);
+    }
+  }
+
+  const criterionTallies = tallyJudgeCriteria(results);
+
+  const functions = [...byFunction.keys()].sort();
+  const sections: string[] = [];
+
+  for (const fn of functions) {
+    const rows = byFunction.get(fn)!;
+    const criterionIds = [...new Set(rows.flatMap((r) => Object.keys(r.avgJudgeScores)))].sort();
+    if (criterionIds.length === 0) continue;
+
+    const header =
+      `| モデル | ${criterionIds.join(" | ")} |\n` +
+      `|---|${criterionIds.map(() => "---").join("|")}|`;
+    const rowLines = rows.map((row) => {
+      const cells = criterionIds.map((id) => {
+        const value = row.avgJudgeScores[id] ?? null;
+        const tally = criterionTallies.get(`${row.function}::${row.modelKey}::${id}`) ?? {
+          scored: 0,
+          notApplicable: 0,
+        };
+        const countText =
+          tally.notApplicable > 0
+            ? `${tally.scored}件、対象外 ${tally.notApplicable}件`
+            : `${tally.scored}件`;
+        return `${formatJudgeScore(value)}（${countText}）`;
+      });
+      return `| ${row.modelKey} | ${cells.join(" | ")} |`;
+    });
+
+    sections.push([`### ${fn}`, "", header, ...rowLines].join("\n"));
+  }
+
+  const body = sections.length > 0 ? sections.join("\n\n") : "(採点なし)";
+  return ["## 採点の観点ごとの平均", "", body].join("\n");
 }
 
 interface CheckTypeTally {
@@ -284,6 +401,28 @@ function formatDeltas(
   return parts.join(", ");
 }
 
+function renderJudgePreview(result: RunResult): string {
+  if (!result.judge) return "  - 採点: なし";
+  if (result.judge.error) {
+    return `  - 採点: エラー — ${truncate(result.judge.error, 200)}`;
+  }
+
+  const lines = ["  - 採点:"];
+  for (const [id, score] of Object.entries(result.judge.scores)) {
+    const scoreText = result.judge.notApplicable.includes(id)
+      ? "対象外"
+      : score === null
+        ? "-"
+        : String(score);
+    const reason = result.judge.reasons[id];
+    lines.push(`    - ${id}: ${scoreText}${reason ? ` — ${truncate(reason, 150)}` : ""}`);
+  }
+  if (result.judge.comment) {
+    lines.push(`    - 総評: ${truncate(result.judge.comment, 150)}`);
+  }
+  return lines.join("\n");
+}
+
 function renderScenarioComparison(results: RunResult[], scenarios: Scenario[]): string {
   const lines = ["## シナリオごとの並べ比べ", ""];
 
@@ -311,7 +450,12 @@ function renderScenarioComparison(results: RunResult[], scenarios: Scenario[]): 
     }
 
     for (const [modelKey, result] of byModel) {
-      lines.push(`- モデル: ${modelKey}`, renderOutputPreview(result), renderFailedChecks(result.checks));
+      lines.push(
+        `- モデル: ${modelKey}`,
+        renderOutputPreview(result),
+        renderFailedChecks(result.checks),
+        renderJudgePreview(result)
+      );
     }
     lines.push("");
   }
@@ -326,6 +470,8 @@ export function renderReport(summary: RunSummary, results: RunResult[], scenario
     renderConditionsSection(summary),
     "",
     renderSummaryTable(summary),
+    "",
+    renderJudgeScoresByCriterionSection(summary, results),
     "",
     renderCheckTypeTable(results),
     "",
@@ -353,19 +499,23 @@ export function compareToBaseline(summary: RunSummary, baseline: RunSummary): st
 
   const allKeys = [...new Set([...currentByKey.keys(), ...baselineByKey.keys()])].sort();
 
+  const sameJudgeModel = summary.options.judgeModelId === baseline.options.judgeModelId;
+
   const header =
-    "| 機能 | モデル | 合格率（今回 / 基準） | 料金（今回 / 基準） | 所要時間（今回 / 基準） |\n" +
-    "|---|---|---|---|---|";
+    "| 機能 | モデル | 合格率（今回 / 基準） | 料金（今回 / 基準） | 所要時間（今回 / 基準） | 採点の平均（今回 / 基準） |\n" +
+    "|---|---|---|---|---|---|";
 
   const rows = allKeys.map((key) => {
     const current = currentByKey.get(key);
     const base = baselineByKey.get(key);
 
     if (current && !base) {
-      return `| ${current.function} | ${current.modelKey} | ${formatPercent(current.checksPassed, current.checksTotal)}（基準に無い） | ${formatCostUsd(current.avgCostUsd)}（基準に無い） | ${formatMs(current.avgLatencyMs)}（基準に無い） |`;
+      const judgeCell = `${formatJudgeScore(current.avgJudgeScoreOverall)}（基準に無い）`;
+      return `| ${current.function} | ${current.modelKey} | ${formatPercent(current.checksPassed, current.checksTotal)}（基準に無い） | ${formatCostUsd(current.avgCostUsd)}（基準に無い） | ${formatMs(current.avgLatencyMs)}（基準に無い） | ${judgeCell} |`;
     }
     if (!current && base) {
-      return `| ${base.function} | ${base.modelKey} | （今回に無い）基準: ${formatPercent(base.checksPassed, base.checksTotal)} | （今回に無い）基準: ${formatCostUsd(base.avgCostUsd)} | （今回に無い）基準: ${formatMs(base.avgLatencyMs)} |`;
+      const judgeCell = `（今回に無い）基準: ${formatJudgeScore(base.avgJudgeScoreOverall)}`;
+      return `| ${base.function} | ${base.modelKey} | （今回に無い）基準: ${formatPercent(base.checksPassed, base.checksTotal)} | （今回に無い）基準: ${formatCostUsd(base.avgCostUsd)} | （今回に無い）基準: ${formatMs(base.avgLatencyMs)} | ${judgeCell} |`;
     }
 
     const c = current!;
@@ -383,8 +533,26 @@ export function compareToBaseline(summary: RunSummary, baseline: RunSummary): st
 
     const latencyCell = formatDiff(c.avgLatencyMs, b.avgLatencyMs, formatMs);
 
-    return `| ${c.function} | ${c.modelKey} | ${rateCell} | ${costCell} | ${latencyCell} |`;
+    let judgeCell: string;
+    if (!sameJudgeModel) {
+      judgeCell = `${formatJudgeScore(c.avgJudgeScoreOverall)} / ${formatJudgeScore(b.avgJudgeScoreOverall)}（比較不可）`;
+    } else if (c.avgJudgeScoreOverall === null || b.avgJudgeScoreOverall === null) {
+      judgeCell = `${formatJudgeScore(c.avgJudgeScoreOverall)}（基準: ${formatJudgeScore(b.avgJudgeScoreOverall)}）`;
+    } else {
+      judgeCell = formatDiff(c.avgJudgeScoreOverall, b.avgJudgeScoreOverall, (v) => v.toFixed(1));
+    }
+
+    return `| ${c.function} | ${c.modelKey} | ${rateCell} | ${costCell} | ${latencyCell} | ${judgeCell} |`;
   });
 
-  return ["# 基準との比較", "", header, ...rows].join("\n");
+  const lines = ["# 基準との比較", ""];
+  if (!sameJudgeModel) {
+    lines.push(
+      "(注: 基準と今回で採点に使ったモデルが違うので、採点の点数は比べられない)",
+      ""
+    );
+  }
+  lines.push(header, ...rows);
+
+  return lines.join("\n");
 }

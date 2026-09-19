@@ -157,6 +157,52 @@ describe("invokeModel（モデルIDの決定とinferenceConfig）", () => {
     });
     expect(command.input.inferenceConfig?.topP).toBeUndefined();
   });
+
+  it("optionsのtemperatureがある → inferenceConfig.temperatureに使われる（既定の0.8ではない）", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel("system", "user", 1000, {
+      modelId: "jp.anthropic.claude-sonnet-4-6",
+      temperature: 0,
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.inferenceConfig).toEqual({
+      maxTokens: 1000,
+      temperature: 0,
+    });
+  });
+
+  it("optionsのtemperatureが無い → 既定の0.8が使われる", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel("system", "user");
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.inferenceConfig?.temperature).toBe(0.8);
+  });
+
+  it("Novaのモデル + optionsのtemperature → temperatureが上書きされ、topPは0.9のまま", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel("system", "user", 1000, {
+      modelId: "apac.amazon.nova-lite-v1:0",
+      temperature: 0.2,
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.inferenceConfig).toEqual({
+      maxTokens: 1000,
+      temperature: 0.2,
+      topP: 0.9,
+    });
+  });
 });
 
 describe("invokeModelJson（options.modelIdの受け渡し）", () => {
@@ -171,6 +217,20 @@ describe("invokeModelJson（options.modelIdの受け渡し）", () => {
 
     const command = sendSpy.mock.calls[0][0] as ConverseCommand;
     expect(command.input.modelId).toBe("jp.anthropic.claude-sonnet-4-6");
+  });
+
+  it("optionsのtemperatureがinvokeModelに渡る", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(['{"ok": true}']) as never);
+
+    await invokeModelJson("system", "user", { ok: false }, 2000, {
+      modelId: "jp.anthropic.claude-sonnet-4-6",
+      temperature: 0,
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.inferenceConfig?.temperature).toBe(0);
   });
 });
 

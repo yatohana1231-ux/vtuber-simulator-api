@@ -2,7 +2,7 @@
 
 AI 応答テスト（AI の出力の質を確かめ、モデルやプロンプトを比べるテスト）の実装。考え方は [`../../../test/test_ai_response/README.md`](../../../test/test_ai_response/README.md) を参照。
 
-**整備中（2026-09-19〜）。** `.notes/model-selection-roadmap.md` のフェーズ3で仕組み（実行・判定・集計・レポート）、フェーズ4でシナリオ（4機能・計27件）と評価基準を作った。LLM による採点（フェーズ5）はこれから。
+**整備中（2026-09-19〜）。** `.notes/model-selection-roadmap.md` のフェーズ3で仕組み（実行・判定・集計・レポート）、フェーズ4でシナリオ（4機能・計27件）と評価基準を作った。フェーズ5で LLM による採点を加えた。
 
 ## 実行
 
@@ -25,6 +25,8 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | `--concurrency` | 3 | 同じモデルの中で同時に走らせる数（モデルは環境変数で切り替えるため、違うモデルは同時に走らせない） |
 | `--max-cost` | 5（USD） | 見積もりがこれを超えたら実行しない（終了コード 2）。実行中も実際の料金がこれを超えたら残りを打ち切る |
 | `--out` | `results/<タイムスタンプ>` | 結果の保存先 |
+| `--no-judge` | （採点する） | LLM による採点をしない（ルールによる判定だけ） |
+| `--judge-model` | `judge.json` の `modelId` | 採点に使うモデルを一時的に変える（変えると基準の点数と比べられない） |
 
 結果（`--out`）: `runs.jsonl`（1回の実行ごとの結果。出力・Bedrock の呼び出し〔プロンプト・応答・使用量〕・DynamoDB への書き込み・判定）、`summary.json`（機能 × モデルの集計）、`report.md`（比較レポート）。
 
@@ -36,7 +38,7 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 2. 計画（シナリオ × モデル × 繰り返し）と料金の見積もり（`estimates.json` の想定トークン数 × `pricing.json` の単価）を出す
 3. `src/lib/dynamo.ts` の `dynamo.send` をメモリ上の偽物に差し替え、シナリオの状態を入れる。Bedrock の呼び出しは記録するだけで、そのまま本物に送る
 4. モデルごとに、環境変数 `BEDROCK_MODEL_ID` を切り替えて各機能の本番の `run*` を呼ぶ
-5. ルールで判定し（`runner/checks/`）、集計してレポートを書く（`runner/report.ts`）
+5. ルールで判定し（`runner/checks/`）、LLM で採点し（`runner/judge.ts`。Bedrock を呼ばなかった実行・例外になった実行は採点しない）、集計してレポートを書く（`runner/report.ts`）
 
 | パス | 内容 |
 |---|---|
@@ -49,10 +51,13 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | `runner/execute.ts` | 1回の実行（パッケージの読み込み、状態の投入、リクエストの組み立て、`run*` の呼び出し） |
 | `runner/cost.ts` | 料金の計算と見積もり |
 | `runner/checks/` | ルールによる判定（機能ごとのファイル。判定の種類は下の表） |
-| `runner/report.ts` | 集計、比較レポート（Markdown）、基準との比較 |
+| `runner/report.ts` | 集計（ルールの合格率・採点の平均・料金など）、比較レポート（Markdown）、基準との比較 |
+| `runner/rubrics.ts` | 評価基準（`rubrics/<機能名>.md`）を観点の一覧に読む。書式が崩れていたら例外 |
+| `runner/judge.ts` | LLM による採点。システムプロンプトは採点者の役割・評価基準・ルール・出力形式（機能ごとに同じ文字列でキャッシュに乗る）。ユーザーメッセージはシナリオの説明と `judgeFocus`・キャラクターと世界観・入力・出力（**比べているモデルの名前は渡さない**）。観点ごとに 1〜5 の整数と理由。そのシナリオで評価する材料が無い観点は「対象外」（点数を付けず `notApplicable` に入れ、平均から外す。例: 続いている話題が無いシナリオの話題の扱い）。`temperature` 0 |
+| `judge.json` | 採点に使うモデル・`temperature`・最大トークン数。暫定で Claude Sonnet 4.6（Opus 5 の利用手続き待ち） |
 | `models.json` | 比較できるモデル（キー → 推論プロファイルの ID・表示名）。足すときはここと `pricing.json` に書く |
 | `pricing.json` | モデルごとの料金（100万トークンあたりの USD。確認日と出典付き。手で更新する） |
-| `estimates.json` | 見積もりに使う、機能ごとの1回あたりの想定トークン数 |
+| `estimates.json` | 見積もりに使う、機能ごとと採点の1回あたりの想定トークン数 |
 | `scenarios/` | シナリオ（`<機能名>/<id>.json`。id は機能の中で一意）。下の「シナリオの一覧」を参照 |
 | `rubrics/` | LLM による採点の評価基準（`<機能名>.md`。書式は [`rubrics/README.md`](rubrics/README.md)） |
 | `baseline/` | 基準の集計（`--save-baseline` で作る。git に残す） |

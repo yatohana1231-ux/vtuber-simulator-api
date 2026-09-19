@@ -4,7 +4,7 @@
 
 | ファイル | 内容 |
 |---|---|
-| `bedrock.ts` | Bedrock Converse API のラッパー。`invokeModel`（テキスト）と `invokeModelJson`（応答から JSON を抽出し、失敗時は既定値）。システムプロンプトは文字列1つか、変わりにくい順の層の配列で渡す。配列のときは層の境目にプロンプトキャッシュの区切り（`cachePoint`、最大4つ）を入れる（D-017。環境変数 `PROMPT_CACHE_ENABLED=false` で無効）。応答のトークン数（キャッシュの読み書きを含む）とモデル ID をログに出す。モデル ID は呼び出しのたびに決める（`options.modelId` → 環境変数 `BEDROCK_MODEL_ID` → `DEFAULT_MODEL_ID`〔Nova Lite〕の順。`resolveModelId`）。推論パラメータは `temperature: 0.8` に、モデルが対応する場合だけ `topP: 0.9` を足す |
+| `bedrock.ts` | Bedrock Converse API のラッパー。`invokeModel`（テキスト）と `invokeModelJson`（応答から JSON を抽出し、失敗時は既定値）。システムプロンプトは文字列1つか、変わりにくい順の層の配列で渡す。配列のときは層の境目にプロンプトキャッシュの区切り（`cachePoint`、最大4つ）を入れる（D-017。環境変数 `PROMPT_CACHE_ENABLED=false` で無効）。応答のトークン数（キャッシュの読み書きを含む）とモデル ID をログに出す。モデル ID は呼び出しのたびに決める（`options.modelId` → 環境変数 `BEDROCK_MODEL_ID` → `DEFAULT_MODEL_ID`〔Nova Lite〕の順。`resolveModelId`）。推論パラメータは `temperature: 0.8`（`options.temperature` で変えられる。AI 応答テストの採点は 0）に、モデルが対応する場合だけ `topP: 0.9` を足す |
 | `modelProfiles.ts` | `getModelProfile(modelId)` — モデルごとの呼び出し方の違い（今は `topP` を受け付けるかだけ）。Nova は受け付け、Claude は `temperature` との併用でエラーになるため付けない（2026-09-19 に実測。未知のモデルは付けない） |
 | `dynamo.ts` | DynamoDB（会話ログ／キャラクター記憶・状態／イベント）へのアクセスを集約。重要記憶は `getRelevantMemories(characterId, ...)` で重要度・新しさ・タグ一致により上位件数だけを返す。不在期間の記録は `saveAbsenceRecord`（イベントテーブルの履歴とキャラクター記憶テーブルの `absence-latest` をトランザクションで同時に保存）・`getLatestAbsenceRecord`（強い整合性で最新1件）・`getRecentAbsenceRecords`（GSI から直近 N 件、旧形式は読み飛ばす）。不在期間の記録の関数は、まだどのエンドポイントからも使っていない |
 | `packages.ts` | `packageId` からキャラクター×世界観×生活様式パッケージ（`api/content/`）を読み込む。ID 検証、コンテナ内キャッシュ、口調の例文の件数制限（最大5件）、`world.timezone`・`lifestyle`（生活リズム・出来事の種類）の形式検証を行う |

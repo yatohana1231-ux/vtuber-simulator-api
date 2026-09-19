@@ -86,6 +86,12 @@ export interface InvokeModelOptions {
    * それも無ければ `DEFAULT_MODEL_ID`（`resolveModelId` 参照）。
    */
   modelId?: string;
+  /**
+   * このリクエストだけで使う temperature。省略時は 0.8（既定の挙動を変えない）。
+   * AI 応答テストの LLM 採点（`api/test/ai-response/runner/judge.ts`）など、
+   * 出力のばらつきを抑えたい呼び出しのために指定できる。
+   */
+  temperature?: number;
 }
 
 /**
@@ -99,8 +105,8 @@ export interface InvokeModelOptions {
  *
  * モデル ID は呼び出しごとに `resolveModelId(options.modelId)` で決める
  * （options.modelId → 環境変数 `BEDROCK_MODEL_ID` → `DEFAULT_MODEL_ID` の順）。
- * `inferenceConfig` は `temperature: 0.8` を常に渡し、`topP: 0.9` はモデルが対応する場合
- * （`getModelProfile` が `supportsTopP: true` を返す場合）だけ足す。
+ * `inferenceConfig` は `temperature: options.temperature ?? 0.8` を常に渡し、`topP: 0.9` は
+ * モデルが対応する場合（`getModelProfile` が `supportsTopP: true` を返す場合）だけ足す。
  */
 export async function invokeModel(
   systemPrompt: string | string[],
@@ -127,7 +133,7 @@ export async function invokeModel(
     ],
     inferenceConfig: {
       maxTokens,
-      temperature: 0.8,
+      temperature: options.temperature ?? 0.8,
       ...(supportsTopP ? { topP: 0.9 } : {}),
     },
   });
