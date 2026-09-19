@@ -2,7 +2,7 @@
 // キャラクター×世界観パッケージの読み込み（api/content/ 配下の JSON）
 // -------------------------------------------------------
 
-import { readFile } from "fs/promises";
+import { readdir, readFile } from "fs/promises";
 import path from "path";
 
 import type {
@@ -64,6 +64,14 @@ async function readContentJson<T>(folder: string, key: string): Promise<T | null
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw e;
   }
+}
+
+/** マニフェストの文字列項目（description / fixedGreeting）が空でない文字列であることを検証する。不正なら例外 */
+function validateNonEmptyManifestField(value: unknown, packageId: string, field: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`package ${packageId} has invalid ${field}: ${JSON.stringify(value)}`);
+  }
+  return value;
 }
 
 /** world.timezone が文字列かつ有効なIANAタイムゾーンであることを検証する。不正なら例外 */
@@ -444,11 +452,16 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
   const manifest = await readContentJson<{
     id: string;
     displayName: string;
+    description: string;
+    fixedGreeting: string;
     world: string;
     character: string;
     lifestyle: string;
   }>("packages", packageId);
   if (!manifest) return null;
+
+  const description = validateNonEmptyManifestField(manifest.description, packageId, "description");
+  const fixedGreeting = validateNonEmptyManifestField(manifest.fixedGreeting, packageId, "fixedGreeting");
 
   const world = await readContentJson<World>("worlds", manifest.world);
   if (!world) {
@@ -476,6 +489,8 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
   const pkg: CharacterPackage = {
     id: manifest.id,
     displayName: manifest.displayName,
+    description,
+    fixedGreeting,
     world,
     character: {
       ...character,
@@ -489,4 +504,28 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
     `[loadPackage] loaded package=${packageId} world=${world.key} character=${character.key} lifestyle=${lifestyle.key}`
   );
   return pkg;
+}
+
+/**
+ * content/packages/ にあるパッケージIDを一覧で返す（GET /packages 用）。
+ * ID の形式（ID_PATTERN）に合わない .json ファイル・.json 以外のファイル（README.md など）は無視する。
+ * 並び順は DEFAULT_PACKAGE_ID が（存在すれば）先頭、残りは昇順。packages/ フォルダが無い場合は空配列。
+ */
+export async function listPackageIds(): Promise<string[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(path.join(contentDir(), "packages"));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw e;
+  }
+
+  const ids = entries
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.slice(0, -".json".length))
+    .filter((id) => ID_PATTERN.test(id))
+    .sort();
+
+  if (!ids.includes(DEFAULT_PACKAGE_ID)) return ids;
+  return [DEFAULT_PACKAGE_ID, ...ids.filter((id) => id !== DEFAULT_PACKAGE_ID)];
 }

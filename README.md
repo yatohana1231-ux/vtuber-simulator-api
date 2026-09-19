@@ -34,7 +34,7 @@ api/
 ├── infra/                              # CDK インフラ定義
 │   ├── bin/                            # CDK エントリーポイント
 │   ├── lib/
-│   │   ├── vtuber-simulator-stack.ts   # メインスタック（Lambda x4＋`/characters`・デバッグ用, API GW, DynamoDB）
+│   │   ├── vtuber-simulator-stack.ts   # メインスタック（Lambda x4＋`/characters`・`/packages`・デバッグ用, API GW, DynamoDB）
 │   │   └── github-oidc-stack.ts        # GitHub OIDC 認証スタック
 │   ├── cdk.json / package.json / tsconfig.json
 ├── scripts/
@@ -48,6 +48,7 @@ api/
 │   │   ├── memoryRetriever.ts
 │   │   ├── dialogueGenerator.ts
 │   │   ├── testerCharacters.ts         # GET/POST /characters
+│   │   ├── packageCatalog.ts           # GET /packages
 │   │   └── debugCharacterState.ts      # POST /debug-character-state（デバッグ専用。stg のみ）
 │   ├── types.ts                        # 型定義
 │   ├── absenceSimulator/{index.ts, skeleton.ts, actionSlots.ts, eventKindSelection.ts, prompt.ts, modelOutput.ts, prompts/}  # 不在期間のシミュレーション
@@ -55,6 +56,7 @@ api/
 │   ├── memoryRetriever/{index.ts, prompt.ts, prompts/}     # 重要記憶管理
 │   ├── dialogueGenerator/{index.ts, prompt.ts, prompts/}   # セリフ生成
 │   ├── testerCharacters/               # テスターのキャラクターの一覧・作成
+│   ├── packageCatalog/                 # パッケージ（キャラクター×世界観）の一覧
 │   ├── debugCharacterState/index.ts    # 感情・関係値の状態の読み取り・書き換え（デバッグ専用）
 │   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 各テンプレート共有のパーシャル
 │   └── lib/{bedrock.ts, modelProfiles.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts, absenceRecordText.ts}
@@ -94,7 +96,7 @@ api/
 3. 各機能の固定部のテンプレートは `{{> world}}` で世界観を、`conversation.fixed.mustache`（`dialogueGenerator`）はさらに `{{> speechExamples}}` で口調の例文を差し込む。キャラクターの `background`（設定）はすべての機能のプロンプトに入る
 4. プロンプトに出す日時は、世界観のタイムゾーンでの表記（`2026/09/18(金) 07:00`）にする
 
-世界観やキャラクターを追加するときは JSON を足すだけで、テンプレートとコードの変更は不要（再デプロイは必要）。データの書式は [`content/README.md`](content/README.md)、パーシャルは [`src/promptPartials/README.md`](src/promptPartials/README.md) を参照。
+世界観やキャラクターを追加するときは JSON を足すだけで、テンプレートとコードの変更は不要（再デプロイは必要）。フロントは、選べるパッケージの一覧と表示用の文言（キャラクター名・紹介文・固定の挨拶など）を `GET /packages` で受け取るので、パッケージを足してもフロントの変更は要らない（2026-09-19〜、D-042）。データの書式は [`content/README.md`](content/README.md)、パーシャルは [`src/promptPartials/README.md`](src/promptPartials/README.md) を参照。
 
 ### プロンプトの層とキャッシュ
 
@@ -709,6 +711,31 @@ erDiagram
 - `GET /characters` → `200 { "characters": [ { "characterId", "packageId", "label", "createdAt" } ] }`（作成日時の古い順）
 - `POST /characters`（本文 `{ "packageId"?: string, "label"?: string }`。`packageId` の省略時は `yui-modern-tokyo`、`label` は前後の空白を除いて1〜30文字、省略時は「キャラクター{n}」）→ `201 { "characterId", "packageId", "label", "createdAt" }`。`characterId` はサーバーが UUID で発番する。不正な `packageId`・`label` は 400、1人あたりの上限（5つ）に達していたら `409 { "error": "character limit reached" }`
 
+### `GET /packages`
+
+2026-09-19 に追加（D-042）。`content/packages/` にあるパッケージの一覧と、フロントの表示用の文言を返す。フロントは、キャラクターの新規作成のときのプロファイルの選択と、画面に出すキャラクター名・固定の挨拶に使う。内容はテスターによらない（`x-tester-id` は見ない）。専用の Lambda（`vtuber-simu-package-catalog-{stage}`）で、Bedrock・DynamoDB の権限は持たない。
+
+```json
+{
+  "packages": [
+    {
+      "packageId": "yui-modern-tokyo",
+      "displayName": "ゆい（現代東京）",
+      "characterName": "ゆい",
+      "worldName": "現代の東京",
+      "description": "都内の高校に通う2年生で、デビューしたての VTuber。明るく前向きだけど、初対面では少し緊張しがち。",
+      "fixedGreeting": "暇だったらお話ししない？",
+      "isDefault": true
+    }
+  ]
+}
+```
+
+- `characterName`・`worldName` は `content/characters/`・`content/worlds/` の `name`、`displayName`・`description`（紹介文）・`fixedGreeting`（不在が短いログインでフロントが出す固定の挨拶）は `content/packages/*.json` の値。`isDefault` は `packageId` の省略時に使われるパッケージ（`yui-modern-tokyo`）だけ `true`。
+- 並び順は、既定のパッケージが先頭、残りは `packageId` の昇順。
+- 読み込み・検証に失敗したパッケージは、一覧から外してログ（`console.error`）に出す（1つの不備で一覧の全体を止めない）。
+- `GET` 以外は `405 { "error": "method not allowed" }`。
+
 ### `POST /debug-character-state`（デバッグ専用）
 
 2026-09-19 に追加（`.notes/done/debug-character-state-roadmap.md`、D-038）。同日、感情・関係値の状態の新しい形（D-040）に合わせて契約を作り直した。状態レコード（キャラクター記憶テーブルの `index = "state"`）を直接読み書きする。ブラウザのデモ（`front-web`）のデバッグパネルの「状態」タブが使う。**`infra/cdk.json` の `context.enableDebugEndpoints.<stage>` が `true` のステージ（stg）にだけ作る。**専用の Lambda で、Bedrock の権限は持たない（キャラクター記憶テーブルの GetItem・PutItem と、持ち主の確認のための読み取りだけ）。
@@ -754,7 +781,7 @@ erDiagram
 ```
 
 - **資格情報:** テスターごとに ID とパスワードを発行し、KeyValueStore（`vtuber-simu-testers-{stage}`）に `ID → salt:sha256(salt + ":" + パスワード)` を登録する。登録・削除・一覧は `scripts/manage-testers.ts`（`npx tsx scripts/manage-testers.ts add <ID>` など。`scripts/README.md`）。反映に1分ほどかかることがある（2026-09-19 の確認では約45秒。反映前は正しい資格情報でも 401 になる）。ID に `:` は使えない。
-- **API キー:** 4つの POST と `/characters` の GET・POST、`/debug-character-state`（有効なステージのみ）は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
+- **API キー:** 4つの POST と `/characters` の GET・POST、`/packages` の GET、`/debug-character-state`（有効なステージのみ）は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
 - **API キーの作り直し:** CloudFormation の動的参照はテンプレートの文字列が変わらないと再解決されないため、Secrets Manager の値を変えるだけでは API キー・CloudFront のヘッダーに反映されない。作り直すときは `infra/cdk.json` の `context.apiKeyVersion.<stage>` を1つ上げて `develop` に push する（`ApiEntrance` がシークレット・API キーの Construct ID・リソース名に版番号を含めるため、新しいシークレット・API キーが作られる）。デプロイ後、古いシークレット・古い API キーは CloudFormation が削除する（古いキーはその時点で使えなくなる）。版1は導入前と同じ ID・名前（`ApiKeySecret`・`ApiKey`、名前は版番号なし）のまま。
 - **ログの保持期間:** 4つの Lambda のロググループの保持期間は30日（`infra/lib/vtuber-simulator-stack.ts` の `logRetention`）。それ以前はログが無期限に残る設定だった（2026-09-19 に修正、`.notes/done/tester-character-ownership-roadmap.md` 検討事項7）。あわせて、共通処理（`handleApiRequest`）のログ出力を、イベント全体ではなく `httpMethod`・`path`・`requestId`・`body` のみの要約に変更した（`headers`・`multiValueHeaders` には CloudFront が付けた `x-api-key`・`x-tester-id` などの秘密が含まれるため）。
 - **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
@@ -782,7 +809,7 @@ erDiagram
 呼び出し順序の詳細は「リクエスト処理フロー」を参照。実装上の注意点:
 
 1. 前段のレスポンスを後段に渡す必要はない。不在期間の記録は `/absence-simulator` が保存し、後段が DynamoDB から読む（`mood`/`perception` も同じで、`/dialogue-generator` は常に DynamoDB から読む。D-032）
-2. `characterId` は `POST /characters` でサーバーに発番してもらい（2026-09-19 から。以前はフロントが発番していた）、サインインしたテスターの `GET /characters` の一覧から選んで使う。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない。持ち主の確認が有効なとき、403 が返ったらキャラクターの選択に戻す
+2. `characterId` は `POST /characters` でサーバーに発番してもらい（2026-09-19 から。以前はフロントが発番していた）、サインインしたテスターの `GET /characters` の一覧から選んで使う。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない。選べるパッケージは `GET /packages` で受け取り、選んだ `packageId` を `POST /characters` に渡す。パッケージは `characterId` に結びついていて、あとから変えられない（4つのエンドポイントには、そのキャラクターの `packageId` を渡す。持ち主の確認が有効なときは、省略すると登録時の `packageId` が使われ、違う `packageId` は 400 になる）。持ち主の確認が有効なとき、403 が返ったらキャラクターの選択に戻す
 3. アプリ終了時の時刻を `lastLoginAt` としてローカル保存し、次回起動時に送信する
 4. ログイン時（不在3時間以上）はセリフの表示までに3回のAPI呼び出しが直列に発生する（`/memory-retriever` はセリフの表示の後）ため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
 5. 不在3時間未満の場合はどのエンドポイントも呼ばず、直前に表示していた mood/perception をそのまま維持する（固定デフォルト値を返す挙動は廃止）
@@ -803,6 +830,7 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 # esbuild src/handlers/absenceSimulator.ts src/handlers/emotionUpdater.ts \
 #   src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts \
 #   src/handlers/testerCharacters.ts src/handlers/debugCharacterState.ts \
+#   src/handlers/packageCatalog.ts \
 #   --bundle --platform=node --target=node24 --format=esm \
 #   --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text
 ```

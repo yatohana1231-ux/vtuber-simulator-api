@@ -104,11 +104,12 @@ describe("enableDebugEndpoints=true → デバッグ専用の Lambda と API リ
     expect(env.EVENTS_TABLE).toBeUndefined();
   });
 
-  it("ロググループの保持期間30日（既存5つ + デバッグ用で6つ）", () => {
+  it("ロググループの保持期間30日（既存6つ + デバッグ用で7つ）", () => {
     const retentions = template.findResources("Custom::LogRetention", {
       Properties: { RetentionInDays: 30 },
     });
-    expect(Object.keys(retentions)).toHaveLength(6);
+    // 既存4つ + テスターのキャラクター + パッケージ一覧（常に作られる） + デバッグ用
+    expect(Object.keys(retentions)).toHaveLength(7);
   });
 
   it("Bedrock の権限が無い", () => {

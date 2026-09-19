@@ -10,6 +10,7 @@ Lambda のエントリーポイント。1ファイル = 1 Lambda = 1 エンド�
 | `dialogueGenerator.ts` | `POST /dialogue-generator` | `runDialogueGenerator` |
 | `testerCharacters.ts` | `GET`/`POST /characters` | `runListTesterCharacters` / `runCreateTesterCharacter` |
 | `debugCharacterState.ts` | `POST /debug-character-state`（デバッグ専用。stg のみ） | `runDebugCharacterState` |
+| `packageCatalog.ts` | `GET /packages` | `runListPackages` |
 
 ## 共通の処理
 
@@ -35,3 +36,13 @@ Lambda のエントリーポイント。1ファイル = 1 Lambda = 1 エンド�
 2. `getTesterIdFromEvent(event)` が `null` なら 403 `{"error":"forbidden"}`（`/characters` は常にテスターの ID が必要）
 3. `httpMethod` で分岐: `GET` → `runListTesterCharacters(testerId)` を呼び 200、`POST` → body をパース（壊れた JSON・オブジェクトでない body は 400。無ければ `{}`）して `runCreateTesterCharacter(testerId, { packageId, label })` を呼び 201、それ以外 → 405 `{"error":"method not allowed"}`
 4. `TesterCharacterInputError`（`src/testerCharacters/index.ts`）は 400、`TesterCharacterLimitError` は 409 `{"error":"character limit reached"}`、それ以外の例外は 500（`error`・`errorName`・`errorMessage`。4本の既存ハンドラーと同じ形）
+
+## `packageCatalog.ts`（`/packages`）
+
+`GET` のみを受ける、`src/packageCatalog/index.ts` の `runListPackages` を呼ぶだけの薄いハンドラー（`.notes/package-selection-roadmap.md` フェーズ1b）。`testerCharacters.ts` と同じく `handleApiRequest` は使わず、ログ出力だけ `summarizeEventForLog` を共有する。処理の流れ:
+
+1. `summarizeEventForLog(event)` でログ出力
+2. `httpMethod` で分岐: `GET` → `runListPackages()` を呼び 200、それ以外 → 405 `{"error":"method not allowed"}`
+3. 例外は 500（`error`・`errorName`・`errorMessage`。他のハンドラーと同じ形）
+
+`testerCharacters.ts` と異なり、`x-tester-id`（テスターの ID）は見ない。パッケージの一覧はテスターによらず内容が変わらないため。API キー必須は入口の CloudFront・API Gateway 側で掛ける。

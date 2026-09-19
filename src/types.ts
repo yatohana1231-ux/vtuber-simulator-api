@@ -87,6 +87,8 @@ export interface RelationshipStage {
 export interface CharacterPackage {
   id: string;
   displayName: string;
+  description: string; // 選択画面に出す紹介文
+  fixedGreeting: string; // 不在が短いログインでフロントが表示する固定の挨拶
   world: World;
   character: CharacterDefinition;
   lifestyle: Lifestyle;

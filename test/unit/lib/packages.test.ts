@@ -6,6 +6,7 @@ import {
   loadRequestedPackage,
   loadPackage,
   isValidPackageId,
+  listPackageIds,
   DEFAULT_PACKAGE_ID,
 } from "../../../src/lib/packages.js";
 
@@ -174,6 +175,23 @@ describe("loadPackage（本物のapi/content/を読む）", () => {
       expect(typeof slot.fatigueChangePerHour).toBe("number");
       expect(Number.isFinite(slot.fatigueChangePerHour)).toBe(true);
     }
+  });
+
+  it("descriptionとfixedGreetingが空でない文字列として読み込まれる", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+
+    expect(typeof pkg?.description).toBe("string");
+    expect(pkg?.description.length).toBeGreaterThan(0);
+    expect(typeof pkg?.fixedGreeting).toBe("string");
+    expect(pkg?.fixedGreeting.length).toBeGreaterThan(0);
+  });
+});
+
+describe("listPackageIds（本物のapi/content/を読む）", () => {
+  it("先頭がDEFAULT_PACKAGE_ID", async () => {
+    const ids = await listPackageIds();
+
+    expect(ids[0]).toBe(DEFAULT_PACKAGE_ID);
   });
 });
 
@@ -388,6 +406,8 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
       JSON.stringify({
         id: "test-pkg",
         displayName: "テストパッケージ",
+        description: "テスト用の紹介文",
+        fixedGreeting: "テスト用の挨拶",
         world: "test-world",
         character: "test-character",
         lifestyle: "test-lifestyle",
@@ -667,6 +687,8 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
       JSON.stringify({
         id: "overnight-slot-pkg",
         displayName: "test",
+        description: "テスト用の紹介文",
+        fixedGreeting: "テスト用の挨拶",
         world: "test-world",
         character: "test-character",
         lifestyle: "test-lifestyle",
@@ -702,6 +724,8 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
       JSON.stringify({
         id: "character-validation-pkg",
         displayName: "test",
+        description: "テスト用の紹介文",
+        fixedGreeting: "テスト用の挨拶",
         world: "test-world",
         character: "test-character",
         lifestyle: "test-lifestyle",
@@ -870,6 +894,71 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
     expect(pkg?.character.relationshipStages[0].speechExamples).toEqual([]);
   });
 
+  it("descriptionが無い → 例外", async () => {
+    await writeMinimalWorldAndCharacter();
+    await writeMinimalLifestyle();
+    await writeFile(
+      path.join(tmpDir, "packages", "no-description-pkg.json"),
+      JSON.stringify({
+        id: "no-description-pkg",
+        displayName: "test",
+        fixedGreeting: "テスト用の挨拶",
+        world: "test-world",
+        character: "test-character",
+        lifestyle: "test-lifestyle",
+      })
+    );
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+
+    await expect(mod.loadPackage("no-description-pkg")).rejects.toThrow();
+  });
+
+  it("fixedGreetingが空文字 → 例外", async () => {
+    await writeMinimalWorldAndCharacter();
+    await writeMinimalLifestyle();
+    await writeFile(
+      path.join(tmpDir, "packages", "empty-fixed-greeting-pkg.json"),
+      JSON.stringify({
+        id: "empty-fixed-greeting-pkg",
+        displayName: "test",
+        description: "テスト用の紹介文",
+        fixedGreeting: "",
+        world: "test-world",
+        character: "test-character",
+        lifestyle: "test-lifestyle",
+      })
+    );
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+
+    await expect(mod.loadPackage("empty-fixed-greeting-pkg")).rejects.toThrow();
+  });
+
+  it("descriptionが文字列でない → 例外", async () => {
+    await writeMinimalWorldAndCharacter();
+    await writeMinimalLifestyle();
+    await writeFile(
+      path.join(tmpDir, "packages", "non-string-description-pkg.json"),
+      JSON.stringify({
+        id: "non-string-description-pkg",
+        displayName: "test",
+        description: 123,
+        fixedGreeting: "テスト用の挨拶",
+        world: "test-world",
+        character: "test-character",
+        lifestyle: "test-lifestyle",
+      })
+    );
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+
+    await expect(mod.loadPackage("non-string-description-pkg")).rejects.toThrow();
+  });
+
   it("CONTENT_DIRもLAMBDA_TASK_ROOTも無い → 例外", async () => {
     vi.stubEnv("CONTENT_DIR", undefined);
     vi.stubEnv("LAMBDA_TASK_ROOT", undefined);
@@ -946,6 +1035,8 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
       JSON.stringify({
         id: "test-pkg",
         displayName: "テストパッケージ",
+        description: "テスト用の紹介文",
+        fixedGreeting: "テスト用の挨拶",
         world: "test-world",
         character: "test-character",
         lifestyle: "test-lifestyle",
@@ -1072,6 +1163,8 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系: D-
       JSON.stringify({
         id: "affect-validation-pkg",
         displayName: "test",
+        description: "テスト用の紹介文",
+        fixedGreeting: "テスト用の挨拶",
         world: "test-world",
         character: "test-character",
         lifestyle: "test-lifestyle",
@@ -1126,6 +1219,8 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系: D-
       JSON.stringify({
         id: "lifestyle-validation-pkg",
         displayName: "test",
+        description: "テスト用の紹介文",
+        fixedGreeting: "テスト用の挨拶",
         world: "test-world",
         character: "test-character",
         lifestyle: "test-lifestyle",
@@ -1404,5 +1499,69 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系: D-
 
   it("fatigueChangePerHourが範囲外（-101） → 例外", async () => {
     await expect(loadWithLifestyleOverrides({ fatigueChangePerHour: -101 })).rejects.toThrow();
+  });
+});
+
+describe("listPackageIds（一時ディレクトリのcontentを使う）", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(tmpdir(), "vtuber-sim-content-list-"));
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(tmpDir, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it("DEFAULT_PACKAGE_IDが先頭、残りは昇順で返す", async () => {
+    await mkdir(path.join(tmpDir, "packages"), { recursive: true });
+    for (const id of ["zeta", "alpha", DEFAULT_PACKAGE_ID]) {
+      await writeFile(path.join(tmpDir, "packages", `${id}.json`), "{}");
+    }
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    const ids = await mod.listPackageIds();
+
+    expect(ids).toEqual([DEFAULT_PACKAGE_ID, "alpha", "zeta"]);
+  });
+
+  it("README.mdや形式に合わないファイル名（Bad_Name.json・notjson.txt）を無視する", async () => {
+    await mkdir(path.join(tmpDir, "packages"), { recursive: true });
+    await writeFile(path.join(tmpDir, "packages", "README.md"), "# packages");
+    await writeFile(path.join(tmpDir, "packages", "Bad_Name.json"), "{}");
+    await writeFile(path.join(tmpDir, "packages", "notjson.txt"), "not json");
+    await writeFile(path.join(tmpDir, "packages", "valid-one.json"), "{}");
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    const ids = await mod.listPackageIds();
+
+    expect(ids).toEqual(["valid-one"]);
+  });
+
+  it("既定パッケージが無いときは昇順だけ", async () => {
+    await mkdir(path.join(tmpDir, "packages"), { recursive: true });
+    for (const id of ["zeta", "alpha"]) {
+      await writeFile(path.join(tmpDir, "packages", `${id}.json`), "{}");
+    }
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    const ids = await mod.listPackageIds();
+
+    expect(ids).toEqual(["alpha", "zeta"]);
+  });
+
+  it("packagesフォルダが無いときは空配列", async () => {
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    const ids = await mod.listPackageIds();
+
+    expect(ids).toEqual([]);
   });
 });
