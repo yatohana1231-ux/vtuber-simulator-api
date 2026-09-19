@@ -357,6 +357,45 @@ describe("保存対象の絞り込み", () => {
   });
 });
 
+describe("emotionValence（気分一致の記憶、D-040 フェーズ13a）", () => {
+  it.each(["positive", "negative", "neutral"] as const)(
+    "emotionValence:%sは、そのままsaveMemoryのitemに保存される",
+    async (value) => {
+      const c = candidate({ emotionValence: value } as Partial<MemoryCandidate>);
+      mockedInvokeModelJson.mockResolvedValueOnce({ candidates: [c] });
+
+      await runMemoryRetriever(process1Req());
+
+      expect(mockedSaveMemory).toHaveBeenCalledTimes(1);
+      const item = mockedSaveMemory.mock.calls[0][0];
+      expect(item.emotionValence).toBe(value);
+    }
+  );
+
+  it("emotionValenceが省略されている → itemにemotionValenceが付かない", async () => {
+    const c = candidate();
+    delete (c as Partial<MemoryCandidate & { memoryLabel: string }>).emotionValence;
+    mockedInvokeModelJson.mockResolvedValueOnce({ candidates: [c] });
+
+    await runMemoryRetriever(process1Req());
+
+    expect(mockedSaveMemory).toHaveBeenCalledTimes(1);
+    const item = mockedSaveMemory.mock.calls[0][0];
+    expect("emotionValence" in item).toBe(false);
+  });
+
+  it("emotionValenceが不正な値 → itemにemotionValenceが付かない", async () => {
+    const c = candidate({ emotionValence: "とても嬉しい" } as unknown as Partial<MemoryCandidate>);
+    mockedInvokeModelJson.mockResolvedValueOnce({ candidates: [c] });
+
+    await runMemoryRetriever(process1Req());
+
+    expect(mockedSaveMemory).toHaveBeenCalledTimes(1);
+    const item = mockedSaveMemory.mock.calls[0][0];
+    expect("emotionValence" in item).toBe(false);
+  });
+});
+
 describe("getRelevantMemoriesの呼び出し条件", () => {
   it("queryText・topK:20・minImportance:10で呼ばれる", async () => {
     await runMemoryRetriever(process1Req());

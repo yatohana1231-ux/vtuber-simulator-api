@@ -1,21 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  formatMoodForPrompt,
-  formatPerceptionForPrompt,
-} from "../../../src/lib/characterStateText.js";
-import type { Mood, Perception } from "../../../src/types.js";
-
-function baseMood(overrides: Partial<Mood> = {}): Mood {
-  return {
-    joy: 50,
-    anxiety: 50,
-    angry: 50,
-    fatigue: 50,
-    confidence: 50,
-    loneliness: 50,
-    ...overrides,
-  };
-}
+import { formatPerceptionForPrompt } from "../../../src/lib/characterStateText.js";
+import type { Perception } from "../../../src/types.js";
 
 function basePerception(overrides: Partial<Perception> = {}): Perception {
   return {
@@ -28,61 +13,6 @@ function basePerception(overrides: Partial<Perception> = {}): Perception {
     ...overrides,
   };
 }
-
-describe("formatMoodForPrompt", () => {
-  it("6項目を Object.entries の順（joy, anxiety, angry, fatigue, confidence, loneliness）で改行区切りにする", () => {
-    const text = formatMoodForPrompt(baseMood());
-
-    expect(text.split("\n")).toEqual([
-      "・喜び：50（標準）",
-      "・不安：50（標準）",
-      "・怒り：50（標準）",
-      "・疲労：50（標準）",
-      "・自信：50（標準）",
-      "・孤独感：50（標準）",
-    ]);
-  });
-
-  it("書式は「・ラベル：値（段階のラベル）」になる", () => {
-    const text = formatMoodForPrompt(baseMood({ joy: 35 }));
-
-    expect(text).toContain("・喜び：35（低い）");
-  });
-
-  describe("段階のラベルの境界値", () => {
-    it("20 → ほとんど感じない", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 20 }))).toContain("・喜び：20（ほとんど感じない）");
-    });
-
-    it("21 → 低い", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 21 }))).toContain("・喜び：21（低い）");
-    });
-
-    it("40 → 低い", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 40 }))).toContain("・喜び：40（低い）");
-    });
-
-    it("41 → 標準", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 41 }))).toContain("・喜び：41（標準）");
-    });
-
-    it("60 → 標準", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 60 }))).toContain("・喜び：60（標準）");
-    });
-
-    it("61 → 自覚している", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 61 }))).toContain("・喜び：61（自覚している）");
-    });
-
-    it("80 → 自覚している", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 80 }))).toContain("・喜び：80（自覚している）");
-    });
-
-    it("81 → 強く感じる", () => {
-      expect(formatMoodForPrompt(baseMood({ joy: 81 }))).toContain("・喜び：81（強く感じる）");
-    });
-  });
-});
 
 describe("formatPerceptionForPrompt", () => {
   it("6項目を Object.entries の順（trust, affection, respect, fear, dependence, familiarity）で改行区切りにする", () => {

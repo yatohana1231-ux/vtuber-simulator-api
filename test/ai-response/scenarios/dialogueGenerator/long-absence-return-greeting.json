@@ -3,6 +3,9 @@
   "function": "dialogueGenerator",
   "description": "長期不在（longTimeFlag=1）からの再会。ログイン直後（message 空欄）で、久しぶりに会えた『さみしさ』と『よろこび』を自然に表現するか",
   "state": {
+    "affect": {
+      "needs": { "loneliness": 60 }
+    },
     "absenceRecords": [
       {
         "createdAt": "now-15d",

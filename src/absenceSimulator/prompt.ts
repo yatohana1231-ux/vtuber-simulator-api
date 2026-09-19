@@ -31,11 +31,16 @@ export interface AbsenceSimulatorPromptInput {
   openThreads: AbsenceThread[]; // 続いている話題（status が open のもの）
   recentEventSummaries: string[]; // 最近の記録の出来事の summary
   memories: CharacterMemoryItem[]; // 重要記憶
+  /**
+   * 不在に入ったときの気分・情動・欲求（formatAffectForPrompt の結果、D-040 フェーズ13b）。
+   * 状態レコードが無い・古い形のときは undefined（③に節を出さない）
+   */
+  affectText?: string;
 }
 
 /** 不在期間のシミュレーションのシステムプロンプトを、層ごとの文字列の配列 [固定部, 可変部] で返す（D-017・D-020） */
 export function buildAbsenceSimulatorPromptLayers(input: AbsenceSimulatorPromptInput): string[] {
-  const { world, character, skeleton, openThreads, recentEventSummaries, memories } = input;
+  const { world, character, skeleton, openThreads, recentEventSummaries, memories, affectText } = input;
   const timeZone = world.timezone;
 
   const fixed = Mustache.render(FIXED_TEMPLATE, buildPromptContext(world, character), PROMPT_PARTIALS);
@@ -44,6 +49,8 @@ export function buildAbsenceSimulatorPromptLayers(input: AbsenceSimulatorPromptI
     lastSeenText: formatLocalDateTime(new Date(skeleton.startDatetime), timeZone),
     nowText: formatLocalDateTime(new Date(skeleton.endDatetime), timeZone),
     elapsedText: formatElapsed(skeleton.startDatetime, skeleton.endDatetime),
+    hasAffectText: Boolean(affectText),
+    affectText: affectText ?? "",
     actionSlotsText: formatActionSlotsText(skeleton, timeZone),
     eventKindsText: formatEventKindsText(skeleton),
     openThreadsText: formatOpenThreadsText(openThreads, timeZone),

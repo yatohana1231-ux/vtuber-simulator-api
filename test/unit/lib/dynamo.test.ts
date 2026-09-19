@@ -9,9 +9,6 @@ import {
 import {
   dynamo,
   getRelevantMemories,
-  getCharacterState,
-  DEFAULT_MOOD,
-  DEFAULT_PERCEPTION,
   saveConversationLog,
   getRecentLogs,
   markLogsAsJudged,
@@ -33,10 +30,8 @@ import {
 import type {
   AbsenceRecord,
   CharacterMemoryItem,
-  CharacterStateItem,
   ConversationLogItem,
   LatestAbsenceRecordItem,
-  Perception,
   RelationshipRecord,
   TesterCharacter,
 } from "../../../src/types.js";
@@ -299,6 +294,133 @@ describe("getRelevantMemories", () => {
     expect(result.map((m) => m.index)).toEqual(["mem-0", "mem-1", "mem-2"]);
   });
 
+  describe("moodPleasure（気分一致効果、D-040 フェーズ13a）", () => {
+    it("気分が快でemotionValence:positiveの記憶のスコアが上がり順位が入れ替わる", async () => {
+      vi.spyOn(dynamo, "send").mockResolvedValue({
+        Items: [
+          memory({
+            index: "no-valence",
+            importance: 65,
+            emotionValence: undefined,
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+          memory({
+            index: "positive",
+            importance: 60,
+            emotionValence: "positive",
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+        ],
+      } as never);
+
+      const result = await getRelevantMemories("char-1", { moodPleasure: 100 });
+
+      expect(result.map((m) => m.index)).toEqual(["positive", "no-valence"]);
+    });
+
+    it("気分が不快でemotionValence:negativeの記憶のスコアが上がり順位が入れ替わる", async () => {
+      vi.spyOn(dynamo, "send").mockResolvedValue({
+        Items: [
+          memory({
+            index: "no-valence",
+            importance: 65,
+            emotionValence: undefined,
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+          memory({
+            index: "negative",
+            importance: 60,
+            emotionValence: "negative",
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+        ],
+      } as never);
+
+      const result = await getRelevantMemories("char-1", { moodPleasure: -100 });
+
+      expect(result.map((m) => m.index)).toEqual(["negative", "no-valence"]);
+    });
+
+    it("向きが逆・neutral・項目なしの記憶はボーナスがかからない（重要度の順のまま）", async () => {
+      vi.spyOn(dynamo, "send").mockResolvedValue({
+        Items: [
+          memory({
+            index: "opposite",
+            importance: 70,
+            emotionValence: "negative",
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+          memory({
+            index: "neutral",
+            importance: 60,
+            emotionValence: "neutral",
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+          memory({
+            index: "none",
+            importance: 50,
+            emotionValence: undefined,
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+        ],
+      } as never);
+
+      // moodPleasure は正（快）だが、opposite は negative なので一致しない
+      const result = await getRelevantMemories("char-1", { moodPleasure: 100 });
+
+      expect(result.map((m) => m.index)).toEqual(["opposite", "neutral", "none"]);
+    });
+
+    it("moodPleasureを未指定・0のどちらでも今までと同じ順位になる", async () => {
+      const items = [
+        memory({
+          index: "no-valence",
+          importance: 65,
+          emotionValence: undefined,
+          updatedAt: "2026-01-15T00:00:00.000Z",
+        }),
+        memory({
+          index: "positive",
+          importance: 60,
+          emotionValence: "positive",
+          updatedAt: "2026-01-15T00:00:00.000Z",
+        }),
+      ];
+      vi.spyOn(dynamo, "send").mockResolvedValue({ Items: items } as never);
+
+      const withoutOption = await getRelevantMemories("char-1");
+      const withZero = await getRelevantMemories("char-1", { moodPleasure: 0 });
+
+      expect(withoutOption.map((m) => m.index)).toEqual(["no-valence", "positive"]);
+      expect(withZero.map((m) => m.index)).toEqual(["no-valence", "positive"]);
+    });
+
+    it("ボーナスの大きさがmoodPleasureの絶対値に比例する（弱い気分では順位が変わらず、強い気分では変わる）", async () => {
+      vi.spyOn(dynamo, "send").mockResolvedValue({
+        Items: [
+          memory({
+            index: "no-valence",
+            importance: 75,
+            emotionValence: undefined,
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+          memory({
+            index: "positive",
+            importance: 60,
+            emotionValence: "positive",
+            updatedAt: "2026-01-15T00:00:00.000Z",
+          }),
+        ],
+      } as never);
+
+      const weakMood = await getRelevantMemories("char-1", { moodPleasure: 50 });
+      const strongMood = await getRelevantMemories("char-1", { moodPleasure: 100 });
+
+      expect(weakMood.map((m) => m.index)).toEqual(["no-valence", "positive"]);
+      expect(strongMood.map((m) => m.index)).toEqual(["positive", "no-valence"]);
+    });
+  });
+
   it("QueryのKeyConditionExpressionの値にcharacterIdが渡っている", async () => {
     const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [] } as never);
 
@@ -308,114 +430,6 @@ describe("getRelevantMemories", () => {
     const command = sendSpy.mock.calls[0][0] as QueryCommand;
     expect(command.input.KeyConditionExpression).toBe("memory_id = :mid");
     expect(command.input.ExpressionAttributeValues).toEqual({ ":mid": "char-xyz" });
-  });
-});
-
-describe("getCharacterState", () => {
-  it("Itemなし → DEFAULT_MOOD/DEFAULT_PERCEPTIONのコピーを返す", async () => {
-    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
-
-    const result = await getCharacterState("char-1");
-
-    expect(result.mood).toEqual(DEFAULT_MOOD);
-    expect(result.perception).toEqual(DEFAULT_PERCEPTION);
-
-    // 返り値を変更しても export の既定値が変わらないこと
-    result.mood.joy = 999;
-    result.perception.trust = 999;
-    expect(DEFAULT_MOOD.joy).not.toBe(999);
-    expect(DEFAULT_PERCEPTION.trust).not.toBe(999);
-  });
-
-  it("Itemあり → その値を返す", async () => {
-    const item: CharacterStateItem = {
-      memory_id: "char-1",
-      index: "state",
-      mood: { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 },
-      perception: { trust: 7, affection: 8, respect: 9, fear: 10, dependence: 11, familiarity: 12 },
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
-    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
-
-    const result = await getCharacterState("char-1");
-
-    expect(result.mood).toEqual(item.mood);
-    expect(result.perception).toEqual(item.perception);
-  });
-
-  it("Itemなし・initialPerception指定あり → mood既定値とinitialPerceptionのコピーを返す", async () => {
-    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
-    const initialPerception: Perception = {
-      trust: 35,
-      affection: 35,
-      respect: 50,
-      fear: 15,
-      dependence: 10,
-      familiarity: 20,
-    };
-
-    const result = await getCharacterState("char-1", initialPerception);
-
-    expect(result.mood).toEqual(DEFAULT_MOOD);
-    expect(result.perception).toEqual(initialPerception);
-
-    // コピーであること（返り値を変更しても渡した引数が変わらない）
-    result.perception.trust = 999;
-    expect(initialPerception.trust).not.toBe(999);
-  });
-
-  it("Itemなし・initialPerception未指定 → DEFAULT_PERCEPTIONのコピーを返す", async () => {
-    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
-
-    const result = await getCharacterState("char-1");
-
-    expect(result.perception).toEqual(DEFAULT_PERCEPTION);
-  });
-
-  it("Itemはあるがperceptionが無い・initialPerception指定あり → initialPerceptionのコピーを返す", async () => {
-    const item = {
-      memory_id: "char-1",
-      index: "state",
-      mood: { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 },
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
-    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
-    const initialPerception: Perception = {
-      trust: 35,
-      affection: 35,
-      respect: 50,
-      fear: 15,
-      dependence: 10,
-      familiarity: 20,
-    };
-
-    const result = await getCharacterState("char-1", initialPerception);
-
-    expect(result.mood).toEqual(item.mood);
-    expect(result.perception).toEqual(initialPerception);
-  });
-
-  it("Itemあり（mood/perceptionとも入っている） → initialPerceptionを指定してもDB上の値をそのまま返す", async () => {
-    const item: CharacterStateItem = {
-      memory_id: "char-1",
-      index: "state",
-      mood: { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 },
-      perception: { trust: 7, affection: 8, respect: 9, fear: 10, dependence: 11, familiarity: 12 },
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
-    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
-    const initialPerception: Perception = {
-      trust: 35,
-      affection: 35,
-      respect: 50,
-      fear: 15,
-      dependence: 10,
-      familiarity: 20,
-    };
-
-    const result = await getCharacterState("char-1", initialPerception);
-
-    expect(result.perception).toEqual(item.perception);
   });
 });
 

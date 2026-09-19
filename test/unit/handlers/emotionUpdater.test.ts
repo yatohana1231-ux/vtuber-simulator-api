@@ -26,7 +26,23 @@ function makeEvent(body: unknown) {
 }
 
 const dummyResult: EmotionUpdaterResponse = {
-  mood: { joy: 52, anxiety: 45, angry: 15, fatigue: 38, confidence: 35, loneliness: 8 },
+  emotions: {
+    joy: 10,
+    sadness: 0,
+    hope: 0,
+    anxiety: 0,
+    relief: 0,
+    disappointment: 0,
+    pride: 0,
+    shame: 0,
+    gratitude: 0,
+    admiration: 0,
+    anger: 0,
+    happyFor: 0,
+    sympathy: 0,
+  },
+  mood: { pleasure: 5, arousal: -3, dominance: 0 },
+  needs: { fatigue: 30, loneliness: 5 },
   perception: { trust: 74, affection: 58, respect: 80, fear: 10, dependence: 32, familiarity: 68 },
 };
 
@@ -38,9 +54,7 @@ beforeEach(() => {
 
 describe("入力チェック", () => {
   it("characterId未指定 → 400でrunEmotionUpdaterは呼ばれない", async () => {
-    const res = (await handler(
-      makeEvent({ process: 1 })
-    )) as LambdaResponse;
+    const res = (await handler(makeEvent({ process: 1 }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body)).toEqual({
@@ -58,9 +72,7 @@ describe("入力チェック", () => {
   });
 
   it("characterIdが文字列以外（数値） → 400 characterId must be a non-empty string（F-018）", async () => {
-    const res = (await handler(
-      makeEvent({ characterId: 12345, process: 1 })
-    )) as LambdaResponse;
+    const res = (await handler(makeEvent({ characterId: 12345, process: 1 }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body)).toEqual({
@@ -70,9 +82,7 @@ describe("入力チェック", () => {
   });
 
   it("process未指定 → 400 process must be 1 or 2", async () => {
-    const res = (await handler(
-      makeEvent({ characterId: "c1" })
-    )) as LambdaResponse;
+    const res = (await handler(makeEvent({ characterId: "c1" }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body)).toEqual({ error: "process must be 1 or 2" });
@@ -80,9 +90,7 @@ describe("入力チェック", () => {
   });
 
   it("processが3 → 400 process must be 1 or 2", async () => {
-    const res = (await handler(
-      makeEvent({ characterId: "c1", process: 3 })
-    )) as LambdaResponse;
+    const res = (await handler(makeEvent({ characterId: "c1", process: 3 }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body)).toEqual({ error: "process must be 1 or 2" });
@@ -90,12 +98,18 @@ describe("入力チェック", () => {
   });
 
   it('processが文字列"1" → 400 process must be 1 or 2（数値の1とは区別される）', async () => {
-    const res = (await handler(
-      makeEvent({ characterId: "c1", process: "1" })
-    )) as LambdaResponse;
+    const res = (await handler(makeEvent({ characterId: "c1", process: "1" }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body)).toEqual({ error: "process must be 1 or 2" });
+    expect(mockedRun).not.toHaveBeenCalled();
+  });
+
+  it("nowが不正な日時文字列 → 400 invalid now format", async () => {
+    const res = (await handler(makeEvent({ characterId: "c1", process: 1, now: "not-a-date" }))) as LambdaResponse;
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: "invalid now format" });
     expect(mockedRun).not.toHaveBeenCalled();
   });
 
@@ -121,23 +135,38 @@ describe("入力チェック", () => {
 });
 
 describe("run*への引数の詰め替え", () => {
-  it("packageId省略 → 既定パッケージ(yui-modern-tokyo)のworld/characterが渡る", async () => {
+  it("packageId省略 → 既定パッケージ(yui-modern-tokyo)のworld/character/lifestyleが渡る", async () => {
     await handler(makeEvent({ characterId: "c1", process: 1 }));
 
     const req = mockedRun.mock.calls[0][0] as EmotionUpdaterRequest;
     expect(req.world.key).toBe("modern-tokyo");
     expect(req.character.key).toBe("yui");
+    expect(req.lifestyle).toBeDefined();
+  });
+
+  it("now省略 → 現在時刻が渡る", async () => {
+    const before = Date.now();
+    await handler(makeEvent({ characterId: "c1", process: 1 }));
+    const after = Date.now();
+
+    const req = mockedRun.mock.calls[0][0] as EmotionUpdaterRequest;
+    const nowMs = new Date(req.now).getTime();
+    expect(nowMs).toBeGreaterThanOrEqual(before);
+    expect(nowMs).toBeLessThanOrEqual(after);
+  });
+
+  it("nowを指定 → そのままISO8601で渡る", async () => {
+    await handler(makeEvent({ characterId: "c1", process: 1, now: "2026-09-19T12:00:00.000Z" }));
+
+    const req = mockedRun.mock.calls[0][0] as EmotionUpdaterRequest;
+    expect(req.now).toBe("2026-09-19T12:00:00.000Z");
   });
 
   describe("process 1", () => {
     it("eventsとactionsが送られても、runEmotionUpdaterへの引数に渡らない", async () => {
       const events = ["イベントA"];
-      const actions = [
-        { startDatetime: "s", endDatetime: "e", action: "行動", memo: "メモ" },
-      ];
-      await handler(
-        makeEvent({ characterId: "c1", process: 1, events, actions })
-      );
+      const actions = [{ startDatetime: "s", endDatetime: "e", action: "行動", memo: "メモ" }];
+      await handler(makeEvent({ characterId: "c1", process: 1, events, actions }));
 
       const req = mockedRun.mock.calls[0][0] as EmotionUpdaterRequestProcess1;
       expect(req).not.toHaveProperty("events");
@@ -170,10 +199,8 @@ describe("run*への引数の詰め替え", () => {
 });
 
 describe("レスポンス", () => {
-  it("成功時 → 200かつCORSヘッダー付きで { mood, perception } がbodyになる", async () => {
-    const res = (await handler(
-      makeEvent({ characterId: "c1", process: 1 })
-    )) as LambdaResponse;
+  it("成功時 → 200かつCORSヘッダー付きで { emotions, mood, needs, perception } がbodyになる", async () => {
+    const res = (await handler(makeEvent({ characterId: "c1", process: 1 }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(200);
     expect(res.headers["Access-Control-Allow-Origin"]).toBe("*");
@@ -183,9 +210,7 @@ describe("レスポンス", () => {
   it("runEmotionUpdaterが例外を投げる → 500でerrorName/errorMessageが入る", async () => {
     mockedRun.mockRejectedValue(new TypeError("boom"));
 
-    const res = (await handler(
-      makeEvent({ characterId: "c1", process: 1 })
-    )) as LambdaResponse;
+    const res = (await handler(makeEvent({ characterId: "c1", process: 1 }))) as LambdaResponse;
 
     expect(res.statusCode).toBe(500);
     expect(JSON.parse(res.body)).toEqual({

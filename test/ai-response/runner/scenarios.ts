@@ -76,6 +76,14 @@ export function resolveScenarioDatetimes(scenario: Scenario, baseTime: Date): Sc
       if (relationship.lastDemotedAt !== null) relationship.lastDemotedAt = dt(relationship.lastDemotedAt);
       relationship.updatedAt = dt(relationship.updatedAt);
     }
+    if (resolved.state.affect) {
+      const affect = resolved.state.affect;
+      if (affect.affectUpdatedAt !== undefined) affect.affectUpdatedAt = dt(affect.affectUpdatedAt);
+      if (affect.pendingSession) {
+        affect.pendingSession.startedAt = dt(affect.pendingSession.startedAt);
+        affect.pendingSession.lastMessageAt = dt(affect.pendingSession.lastMessageAt);
+      }
+    }
   }
 
   const request = resolved.request as Record<string, unknown>;
@@ -109,6 +117,9 @@ function validateRequest(request: unknown, fn: TargetFunction, filePath: string)
     if (r.process === 2 && typeof r.playerMessage !== "string") {
       fail(filePath, "process=2 の request.playerMessage は文字列である必要があります");
     }
+    if (r.now !== undefined && typeof r.now !== "string") {
+      fail(filePath, "request.now は文字列である必要があります（省略可）");
+    }
   } else if (fn === "memoryRetriever") {
     if (r.process !== 1 && r.process !== 2) fail(filePath, "request.process は 1 または 2 である必要があります");
   }
@@ -141,6 +152,12 @@ function validateScenario(parsed: unknown, expectedId: string, expectedFunction:
 
   if (v.state !== undefined && (typeof v.state !== "object" || v.state === null)) {
     fail(filePath, "state はオブジェクトである必要があります");
+  }
+  if (v.state !== undefined) {
+    const state = (v.state as Record<string, unknown>).affect;
+    if (state !== undefined && (typeof state !== "object" || state === null)) {
+      fail(filePath, "state.affect はオブジェクトである必要があります");
+    }
   }
 
   if (v.checks !== undefined && !Array.isArray(v.checks)) {

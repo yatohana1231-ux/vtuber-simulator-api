@@ -14,21 +14,25 @@
 import { invokeModelJson } from "../../../src/lib/bedrock.js";
 import { formatAbsenceRecordForPrompt } from "../../../src/lib/absenceRecordText.js";
 import { formatLocalDateTime } from "../../../src/lib/timezone.js";
-import { DEFAULT_MOOD, DEFAULT_PERCEPTION } from "../../../src/lib/dynamo.js";
+import { formatAffectForPrompt } from "../../../src/lib/affect/affectText.js";
 import * as bedrockRecorder from "./bedrockRecorder.js";
 import { calculateRunCost } from "./cost.js";
 import { getSavedAbsenceRecord } from "./checks/absenceSimulator.js";
+import { getParsedModelOutput } from "./checks/emotionUpdater.js";
 import { getSavedMemories } from "./checks/memoryRetriever.js";
 import type { CheckContext } from "./checks/types.js";
-import type {
-  AbsenceRecord,
-  AbsenceSimulatorResult,
-  CharacterDefinition,
-  EmotionUpdaterResponse,
-  Mood,
-  Perception,
-  RelationshipStage,
-  World,
+import {
+  EMOTION_KEYS,
+  type AbsenceRecord,
+  type AbsenceSimulatorResult,
+  type Appraisal,
+  type CharacterAffectState,
+  type CharacterDefinition,
+  type InteractionLabels,
+  type PendingSession,
+  type Perception,
+  type RelationshipStage,
+  type World,
 } from "../../../src/types.js";
 import type { JudgeResult, ModelPrice, RubricCriterion, RunResult, Scenario, ScenarioRequest } from "./types.js";
 
@@ -79,23 +83,8 @@ export function buildJudgeSystemPrompt(criteria: RubricCriterion[]): string {
 // ユーザーメッセージ（シナリオ・キャラクター・世界観・機能ごとの入力/出力）
 // -------------------------------------------------------
 
-function formatMood(m: Mood): string {
-  return `joy=${m.joy} anxiety=${m.anxiety} angry=${m.angry} fatigue=${m.fatigue} confidence=${m.confidence} loneliness=${m.loneliness}`;
-}
-
 function formatPerception(p: Perception): string {
   return `trust=${p.trust} affection=${p.affection} respect=${p.respect} fear=${p.fear} dependence=${p.dependence} familiarity=${p.familiarity}`;
-}
-
-function formatDiff(before: Record<string, number>, after: Record<string, number>): string {
-  return Object.keys(after)
-    .map((key) => {
-      const b = before[key] ?? 0;
-      const a = after[key];
-      const d = a - b;
-      return `${key}:${d >= 0 ? "+" : ""}${d}`;
-    })
-    .join(" ");
 }
 
 function formatCharacterSection(character: CharacterDefinition): string {
@@ -221,9 +210,9 @@ function buildAbsenceSimulatorSection(scenario: Scenario, result: RunResult, con
 function buildDialogueGeneratorSection(scenario: Scenario, result: RunResult, context: CheckContext): UserMessageSection {
   const req = scenario.request as Extract<ScenarioRequest, { message: string }>;
   const tz = context.world.timezone;
-  // mood/perceptionはリクエストでは受け取らない（D-032）。初期値はscenario.stateで与える。
-  const mood = scenario.state?.mood ?? DEFAULT_MOOD;
-  const perception = scenario.state?.perception ?? DEFAULT_PERCEPTION;
+  // mood/perceptionはリクエストでは受け取らない（D-032）。今の状態は result.preAffectState
+  // （D-040 フェーズ16。シナリオの state.affect を省略した項目も含めて解決済みの値）を使う。
+  const affectState = result.preAffectState;
   const memories = scenario.state?.memories ?? [];
   const logs = scenario.state?.conversationLogs ?? [];
   const absenceRecords = scenario.state?.absenceRecords ?? [];
@@ -234,8 +223,8 @@ function buildDialogueGeneratorSection(scenario: Scenario, result: RunResult, co
     `プレイヤーの発言: ${req.message === "" ? "（不在。プレイヤーが来た）" : req.message}`,
     `長期不在フラグ（longTimeFlag）: ${req.longTimeFlag === 1 ? "1（長期不在明け）" : "0"}`,
     `今の関係の段階:\n${formatRelationshipStageSection(context.character, currentStage)}`,
-    `感情値: ${formatMood(mood)}`,
-    `関係値: ${formatPerception(perception)}`,
+    `感情・気分・欲求:\n${formatAffectForPrompt(affectState)}`,
+    `関係値: ${formatPerception(affectState.perception)}`,
     `重要記憶:\n${formatMemoriesText(memories)}`,
     `直近の会話:\n${formatLogsText(logs, context.character.name)}`,
     `最新の不在期間の記録:\n${latest ? formatAbsenceRecordSection(latest as AbsenceRecord, tz) : "（なし）"}`,
@@ -247,11 +236,59 @@ function buildDialogueGeneratorSection(scenario: Scenario, result: RunResult, co
   return { input, output };
 }
 
+/** appraisals（検証後）を1件ずつ、番号・要約・評価の各項目にして並べる */
+function formatAppraisalsText(appraisals: Appraisal[]): string {
+  if (appraisals.length === 0) return "（評価なし）";
+  return appraisals
+    .map((a, i) => {
+      const goal = a.relatedGoalKey ?? "（なし）";
+      return [
+        `${i + 1}. ${a.summary || "（要約なし）"}`,
+        `   desirabilityForSelf=${a.desirabilityForSelf} desirabilityForPlayer=${a.desirabilityForPlayer} prospect=${a.prospect} cause=${a.cause} praiseworthiness=${a.praiseworthiness} relatedGoalKey=${goal}`,
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+/** interaction（process=2 だけ検証後の値がある）を項目ごとに並べる */
+function formatInteractionText(interaction: InteractionLabels | null): string {
+  if (!interaction) return "（process=1 のため無し）";
+  return [
+    `playerSelfDisclosure=${interaction.playerSelfDisclosure}`,
+    `responseToCharacterDisclosure=${interaction.responseToCharacterDisclosure}`,
+    `helpedCharacter=${interaction.helpedCharacter}`,
+    `rememberedPastTopic=${interaction.rememberedPastTopic}`,
+  ].join(" ");
+}
+
+/** サーバーが加えた情動の変化（実行前後の差。絶対値 0.5 未満は変化なしとみなして省く） */
+function formatEmotionDiffText(before: CharacterAffectState["emotions"], after: CharacterAffectState["emotions"]): string {
+  const diffs = EMOTION_KEYS.map((key) => ({ key, delta: after[key] - before[key] })).filter(
+    (d) => Math.abs(d.delta) >= 0.5
+  );
+  if (diffs.length === 0) return "（変化なし）";
+  return diffs.map((d) => `${d.key}:${d.delta >= 0 ? "+" : ""}${d.delta.toFixed(1)}`).join(" ");
+}
+
+/** 今回の発言の関係値への寄与（pendingSession.last）。関係値そのものはこの時点では動いていない */
+function formatPendingContributionText(pending: PendingSession | null): string {
+  if (!pending) return "（無し）";
+  const entries = Object.entries(pending.last).filter(([, v]) => v !== undefined && v !== 0);
+  if (entries.length === 0) return "（変化なし）";
+  return entries.map(([key, value]) => `${key}:${(value as number) >= 0 ? "+" : ""}${(value as number).toFixed(2)}`).join(" ");
+}
+
+/**
+ * emotionUpdater の採点の入力（D-040 フェーズ16b）。LLM が出した評価（appraisals・interaction。
+ * サーバーが検証したあとの値）、それでサーバーが加えた情動（実行前後の差）、気分・欲求の前後
+ * （formatAffectForPrompt の文章）、pendingSession.last（今回の発言の関係値への寄与。関係値
+ * そのものはセッションが終わるまで動かないため、process=2 でも perception は載せない）を渡す。
+ * 入力テキストには、process=2 のときの直近の会話も含める。
+ */
 function buildEmotionUpdaterSection(scenario: Scenario, result: RunResult, context: CheckContext): UserMessageSection {
   const req = scenario.request as { process: 1 | 2; playerMessage?: string };
   const tz = context.world.timezone;
-  const beforeMood = scenario.state?.mood ?? DEFAULT_MOOD;
-  const beforePerception = scenario.state?.perception ?? DEFAULT_PERCEPTION;
+  const before = result.preAffectState;
 
   let inputText: string;
   if (req.process === 1) {
@@ -261,31 +298,32 @@ function buildEmotionUpdaterSection(scenario: Scenario, result: RunResult, conte
       ? `不在中の出来事・行動:\n${formatAbsenceRecordSection(latest as AbsenceRecord, tz)}`
       : "（不在期間の記録なし）";
   } else {
-    inputText = `プレイヤーの発言: ${req.playerMessage ?? ""}`;
+    const logs = scenario.state?.conversationLogs ?? [];
+    const logsText = logs.length > 0 ? `\n\n直近の会話:\n${formatLogsText(logs, context.character.name)}` : "";
+    inputText = `プレイヤーの発言: ${req.playerMessage ?? ""}${logsText}`;
   }
 
-  const input = [inputText, `更新前の感情値: ${formatMood(beforeMood)}`, `更新前の関係値: ${formatPerception(beforePerception)}`].join(
-    "\n\n"
-  );
+  const input = [inputText, `更新前の気分・欲求:\n${formatAffectForPrompt(before)}`].join("\n\n");
 
-  const output = result.output as EmotionUpdaterResponse | undefined;
-  const moodText = output
-    ? `${formatMood(output.mood)}（差分: ${formatDiff(
-        beforeMood as unknown as Record<string, number>,
-        output.mood as unknown as Record<string, number>
-      )}）`
-    : "（出力なし）";
-  const perceptionText = output
-    ? `${formatPerception(output.perception)}（差分: ${formatDiff(
-        beforePerception as unknown as Record<string, number>,
-        output.perception as unknown as Record<string, number>
-      )}）`
-    : "（出力なし）";
+  const after = result.postAffectState;
+  if (!after) {
+    return { input, output: "（出力なし）" };
+  }
 
-  return {
-    input,
-    output: [`更新後の感情値: ${moodText}`, `更新後の関係値: ${perceptionText}`].join("\n"),
-  };
+  const parsed = getParsedModelOutput(result, context);
+  const appraisalsText = parsed ? formatAppraisalsText(parsed.appraisals) : "（モデルの応答から評価を読み取れなかった）";
+
+  const outputLines = [`LLM が出した評価（appraisals）:\n${appraisalsText}`];
+  if (req.process === 2) {
+    outputLines.push(`やり取りの分類（interaction）:\n${formatInteractionText(parsed?.interaction ?? null)}`);
+  }
+  outputLines.push(`サーバーが加えた情動の変化: ${formatEmotionDiffText(before.emotions, after.emotions)}`);
+  outputLines.push(`更新後の気分・欲求:\n${formatAffectForPrompt(after)}`);
+  if (req.process === 2) {
+    outputLines.push(`今回の発言の関係値への寄与（pendingSession.last）: ${formatPendingContributionText(after.pendingSession)}`);
+  }
+
+  return { input, output: outputLines.join("\n\n") };
 }
 
 function buildMemoryRetrieverSection(scenario: Scenario, result: RunResult, context: CheckContext): UserMessageSection {

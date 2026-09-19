@@ -137,6 +137,52 @@ describe("resolveScenarioDatetimes", () => {
     expect(relationship?.firstMetAt).toBe("2026-01-15T00:00:00.000Z");
   });
 
+  it("state.affect の日時（affectUpdatedAt・pendingSession.startedAt/lastMessageAt）を解決する（D-040）", () => {
+    const scenario: Scenario = {
+      id: "s5",
+      function: "emotionUpdater",
+      description: "test",
+      state: {
+        affect: {
+          emotions: { joy: 10 },
+          affectUpdatedAt: "now-2d",
+          pendingSession: {
+            startedAt: "now-40m",
+            lastMessageAt: "now-35m",
+            messageCount: 2,
+            peak: { trust: 3 },
+            last: { trust: 1 },
+          },
+        },
+      },
+      request: { process: 2, playerMessage: "hi" },
+    };
+
+    const resolved = resolveScenarioDatetimes(scenario, BASE);
+    const affect = resolved.state?.affect;
+
+    expect(affect?.affectUpdatedAt).toBe("2026-01-13T00:00:00.000Z");
+    expect(affect?.pendingSession?.startedAt).toBe("2026-01-14T23:20:00.000Z");
+    expect(affect?.pendingSession?.lastMessageAt).toBe("2026-01-14T23:25:00.000Z");
+
+    // 元の scenario は変更されない
+    expect((scenario.state?.affect?.affectUpdatedAt)).toBe("now-2d");
+  });
+
+  it("state.affect.affectUpdatedAt を省略 → 未解決のまま undefined（実行開始時刻は execute.ts 側で既定にする）", () => {
+    const scenario: Scenario = {
+      id: "s6",
+      function: "emotionUpdater",
+      description: "test",
+      state: { affect: { emotions: { joy: 10 } } },
+      request: { process: 1 },
+    };
+
+    const resolved = resolveScenarioDatetimes(scenario, BASE);
+
+    expect(resolved.state?.affect?.affectUpdatedAt).toBeUndefined();
+  });
+
   it("dialogueGeneratorのrequest.nowが未指定 → そのままundefined", () => {
     const scenario: Scenario = {
       id: "s2",
@@ -252,6 +298,29 @@ describe("loadScenarios", () => {
     });
 
     await expect(loadScenarios(dir)).rejects.toThrow(/playerMessage/);
+  });
+
+  it("emotionUpdaterのrequest.nowが文字列でない → 例外（省略は可）", async () => {
+    await writeScenario("emotionUpdater", "sample-e2.json", {
+      id: "sample-e2",
+      function: "emotionUpdater",
+      description: "desc",
+      request: { process: 1, now: 12345 },
+    });
+
+    await expect(loadScenarios(dir)).rejects.toThrow(/request\.now/);
+  });
+
+  it("state.affect がオブジェクトでない → 例外", async () => {
+    await writeScenario("emotionUpdater", "sample-e3.json", {
+      id: "sample-e3",
+      function: "emotionUpdater",
+      description: "desc",
+      state: { affect: "not-an-object" },
+      request: { process: 1 },
+    });
+
+    await expect(loadScenarios(dir)).rejects.toThrow(/state\.affect/);
   });
 
   it("memoryRetrieverのprocessが不正 → 例外", async () => {

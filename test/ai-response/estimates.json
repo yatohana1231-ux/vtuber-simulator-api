@@ -1,10 +1,10 @@
 {
-  "note": "機能ごとの1回あたりの想定トークン数（実行前の料金見積もりに使う。キャッシュは見積もりでは考えない）。2026-09-19 の stg 実測をもとにした値。judge は LLM による採点1回あたりの想定トークン数（評価基準・シナリオ・入出力を渡すユーザーメッセージが対象になるため、実行本体より入力トークンが多め）。",
+  "note": "機能ごとの1回あたりの想定トークン数（実行前の料金見積もりに使う。キャッシュは見積もりでは考えない）。2026-09-19 の stg 実測をもとにした値。emotionUpdater は同日、D-040 フェーズ16b（LLM の役割が差分の算出から出来事の評価に変わり、固定部が約1,800字＋可変部まで伸びた）にあわせて見積もりを見直した（実測ではなく、プロンプトの文字数からの概算）。judge は LLM による採点1回あたりの想定トークン数（評価基準・シナリオ・入出力を渡すユーザーメッセージが対象になるため、実行本体より入力トークンが多め）。",
   "checkedAt": "2026-09-19",
   "functions": {
     "absenceSimulator": { "inputTokens": 1300, "outputTokens": 600 },
     "dialogueGenerator": { "inputTokens": 2000, "outputTokens": 60 },
-    "emotionUpdater": { "inputTokens": 1100, "outputTokens": 120 },
+    "emotionUpdater": { "inputTokens": 2000, "outputTokens": 250 },
     "memoryRetriever": { "inputTokens": 1300, "outputTokens": 500 }
   },
   "judge": { "inputTokens": 3000, "outputTokens": 500 }

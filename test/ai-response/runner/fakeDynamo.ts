@@ -33,8 +33,11 @@ import {
 // 呼び出し元（execute.ts）が動的 import で読み込み、install() に渡す
 // （env 設定前にこのファイルが dynamo.ts を静的 import して読み込んでしまわないようにするため）。
 import type * as DynamoModule from "../../../src/lib/dynamo.js";
-import type { AbsenceRecord, CharacterMemoryItem, ConversationLogItem } from "../../../src/types.js";
+import type { AbsenceRecord, CharacterDefinition, CharacterMemoryItem, ConversationLogItem } from "../../../src/types.js";
 import type { DynamoWriteRecord, ScenarioState } from "./types.js";
+// lib/affect/ は LLM・DB を使わない純粋な計算だけなので、env 設定前に静的 import しても安全
+// （scenarioAffect.ts の説明を参照）。
+import { buildScenarioAffectState } from "./scenarioAffect.js";
 
 type StoredItem = Record<string, unknown>;
 
@@ -169,8 +172,12 @@ type TableKey = "conversationLogs" | "characterMemory" | "events";
 export interface FakeDynamo {
   /** install してからの全実行分の書き込み（selectWritesForCharacter で1回の実行分に絞り込む） */
   writes: DynamoWriteRecord[];
-  /** characterId のデータを投入する（会話ログ・重要記憶・感情状態・不在期間の記録） */
-  seed(characterId: string, state: ScenarioState): void;
+  /**
+   * characterId のデータを投入する（会話ログ・重要記憶・感情状態・不在期間の記録）。
+   * state.affect（D-040）を投入するときは character・now が必須（省略した項目を埋めるのに使う。
+   * 省略すると例外）。affect を使わない呼び出しでは省略できる。
+   */
+  seed(characterId: string, state: ScenarioState, character?: CharacterDefinition, now?: Date): void;
   /** dynamo.ts の dynamo.send を差し替える（実行のまとまりにつき一度だけ呼ぶ） */
   install(dynamoModule: typeof DynamoModule): void;
   /** dynamo.send を元に戻す */
@@ -205,15 +212,19 @@ class FakeDynamoImpl implements FakeDynamo {
     this.originalSend = undefined;
   }
 
-  seed(characterId: string, state: ScenarioState): void {
+  seed(characterId: string, state: ScenarioState, character?: CharacterDefinition, now?: Date): void {
     const dynamoModule = this.requireInstalled();
 
-    if (state.mood || state.perception) {
+    if (state.affect) {
+      if (!character) {
+        throw new Error("fakeDynamo: seed() with state.affect requires a character argument");
+      }
+      const affectState = buildScenarioAffectState(character, state.affect, now ?? new Date());
       this.characterMemory.put({
         memory_id: characterId,
         index: dynamoModule.STATE_INDEX_KEY,
-        mood: state.mood ?? dynamoModule.DEFAULT_MOOD,
-        perception: state.perception ?? dynamoModule.DEFAULT_PERCEPTION,
+        stateVersion: 2,
+        ...affectState,
         updatedAt: new Date().toISOString(),
       });
     }

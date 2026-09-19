@@ -8,7 +8,10 @@ vi.mock("../../../src/lib/dynamo.js", () => ({
   getLatestAbsenceRecord: vi.fn(),
   getRecentAbsenceRecords: vi.fn(),
   getRelevantMemories: vi.fn(),
+  getStoredAffectState: vi.fn(),
   saveAbsenceRecord: vi.fn(),
+  // 状態レコードに書き込まないことを確かめるためだけに用意する（absenceSimulator は本来呼ばない）
+  saveCharacterAffectState: vi.fn(),
 }));
 
 import {
@@ -22,12 +25,17 @@ import {
   getLatestAbsenceRecord,
   getRecentAbsenceRecords,
   getRelevantMemories,
+  getStoredAffectState,
   saveAbsenceRecord,
+  saveCharacterAffectState,
 } from "../../../src/lib/dynamo.js";
+import { EMOTION_KEYS } from "../../../src/types.js";
 import type {
   AbsenceRecord,
   AbsenceSimulatorRequest,
+  CharacterAffectState,
   CharacterDefinition,
+  Emotions,
   Lifestyle,
   World,
 } from "../../../src/types.js";
@@ -36,7 +44,9 @@ const mockedInvokeModelJson = vi.mocked(invokeModelJson);
 const mockedGetLatestAbsenceRecord = vi.mocked(getLatestAbsenceRecord);
 const mockedGetRecentAbsenceRecords = vi.mocked(getRecentAbsenceRecords);
 const mockedGetRelevantMemories = vi.mocked(getRelevantMemories);
+const mockedGetStoredAffectState = vi.mocked(getStoredAffectState);
 const mockedSaveAbsenceRecord = vi.mocked(saveAbsenceRecord);
+const mockedSaveCharacterAffectState = vi.mocked(saveCharacterAffectState);
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -137,6 +147,32 @@ function record(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
   };
 }
 
+// 感情・関係値の状態（D-040）のフィクスチャ。emotionUpdater のテストと同じ流儀。
+function emotions(overrides: Partial<Emotions> = {}): Emotions {
+  const base = Object.fromEntries(EMOTION_KEYS.map((key) => [key, 0])) as Emotions;
+  return { ...base, ...overrides };
+}
+
+function storedState(overrides: Partial<CharacterAffectState> = {}): CharacterAffectState {
+  return {
+    emotions: emotions(),
+    mood: { pleasure: 0, arousal: 0, dominance: 0 },
+    needs: { fatigue: 30, loneliness: 20 },
+    perception: {
+      trust: 50,
+      affection: 50,
+      respect: 50,
+      fear: 10,
+      dependence: 10,
+      familiarity: 50,
+    },
+    perceptionStageBase: null,
+    pendingSession: null,
+    affectUpdatedAt: "2026-09-20T22:00:00.000Z",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -150,6 +186,7 @@ beforeEach(() => {
   mockedGetLatestAbsenceRecord.mockResolvedValue(null);
   mockedGetRecentAbsenceRecords.mockResolvedValue([]);
   mockedGetRelevantMemories.mockResolvedValue([]);
+  mockedGetStoredAffectState.mockResolvedValue({ state: null, legacyPerception: null });
   mockedSaveAbsenceRecord.mockResolvedValue(undefined);
   // 既定では fallback（第3引数）をそのまま返す = invokeModelJson がフォールバックした場合と同じ挙動
   mockedInvokeModelJson.mockImplementation(async (_systemPrompt, _userMessage, fallback) => fallback);
@@ -341,6 +378,95 @@ describe("DynamoDBの保存失敗", () => {
     mockedSaveAbsenceRecord.mockRejectedValueOnce(new Error("ddb down"));
 
     await expect(runAbsenceSimulator(baseReq())).rejects.toThrow("ddb down");
+  });
+});
+
+describe("不在に入ったときの気分（D-040 フェーズ13b）", () => {
+  it("状態レコードがある → 可変部に「不在に入ったときの気分」の節と、気分・欲求の文章が入る", async () => {
+    mockedGetStoredAffectState.mockResolvedValueOnce({
+      state: storedState({ mood: { pleasure: 80, arousal: 80, dominance: 80 } }),
+      legacyPerception: null,
+    });
+
+    await runAbsenceSimulator(baseReq());
+
+    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0] as string[];
+    expect(systemPrompt[1]).toContain("【不在に入ったときの気分】");
+    expect(systemPrompt[1]).toContain("・今の気分：");
+    expect(systemPrompt[1]).toContain("・疲労：");
+    expect(systemPrompt[1]).toContain("・孤独感：");
+  });
+
+  it("状態レコードが無い → 可変部に「不在に入ったときの気分」の節が出ない", async () => {
+    mockedGetStoredAffectState.mockResolvedValueOnce({ state: null, legacyPerception: null });
+
+    await runAbsenceSimulator(baseReq());
+
+    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0] as string[];
+    expect(systemPrompt[1]).not.toContain("【不在に入ったときの気分】");
+  });
+
+  it("状態レコードが古い形（legacyPerceptionのみ） → 可変部に「不在に入ったときの気分」の節が出ない", async () => {
+    mockedGetStoredAffectState.mockResolvedValueOnce({
+      state: null,
+      legacyPerception: {
+        trust: 50,
+        affection: 50,
+        respect: 50,
+        fear: 10,
+        dependence: 10,
+        familiarity: 50,
+      },
+    });
+
+    await runAbsenceSimulator(baseReq());
+
+    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0] as string[];
+    expect(systemPrompt[1]).not.toContain("【不在に入ったときの気分】");
+  });
+
+  it("固定部（①）は、状態レコードの有無によらず同じ文字列になる", async () => {
+    mockedGetStoredAffectState.mockResolvedValueOnce({
+      state: storedState({ emotions: emotions({ joy: 90 }) }),
+      legacyPerception: null,
+    });
+    await runAbsenceSimulator(baseReq());
+    const fixedWithState = (mockedInvokeModelJson.mock.calls[0][0] as string[])[0];
+
+    mockedGetStoredAffectState.mockResolvedValueOnce({ state: null, legacyPerception: null });
+    await runAbsenceSimulator(baseReq());
+    const fixedWithoutState = (mockedInvokeModelJson.mock.calls[1][0] as string[])[0];
+
+    expect(fixedWithState).toBe(fixedWithoutState);
+  });
+
+  it("不在の開始の時点（lastLoginAt）まで進めた値が使われる（保存時に強かった情動が、保存の何日も後に不在が始まった場合は「特になし」になる）", async () => {
+    mockedGetStoredAffectState.mockResolvedValueOnce({
+      state: storedState({
+        emotions: emotions({ sadness: 90 }),
+        // LAST_LOGIN_AT（2026-09-21T22:00:00.000Z）の51日前 → 情動の半減期（最長12時間）を大きく超えて減衰する
+        affectUpdatedAt: "2026-08-01T22:00:00.000Z",
+      }),
+      legacyPerception: null,
+    });
+
+    await runAbsenceSimulator(baseReq());
+
+    const systemPrompt = mockedInvokeModelJson.mock.calls[0][0] as string[];
+    expect(systemPrompt[1]).toContain("・いま強く感じていること：特になし");
+  });
+
+  it("状態レコードに書き込まない（読み取りだけ行う）", async () => {
+    mockedGetStoredAffectState.mockResolvedValueOnce({
+      state: storedState(),
+      legacyPerception: null,
+    });
+
+    await runAbsenceSimulator(baseReq());
+
+    expect(mockedGetStoredAffectState).toHaveBeenCalledTimes(1);
+    expect(mockedGetStoredAffectState).toHaveBeenCalledWith("char-1");
+    expect(mockedSaveCharacterAffectState).not.toHaveBeenCalled();
   });
 });
 

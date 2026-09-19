@@ -8,7 +8,7 @@ vi.mock("../../../src/lib/dynamo.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/lib/dynamo.js")>();
   return {
     ...actual,
-    getCharacterState: vi.fn(),
+    getStoredAffectState: vi.fn(),
     getRelevantMemories: vi.fn(),
     getRecentLogs: vi.fn(),
     getLatestAbsenceRecord: vi.fn(),
@@ -16,13 +16,14 @@ vi.mock("../../../src/lib/dynamo.js", async (importOriginal) => {
     saveConversationLog: vi.fn(),
     saveRelationshipRecord: vi.fn(),
     saveMemory: vi.fn(),
+    saveCharacterAffectState: vi.fn(),
   };
 });
 
 import { runDialogueGenerator } from "../../../src/dialogueGenerator/index.js";
 import { invokeModel } from "../../../src/lib/bedrock.js";
 import {
-  getCharacterState,
+  getStoredAffectState,
   getRelevantMemories,
   getRecentLogs,
   getLatestAbsenceRecord,
@@ -30,22 +31,23 @@ import {
   saveConversationLog,
   saveRelationshipRecord,
   saveMemory,
-  DEFAULT_MOOD,
-  DEFAULT_PERCEPTION,
+  saveCharacterAffectState,
   RELATIONSHIP_MILESTONE_MEMORY_TYPE,
 } from "../../../src/lib/dynamo.js";
 import type {
   AbsenceRecord,
+  CharacterAffectState,
   CharacterDefinition,
   ConversationLogItem,
   DialogueGeneratorRequest,
+  Lifestyle,
   RelationshipRecord,
   RelationshipStage,
   World,
 } from "../../../src/types.js";
 
 const mockedInvokeModel = vi.mocked(invokeModel);
-const mockedGetCharacterState = vi.mocked(getCharacterState);
+const mockedGetStoredAffectState = vi.mocked(getStoredAffectState);
 const mockedGetRelevantMemories = vi.mocked(getRelevantMemories);
 const mockedGetRecentLogs = vi.mocked(getRecentLogs);
 const mockedGetLatestAbsenceRecord = vi.mocked(getLatestAbsenceRecord);
@@ -53,6 +55,7 @@ const mockedGetRelationshipRecord = vi.mocked(getRelationshipRecord);
 const mockedSaveConversationLog = vi.mocked(saveConversationLog);
 const mockedSaveRelationshipRecord = vi.mocked(saveRelationshipRecord);
 const mockedSaveMemory = vi.mocked(saveMemory);
+const mockedSaveCharacterAffectState = vi.mocked(saveCharacterAffectState);
 
 const world: World = {
   key: "test-world",
@@ -61,6 +64,17 @@ const world: World = {
   rules: [],
   forbiddenElements: [],
   timezone: "Asia/Tokyo",
+};
+
+// 感情・関係値の状態を now まで進める計算（needs.fatigue）が使う生活様式。
+// 疲労の増減はこのテストの関心事ではないので、1日を通して変化させない枠にする
+const lifestyle: Lifestyle = {
+  key: "test-lifestyle",
+  schedules: {
+    weekday: [{ start: "00:00", end: "23:59", activity: "日常", fatigueChangePerHour: 0 }],
+    holiday: [{ start: "00:00", end: "23:59", activity: "日常", fatigueChangePerHour: 0 }],
+  },
+  eventKinds: [{ key: "daily", label: "日常", weight: 1 }],
 };
 
 const character: CharacterDefinition = {
@@ -111,6 +125,21 @@ const characterWithPromotableStage: CharacterDefinition = {
   relationshipStages: [character.relationshipStages[0], promotableSecondStage],
 };
 
+// 関係値（trust）がある程度上がらないと満たせない段階（セッション確定後の関係値での判定テスト用）
+const stageThatNeedsHighTrust: RelationshipStage = {
+  key: "second",
+  label: "テスト段階2",
+  description: "テスト用の説明2",
+  speechStyle: "テスト用の話し方2",
+  speechExamples: [],
+  promoteWhen: { minConversationDays: 0, minConversationCount: 0, minPerception: { trust: 55 } },
+};
+
+const characterWithSessionPromotableStage: CharacterDefinition = {
+  ...character,
+  relationshipStages: [character.relationshipStages[0], stageThatNeedsHighTrust],
+};
+
 function relationshipRecord(overrides: Partial<RelationshipRecord> = {}): RelationshipRecord {
   return {
     firstMetAt: "2026-08-01T00:00:00.000Z",
@@ -123,17 +152,6 @@ function relationshipRecord(overrides: Partial<RelationshipRecord> = {}): Relati
     recoveryRemaining: 0,
     lastDemotedAt: null,
     updatedAt: "2026-08-10T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
-function baseReq(overrides: Partial<DialogueGeneratorRequest> = {}): DialogueGeneratorRequest {
-  return {
-    characterId: "char-1",
-    world,
-    character,
-    now: "2026-08-11T14:30:00.000Z",
-    message: "こんにちは",
     ...overrides,
   };
 }
@@ -170,6 +188,48 @@ function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
   };
 }
 
+// 情動0・気分平常（bigFive省略の平常値）・欲求は既定の基準値・関係値はキャラクターの
+// initialPerception、進行中のセッションも段階の基点も無い状態（affectUpdatedAt は
+// baseReq の既定の now と同じにして、経過時間による変化が起きないようにする）
+function neutralAffectState(overrides: Partial<CharacterAffectState> = {}): CharacterAffectState {
+  const base: CharacterAffectState = {
+    emotions: {
+      joy: 0,
+      sadness: 0,
+      hope: 0,
+      anxiety: 0,
+      relief: 0,
+      disappointment: 0,
+      pride: 0,
+      shame: 0,
+      gratitude: 0,
+      admiration: 0,
+      anger: 0,
+      happyFor: 0,
+      sympathy: 0,
+    },
+    mood: { pleasure: 0, arousal: 0, dominance: 0 },
+    needs: { fatigue: 30, loneliness: 0 },
+    perception: { ...character.initialPerception },
+    perceptionStageBase: null,
+    pendingSession: null,
+    affectUpdatedAt: "2026-08-11T14:30:00.000Z",
+  };
+  return { ...base, ...overrides };
+}
+
+function baseReq(overrides: Partial<DialogueGeneratorRequest> = {}): DialogueGeneratorRequest {
+  return {
+    characterId: "char-1",
+    world,
+    character,
+    lifestyle,
+    now: "2026-08-11T14:30:00.000Z",
+    message: "こんにちは",
+    ...overrides,
+  };
+}
+
 /** invokeModel に渡ったシステムプロンプト（層の配列）を、内容確認用に1つの文字列に結合する */
 function promptText(callIndex = 0): string {
   return (mockedInvokeModel.mock.calls[callIndex][0] as string[]).join("\n");
@@ -179,7 +239,7 @@ beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 
-  mockedGetCharacterState.mockResolvedValue({ mood: { ...DEFAULT_MOOD }, perception: { ...DEFAULT_PERCEPTION } });
+  mockedGetStoredAffectState.mockResolvedValue({ state: null, legacyPerception: null });
   mockedGetRelevantMemories.mockResolvedValue([]);
   mockedGetRecentLogs.mockResolvedValue([]);
   mockedGetLatestAbsenceRecord.mockResolvedValue(null);
@@ -187,6 +247,7 @@ beforeEach(() => {
   mockedSaveConversationLog.mockResolvedValue(undefined);
   mockedSaveRelationshipRecord.mockResolvedValue(undefined);
   mockedSaveMemory.mockResolvedValue(undefined);
+  mockedSaveCharacterAffectState.mockResolvedValue(undefined);
   mockedInvokeModel.mockResolvedValue("セリフの返答");
 });
 
@@ -229,49 +290,91 @@ describe("messageがある場合", () => {
   });
 });
 
-describe("mood/perception（D-032: リクエストでは受け取らず常にDBから読む）", () => {
-  it("常にgetCharacterStateをcharacterIdで呼び、その値がプロンプトに入る", async () => {
-    const stateMood = { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 };
-    const statePerception = { trust: 11, affection: 12, respect: 13, fear: 14, dependence: 15, familiarity: 16 };
-    mockedGetCharacterState.mockResolvedValue({ mood: stateMood, perception: statePerception });
-
-    await runDialogueGenerator(baseReq({ characterId: "char-xyz" }));
-
-    expect(mockedGetCharacterState).toHaveBeenCalledWith("char-xyz", character.initialPerception);
-    expect(mockedGetCharacterState).toHaveBeenCalledTimes(1);
-    expect(promptText()).toContain("喜び：1（ほとんど感じない）");
-    expect(promptText()).toContain("信頼：11（ほとんど感じない）");
-  });
-
-  it("getCharacterStateがmood/perceptionを返さない場合 → 既定値(DEFAULT_MOOD/DEFAULT_PERCEPTION)が使われる", async () => {
-    mockedGetCharacterState.mockResolvedValue({} as unknown as Awaited<ReturnType<typeof getCharacterState>>);
+describe("感情・関係値の状態（D-040: 状態レコードを読んで now まで進めた値を使うだけで、保存はしない）", () => {
+  it("状態レコードが無い場合 → 初期状態（平常の気分・キャラクターのinitialPerception）でプロンプトができる", async () => {
+    mockedGetStoredAffectState.mockResolvedValue({ state: null, legacyPerception: null });
 
     await runDialogueGenerator(baseReq());
 
     const prompt = promptText();
-    expect(prompt).toContain(`喜び：${DEFAULT_MOOD.joy}`);
-    expect(prompt).toContain(`信頼：${DEFAULT_PERCEPTION.trust}`);
+    expect(prompt).toContain("今の気分：ふつう（特に偏りはない）");
+    expect(prompt).toContain("いま強く感じていること：特になし");
+    expect(prompt).toContain(`信頼：${character.initialPerception.trust}`);
   });
 
-  it("D-033: character.initialPerceptionがgetCharacterStateの第2引数に渡る（キャラクターごとに異なる値でも）", async () => {
-    const characterWithCustomInitialPerception = {
-      ...character,
-      initialPerception: {
-        trust: 35,
-        affection: 35,
-        respect: 50,
-        fear: 15,
-        dependence: 10,
-        familiarity: 20,
-      },
-    };
+  it("古い形のレコード（legacyPerception）がある場合 → 関係値だけが引き継がれる", async () => {
+    mockedGetStoredAffectState.mockResolvedValue({
+      state: null,
+      legacyPerception: { trust: 80, affection: 81, respect: 50, fear: 20, dependence: 15, familiarity: 66 },
+    });
 
-    await runDialogueGenerator(baseReq({ character: characterWithCustomInitialPerception }));
+    await runDialogueGenerator(baseReq());
 
-    expect(mockedGetCharacterState).toHaveBeenCalledWith(
-      "char-1",
-      characterWithCustomInitialPerception.initialPerception
+    const prompt = promptText();
+    expect(prompt).toContain("信頼：80（自覚している）");
+    expect(prompt).toContain("好感：81（強く感じる）");
+  });
+
+  it("保存時に強かった情動が、時間が進んで何日も後では「特になし」になる", async () => {
+    mockedGetStoredAffectState.mockResolvedValue({
+      state: neutralAffectState({
+        emotions: { ...neutralAffectState().emotions, sadness: 80 },
+        affectUpdatedAt: "2026-08-01T00:00:00.000Z", // baseReq の now（8/11 14:30）の10日以上前
+      }),
+      legacyPerception: null,
+    });
+
+    await runDialogueGenerator(baseReq({ now: "2026-08-11T14:30:00.000Z" }));
+
+    const prompt = promptText();
+    expect(prompt).toContain("いま強く感じていること：特になし");
+    expect(prompt).not.toContain("悲しみ・落ち込み");
+  });
+
+  it("今の気分の快（mood.pleasure）が、getRelevantMemoriesのmoodPleasureに渡る（気分一致の記憶）", async () => {
+    const now = "2026-08-11T14:30:00.000Z";
+    mockedGetStoredAffectState.mockResolvedValue({
+      state: neutralAffectState({
+        mood: { pleasure: -60, arousal: 0, dominance: 0 },
+        affectUpdatedAt: now, // 経過時間0なので、気分は平常値へ戻らず保存時の値のまま
+      }),
+      legacyPerception: null,
+    });
+
+    await runDialogueGenerator(baseReq({ now }));
+
+    const options = mockedGetRelevantMemories.mock.calls[0][1];
+    expect(options?.moodPleasure).toBeCloseTo(-60, 5);
+  });
+
+  it("終わったセッションの確定後の関係値（trustの上昇）で段階の判定がされる", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(relationshipRecord({ stageKey: "first" }));
+    mockedGetStoredAffectState.mockResolvedValue({
+      state: neutralAffectState({
+        pendingSession: {
+          startedAt: "2026-08-11T12:00:00.000Z",
+          lastMessageAt: "2026-08-11T13:00:00.000Z", // now（14:30）との差90分 ≥ セッションの終わりの間隔（30分）
+          messageCount: 1,
+          peak: { trust: 100 },
+          last: { trust: 100 },
+        },
+        affectUpdatedAt: "2026-08-11T13:00:00.000Z",
+      }),
+      legacyPerception: null,
+    });
+
+    await runDialogueGenerator(
+      baseReq({ character: characterWithSessionPromotableStage, message: "こんにちは" })
     );
+
+    const savedRecord = mockedSaveRelationshipRecord.mock.calls[0][1];
+    expect(savedRecord.stageKey).toBe("second");
+  });
+
+  it("状態レコードには書き込まない（saveCharacterAffectStateは呼ばれない）", async () => {
+    await runDialogueGenerator(baseReq());
+
+    expect(mockedSaveCharacterAffectState).not.toHaveBeenCalled();
   });
 });
 
@@ -513,42 +616,6 @@ describe("プロンプトに含まれる情報", () => {
     await runDialogueGenerator(baseReq());
 
     expect(promptText()).toContain("文化祭を手伝った");
-  });
-
-  it("mood/perceptionのラベルが入る（境界値 40/41）", async () => {
-    mockedGetCharacterState.mockResolvedValue({
-      mood: { joy: 40, anxiety: 41, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
-      perception: { ...DEFAULT_PERCEPTION },
-    });
-
-    await runDialogueGenerator(baseReq());
-
-    const prompt = promptText();
-    expect(prompt).toContain("喜び：40（低い）");
-    expect(prompt).toContain("不安：41（標準）");
-  });
-
-  it("mood/perceptionのラベルが入る（境界値 80/81）", async () => {
-    mockedGetCharacterState.mockResolvedValue({
-      mood: { ...DEFAULT_MOOD },
-      perception: { trust: 80, affection: 81, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
-    });
-
-    await runDialogueGenerator(baseReq());
-
-    const prompt = promptText();
-    expect(prompt).toContain("信頼：80（自覚している）");
-    expect(prompt).toContain("好感：81（強く感じる）");
-  });
-
-  it("longTimeFlagが1のとき「さみしさ」の記述が入る", async () => {
-    await runDialogueGenerator(baseReq({ longTimeFlag: 1 }));
-    expect(promptText()).toContain("さみしさ");
-  });
-
-  it("longTimeFlagが0（省略）のとき「さみしさ」の記述が入らない", async () => {
-    await runDialogueGenerator(baseReq({ longTimeFlag: 0 }));
-    expect(promptText()).not.toContain("さみしさ");
   });
 });
 

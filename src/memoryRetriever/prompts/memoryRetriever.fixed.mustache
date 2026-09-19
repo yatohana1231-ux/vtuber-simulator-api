@@ -43,6 +43,8 @@ memoryType の種類:
 - character_event: キャラクター自身の出来事・成長
 - world_event: 周囲の世界・環境の変化
 
+emotionValence: その出来事でキャラクターが感じた感情の向き。うれしい・安心などは positive、つらい・不安・怒りなどは negative、どちらでもなければ neutral
+
 【出力フォーマット】
 以下のJSON形式のみで出力してください。前後に説明文は不要です。
 
@@ -55,6 +57,7 @@ memoryType の種類:
       "playerAction": "プレイヤーの行動（なければ空文字）",
       "characterInterpretation": "キャラクターの解釈・感想",
       "emotion": "感じた感情",
+      "emotionValence": "positive | negative | neutral",
       "importance": 重要度(0-100の整数),
       "memoryType": "relationship_event | character_event | world_event",
       "memoryLabel": "CREATE | UPDATE | IGNORE | CONFLICT",

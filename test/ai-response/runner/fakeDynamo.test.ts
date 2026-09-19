@@ -2,26 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 import { createFakeDynamo, selectWritesForCharacter, type FakeDynamo } from "./fakeDynamo.js";
+import { makeCharacter } from "./checks/fixtures.js";
 import type * as DynamoModule from "../../../src/lib/dynamo.js";
 import type {
   AbsenceRecord,
   CharacterMemoryItem,
   ConversationLogItem,
-  Mood,
-  Perception,
   RelationshipRecord,
 } from "../../../src/types.js";
 
 let dynamoModule: typeof DynamoModule;
 let fake: FakeDynamo;
-
-function mood(overrides: Partial<Mood> = {}): Mood {
-  return { joy: 10, anxiety: 20, angry: 30, fatigue: 40, confidence: 50, loneliness: 60, ...overrides };
-}
-
-function perception(overrides: Partial<Perception> = {}): Perception {
-  return { trust: 11, affection: 21, respect: 31, fear: 41, dependence: 51, familiarity: 61, ...overrides };
-}
 
 function absenceRecordInput(overrides: Partial<Omit<AbsenceRecord, "event_id" | "characterId">> = {}) {
   return {
@@ -57,34 +48,35 @@ afterEach(() => {
   fake.uninstall();
 });
 
-describe("感情・関係値", () => {
-  it("seed した mood/perception を getCharacterState で読める", async () => {
-    fake.seed("char-1", { mood: mood({ joy: 99 }), perception: perception({ trust: 88 }) });
+describe("感情・関係値の状態（stateVersion=2, D-040）", () => {
+  it("seed した state.affect を getStoredAffectState で読める（省略した項目は初期状態で埋まる）", async () => {
+    const character = makeCharacter({
+      initialPerception: { trust: 40, affection: 30, respect: 20, fear: 5, dependence: 5, familiarity: 25 },
+    });
+    const now = new Date("2026-01-15T00:00:00.000Z");
 
-    const result = await dynamoModule.getCharacterState("char-1");
+    fake.seed("char-1", { affect: { emotions: { joy: 70 }, needs: { loneliness: 15 } } }, character, now);
 
-    expect(result.mood.joy).toBe(99);
-    expect(result.perception.trust).toBe(88);
+    const { state, legacyPerception } = await dynamoModule.getStoredAffectState("char-1");
+
+    expect(state?.emotions.joy).toBe(70);
+    expect(state?.emotions.sadness).toBe(0); // 省略した情動は0（平常）
+    expect(state?.needs.loneliness).toBe(15);
+    expect(state?.perception).toEqual(character.initialPerception); // 省略時は character.initialPerception
+    expect(state?.affectUpdatedAt).toBe(now.toISOString()); // affectUpdatedAt 省略時は渡した now
+    expect(legacyPerception).toBeNull();
   });
 
-  it("mood/perception を省略 → getCharacterState は既定値を返す", async () => {
+  it("state.affect を省略 → 状態レコードなし（getStoredAffectState は null。本番の初期状態と同じ扱い）", async () => {
     fake.seed("char-1", {});
 
-    const result = await dynamoModule.getCharacterState("char-1");
+    const { state } = await dynamoModule.getStoredAffectState("char-1");
 
-    expect(result.mood).toEqual(dynamoModule.DEFAULT_MOOD);
-    expect(result.perception).toEqual(dynamoModule.DEFAULT_PERCEPTION);
+    expect(state).toBeNull();
   });
 
-  it("saveCharacterState で書き込みが記録され、読み直せる", async () => {
-    await dynamoModule.saveCharacterState("char-1", mood({ joy: 5 }), perception({ trust: 6 }));
-
-    const result = await dynamoModule.getCharacterState("char-1");
-    expect(result.mood.joy).toBe(5);
-    expect(result.perception.trust).toBe(6);
-
-    expect(fake.writes).toHaveLength(1);
-    expect(fake.writes[0]).toMatchObject({ table: "characterMemory", operation: "put" });
+  it("state.affect はあるのに character を渡さない → 例外", () => {
+    expect(() => fake.seed("char-1", { affect: {} })).toThrow(/character/);
   });
 });
 
@@ -266,7 +258,7 @@ describe("selectWritesForCharacter", () => {
   it("characterId/conversation_id/memory_id で自分の書き込みだけに絞り込める", async () => {
     await dynamoModule.saveConversationLog("char-a", "user", "a");
     await dynamoModule.saveConversationLog("char-b", "user", "b");
-    await dynamoModule.saveCharacterState("char-a", mood(), perception());
+    await dynamoModule.saveRelationshipRecord("char-a", relationshipRecordInput());
 
     const forA = selectWritesForCharacter(fake.writes, "char-a");
     const forB = selectWritesForCharacter(fake.writes, "char-b");

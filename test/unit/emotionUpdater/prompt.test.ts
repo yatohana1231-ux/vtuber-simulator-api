@@ -5,33 +5,28 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { buildEmotionUpdaterPromptLayers } from "../../../src/emotionUpdater/prompt.js";
 import { loadPackage } from "../../../src/lib/packages.js";
 import type { EmotionUpdaterPromptInput } from "../../../src/emotionUpdater/prompt.js";
-import type { CharacterDefinition, Mood, Perception, World } from "../../../src/types.js";
+import type { CharacterDefinition, World } from "../../../src/types.js";
 
 let world: World;
 let character: CharacterDefinition;
+let characterWithoutGoals: CharacterDefinition;
 
 beforeAll(async () => {
   const pkg = await loadPackage("yui-modern-tokyo");
   if (!pkg) throw new Error("yui-modern-tokyo package not found");
   world = pkg.world;
   character = pkg.character;
+  characterWithoutGoals = { ...pkg.character, goals: undefined };
 });
-
-function mood(overrides: Partial<Mood> = {}): Mood {
-  return { joy: 50, anxiety: 50, angry: 50, fatigue: 50, confidence: 50, loneliness: 50, ...overrides };
-}
-
-function perception(overrides: Partial<Perception> = {}): Perception {
-  return { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50, ...overrides };
-}
 
 function baseInput(overrides: Partial<EmotionUpdaterPromptInput> = {}): EmotionUpdaterPromptInput {
   return {
     world,
     character,
     process: 1,
-    currentMood: mood(),
-    currentPerception: perception(),
+    affectText: "・今の気分：ふつう（特に偏りはない）\n・いま強く感じていること：特になし\n・疲労：30（少し）\n・孤独感：0（ほとんど感じない）",
+    stageDescription: "テスト用の関係の段階の説明",
+    recentConversationText: "",
     inputText: "【不在中の出来事】（期間: 2026/09/18(金) 07:00 〜 2026/09/18(金) 19:00）\n1. 雨が降った\n   傘を忘れて濡れた",
     ...overrides,
   };
@@ -47,13 +42,14 @@ describe("buildEmotionUpdaterPromptLayers", () => {
   });
 
   describe("固定部（① プロンプトキャッシュのための性質）", () => {
-    it("process・感情・関係値・入力が違う2つの入力で、固定部は完全に同じ文字列になる", () => {
+    it("process・状態が違う2つの入力で、固定部は完全に同じ文字列になる", () => {
       const [fixedA] = buildEmotionUpdaterPromptLayers(baseInput());
       const [fixedB] = buildEmotionUpdaterPromptLayers(
         baseInput({
           process: 2,
-          currentMood: mood({ joy: 90, anxiety: 5 }),
-          currentPerception: perception({ trust: 10, affection: 95 }),
+          affectText: "・今の気分：とても、はつらつとして前向き\n・いま強く感じていること：喜び 90（強く）\n・疲労：80（かなり）\n・孤独感：60（そこそこ）",
+          stageDescription: "別の段階の説明",
+          recentConversationText: "プレイヤー: やあ\nテストキャラ: こんにちは",
           inputText: "【プレイヤーの発言】\n今日も配信見てたよ",
         })
       );
@@ -66,49 +62,82 @@ describe("buildEmotionUpdaterPromptLayers", () => {
 
       expect(fixed).toContain(character.name);
       expect(fixed).toContain(world.description);
-      expect(fixed).toContain("moodDelta");
-      expect(fixed).toContain("perceptionDelta");
+      expect(fixed).toContain("appraisals");
+      expect(fixed).toContain("interaction");
     });
 
-    it("現在の感情状態・関係値・更新のインプットが入らない", () => {
+    it("goalsが入る", () => {
+      const [fixed] = buildEmotionUpdaterPromptLayers(baseInput());
+
+      expect(character.goals && character.goals.length).toBeGreaterThan(0);
+      for (const goal of character.goals ?? []) {
+        expect(fixed).toContain(goal.key);
+        expect(fixed).toContain(goal.description);
+      }
+    });
+
+    it("goalsが無ければ「（特になし）」が入る", () => {
+      const [fixed] = buildEmotionUpdaterPromptLayers(baseInput({ character: characterWithoutGoals }));
+
+      expect(fixed).toContain("（特になし）");
+    });
+
+    it("今の状態・関係の段階の説明・更新のインプットが入らない", () => {
       const [fixed] = buildEmotionUpdaterPromptLayers(baseInput());
 
       expect(fixed).not.toContain("雨が降った");
-      expect(fixed).not.toContain("喜び：50");
-      expect(fixed).not.toContain("±0〜3");
-      expect(fixed).not.toContain("±1〜5");
+      expect(fixed).not.toContain("テスト用の関係の段階の説明");
+      expect(fixed).not.toContain("今の気分：ふつう");
     });
   });
 
   describe("可変部（③ 毎回変わる入力）", () => {
-    it("現在の感情状態・関係値が入る", () => {
-      const [, variable] = buildEmotionUpdaterPromptLayers(
-        baseInput({ currentMood: mood({ joy: 20 }), currentPerception: perception({ trust: 61 }) })
-      );
+    it("今の状態（affectText）が入る", () => {
+      const [, variable] = buildEmotionUpdaterPromptLayers(baseInput());
 
-      expect(variable).toContain("喜び：20（ほとんど感じない）");
-      expect(variable).toContain("信頼：61（自覚している）");
+      expect(variable).toContain("今の気分：ふつう");
     });
 
-    it("更新のインプットが入る", () => {
+    it("関係の段階の説明（stageDescription）が入る", () => {
+      const [, variable] = buildEmotionUpdaterPromptLayers(baseInput({ stageDescription: "とても親しい間柄" }));
+
+      expect(variable).toContain("とても親しい間柄");
+    });
+
+    it("評価する入力（inputText）が入る", () => {
       const [, variable] = buildEmotionUpdaterPromptLayers(baseInput());
 
       expect(variable).toContain("雨が降った");
       expect(variable).toContain("傘を忘れて濡れた");
     });
 
-    it("process=1 → 「±0〜3」の関係値のルールが入る", () => {
-      const [, variable] = buildEmotionUpdaterPromptLayers(baseInput({ process: 1 }));
+    it("最近の会話があれば【最近の会話】の節に入る", () => {
+      const [, variable] = buildEmotionUpdaterPromptLayers(
+        baseInput({ recentConversationText: "プレイヤー: やあ\nテストキャラ: こんにちは" })
+      );
 
-      expect(variable).toContain("±0〜3");
-      expect(variable).not.toContain("±1〜5");
+      expect(variable).toContain("【最近の会話】");
+      expect(variable).toContain("プレイヤー: やあ");
     });
 
-    it("process=2 → 「±1〜5」の関係値のルールが入る", () => {
+    it("最近の会話が空なら【最近の会話】の節が出ない", () => {
+      const [, variable] = buildEmotionUpdaterPromptLayers(baseInput({ recentConversationText: "" }));
+
+      expect(variable).not.toContain("【最近の会話】");
+    });
+
+    it("process=1 → process=1向けのルール（player以外をcause playerにしない・interactionを出さない）が入る", () => {
+      const [, variable] = buildEmotionUpdaterPromptLayers(baseInput({ process: 1 }));
+
+      expect(variable).toContain("プレイヤーがいなかった間の出来事");
+      expect(variable).toContain("interaction は出力しないこと");
+    });
+
+    it("process=2 → process=2向けのルール（最近の会話は参考、評価は入力の発言だけ）が入る", () => {
       const [, variable] = buildEmotionUpdaterPromptLayers(baseInput({ process: 2 }));
 
-      expect(variable).toContain("±1〜5");
-      expect(variable).not.toContain("±0〜3");
+      expect(variable).toContain("プレイヤーの発言です");
+      expect(variable).toContain("評価するのは【評価する入力】の発言だけ");
     });
 
     it("出力フォーマットを守るよう促す念押しの一文が入る", () => {
@@ -128,18 +157,13 @@ describe("buildEmotionUpdaterPromptLayers", () => {
   describe("テンプレートに世界観・キャラクターに依存する語が直書きされていない", () => {
     const forbiddenWords = ["高校", "学校", "東京", "配信"];
 
-    it.each(["emotionUpdater.fixed.mustache", "emotionUpdater.variable.mustache"])(
-      "%s",
-      (fileName) => {
-        const templatePath = fileURLToPath(
-          new URL(`../../../src/emotionUpdater/prompts/${fileName}`, import.meta.url)
-        );
-        const raw = readFileSync(templatePath, "utf8");
+    it.each(["emotionUpdater.fixed.mustache", "emotionUpdater.variable.mustache"])("%s", (fileName) => {
+      const templatePath = fileURLToPath(new URL(`../../../src/emotionUpdater/prompts/${fileName}`, import.meta.url));
+      const raw = readFileSync(templatePath, "utf8");
 
-        for (const word of forbiddenWords) {
-          expect(raw).not.toContain(word);
-        }
+      for (const word of forbiddenWords) {
+        expect(raw).not.toContain(word);
       }
-    );
+    });
   });
 });

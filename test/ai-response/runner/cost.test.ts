@@ -121,7 +121,7 @@ describe("loadPricing / loadEstimates", () => {
     expect(pricing["apac.amazon.nova-lite-v1:0"]).toBeDefined();
     expect(estimates.absenceSimulator).toEqual({ inputTokens: 1300, outputTokens: 600 });
     expect(estimates.dialogueGenerator).toEqual({ inputTokens: 2000, outputTokens: 60 });
-    expect(estimates.emotionUpdater).toEqual({ inputTokens: 1100, outputTokens: 120 });
+    expect(estimates.emotionUpdater).toEqual({ inputTokens: 2000, outputTokens: 250 });
     expect(estimates.memoryRetriever).toEqual({ inputTokens: 1300, outputTokens: 500 });
   });
 

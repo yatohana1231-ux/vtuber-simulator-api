@@ -15,7 +15,8 @@
     "testers:list": "tsx scripts/manage-testers.ts list",
     "testers:assign": "tsx scripts/manage-testers.ts assign",
     "testers:characters": "tsx scripts/manage-testers.ts characters",
-    "testers:unassign": "tsx scripts/manage-testers.ts unassign"
+    "testers:unassign": "tsx scripts/manage-testers.ts unassign",
+    "simulate:perception": "tsx scripts/simulate-perception-growth.ts"
   },
   "engines": {
     "node": ">=24"

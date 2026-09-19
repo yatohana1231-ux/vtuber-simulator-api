@@ -1,0 +1,32 @@
+{
+  "id": "process2-session-settles",
+  "function": "emotionUpdater",
+  "description": "process=2。前回の発言から2時間あき、進行中だったセッション（信頼・好感・親密度に正の寄与）が終わったとみなされるとき、ふつうの発言で関係値がそのセッションの分だけ確定して上がること",
+  "state": {
+    "affect": {
+      "pendingSession": {
+        "startedAt": "now-2h10m",
+        "lastMessageAt": "now-2h",
+        "messageCount": 3,
+        "peak": { "trust": 4, "affection": 3, "familiarity": 5 },
+        "last": { "trust": 2, "affection": 2, "familiarity": 3 }
+      }
+    }
+  },
+  "request": {
+    "process": 2,
+    "playerMessage": "おはよう、今日もいい一日になりますように"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    {
+      "type": "perceptionSettled",
+      "params": { "expect": { "trust": "up", "affection": "up", "familiarity": "up" }, "max": 10 }
+    }
+  ],
+  "judgeFocus": [
+    "今回の発言そのものの内容（ふつうの挨拶）に対して、評価の大きさが釣り合っているか。",
+    "このシナリオは主にルール判定（perceptionSettled）で確認する。話題の扱いなど、判定できる材料が無い観点は対象外でよい。"
+  ]
+}

@@ -117,6 +117,64 @@ describe("loadPackage（本物のapi/content/を読む）", () => {
       expect(stage.promoteWhen).not.toBeNull();
     }
   });
+
+  it("character.bigFiveの5項目が読み込まれる（D-040）", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+    const bigFive = pkg?.character.bigFive;
+
+    expect(bigFive).toBeDefined();
+    for (const key of [
+      "openness",
+      "conscientiousness",
+      "extraversion",
+      "agreeableness",
+      "neuroticism",
+    ] as const) {
+      expect(typeof bigFive?.[key]).toBe("number");
+    }
+  });
+
+  it("character.goalsが3件読み込まれ、各要素にkey/description/importanceがある（D-040）", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+    const goals = pkg?.character.goals;
+
+    expect(goals).toHaveLength(3);
+    for (const goal of goals ?? []) {
+      expect(goal.key.length).toBeGreaterThan(0);
+      expect(goal.description.length).toBeGreaterThan(0);
+      expect(goal.importance).toBeGreaterThanOrEqual(1);
+      expect(goal.importance).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("character.attachmentStyleが読み込まれる（D-040）", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+
+    expect(pkg?.character.attachmentStyle).toBe("secure");
+  });
+
+  it("relationshipStages[0].maxPerceptionが読み込まれる（D-040）", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+    const firstStage = pkg?.character.relationshipStages[0];
+
+    expect(firstStage?.maxPerception).toEqual({
+      trust: 50,
+      affection: 50,
+      respect: 60,
+      dependence: 25,
+      familiarity: 50,
+    });
+  });
+
+  it("lifestyle.schedulesの全枠にfatigueChangePerHourが有限の数値で入っている（D-040）", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+    const { weekday, holiday } = pkg!.lifestyle.schedules;
+
+    for (const slot of [...weekday, ...holiday]) {
+      expect(typeof slot.fatigueChangePerHour).toBe("number");
+      expect(Number.isFinite(slot.fatigueChangePerHour)).toBe(true);
+    }
+  });
 });
 
 describe("isValidPackageId", () => {
@@ -815,5 +873,445 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
     } finally {
       await rm(taskRoot, { recursive: true, force: true });
     }
+  });
+});
+
+// -------------------------------------------------------
+// 感情・関係値のモデル（D-040）で追加した項目の検証
+// -------------------------------------------------------
+
+describe("loadPackage（一時ディレクトリのcontentを使う異常系: D-040で追加した項目）", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(tmpdir(), "vtuber-sim-content-affect-"));
+    await mkdir(path.join(tmpDir, "packages"), { recursive: true });
+    await mkdir(path.join(tmpDir, "worlds"), { recursive: true });
+    await mkdir(path.join(tmpDir, "characters"), { recursive: true });
+    await mkdir(path.join(tmpDir, "lifestyles"), { recursive: true });
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(tmpDir, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  const VALID_INITIAL_PERCEPTION = {
+    trust: 30,
+    affection: 30,
+    respect: 30,
+    fear: 10,
+    dependence: 10,
+    familiarity: 30,
+  };
+
+  /** 先頭段階（maxPerception付き）と2番目の段階（promoteWhen.minPerception付き）の2段階構成 */
+  function twoStages(overrides: {
+    firstMaxPerception?: Record<string, number>;
+    secondMinPerception?: Record<string, number>;
+  }) {
+    return [
+      {
+        key: "first",
+        label: "はじめまして",
+        description: "テスト用の説明",
+        speechStyle: "テスト用の話し方",
+        speechExamples: [],
+        promoteWhen: null,
+        maxPerception: overrides.firstMaxPerception,
+      },
+      {
+        key: "acquainted",
+        label: "顔なじみ",
+        description: "テスト用の説明2",
+        speechStyle: "テスト用の話し方2",
+        speechExamples: [],
+        promoteWhen: {
+          minConversationDays: 0,
+          minConversationCount: 0,
+          minPerception: overrides.secondMinPerception ?? {},
+        },
+      },
+    ];
+  }
+
+  /** 有効な世界観・生活様式を書き込み、キャラクターを overrides で組み立てて読み込む */
+  async function loadWithCharacterOverrides(overrides: Record<string, unknown>) {
+    await writeFile(
+      path.join(tmpDir, "worlds", "test-world.json"),
+      JSON.stringify({
+        key: "test-world",
+        name: "テスト世界",
+        description: "テスト用",
+        rules: [],
+        forbiddenElements: [],
+        timezone: "Asia/Tokyo",
+      })
+    );
+    await writeFile(
+      path.join(tmpDir, "characters", "test-character.json"),
+      JSON.stringify({
+        key: "test-character",
+        name: "テストキャラ",
+        personality: "",
+        speechStyle: "",
+        relationship: "",
+        background: "",
+        speechExamples: [],
+        initialPerception: VALID_INITIAL_PERCEPTION,
+        relationshipStages: twoStages({}),
+        ...overrides,
+      })
+    );
+    await writeFile(
+      path.join(tmpDir, "lifestyles", "test-lifestyle.json"),
+      JSON.stringify({
+        key: "test-lifestyle",
+        schedules: {
+          weekday: [{ start: "07:00", end: "08:00", activity: "起床・身支度" }],
+          holiday: [{ start: "08:00", end: "09:00", activity: "起床・身支度" }],
+        },
+        eventKinds: [{ key: "daily", label: "日常のひとコマ", weight: 1 }],
+      })
+    );
+    await writeFile(
+      path.join(tmpDir, "packages", "affect-validation-pkg.json"),
+      JSON.stringify({
+        id: "affect-validation-pkg",
+        displayName: "test",
+        world: "test-world",
+        character: "test-character",
+        lifestyle: "test-lifestyle",
+      })
+    );
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    return mod.loadPackage("affect-validation-pkg");
+  }
+
+  /** 有効な世界観・キャラクターを書き込み、生活様式を overrides で組み立てて読み込む */
+  async function loadWithLifestyleOverrides(scheduleOverrides: Record<string, unknown>) {
+    await writeFile(
+      path.join(tmpDir, "worlds", "test-world.json"),
+      JSON.stringify({
+        key: "test-world",
+        name: "テスト世界",
+        description: "テスト用",
+        rules: [],
+        forbiddenElements: [],
+        timezone: "Asia/Tokyo",
+      })
+    );
+    await writeFile(
+      path.join(tmpDir, "characters", "test-character.json"),
+      JSON.stringify({
+        key: "test-character",
+        name: "テストキャラ",
+        personality: "",
+        speechStyle: "",
+        relationship: "",
+        background: "",
+        speechExamples: [],
+        initialPerception: VALID_INITIAL_PERCEPTION,
+        relationshipStages: twoStages({}),
+      })
+    );
+    await writeFile(
+      path.join(tmpDir, "lifestyles", "test-lifestyle.json"),
+      JSON.stringify({
+        key: "test-lifestyle",
+        schedules: {
+          weekday: [{ start: "07:00", end: "08:00", activity: "起床・身支度", ...scheduleOverrides }],
+          holiday: [],
+        },
+        eventKinds: [{ key: "daily", label: "日常のひとコマ", weight: 1 }],
+      })
+    );
+    await writeFile(
+      path.join(tmpDir, "packages", "lifestyle-validation-pkg.json"),
+      JSON.stringify({
+        id: "lifestyle-validation-pkg",
+        displayName: "test",
+        world: "test-world",
+        character: "test-character",
+        lifestyle: "test-lifestyle",
+      })
+    );
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    return mod.loadPackage("lifestyle-validation-pkg");
+  }
+
+  // --- bigFive ---
+
+  it("bigFiveを省略 → undefinedのまま読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({});
+
+    expect(pkg?.character.bigFive).toBeUndefined();
+  });
+
+  it("bigFiveの5項目が範囲内 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      bigFive: { openness: -100, conscientiousness: 0, extraversion: 100, agreeableness: 50, neuroticism: -50 },
+    });
+
+    expect(pkg?.character.bigFive).toEqual({
+      openness: -100,
+      conscientiousness: 0,
+      extraversion: 100,
+      agreeableness: 50,
+      neuroticism: -50,
+    });
+  });
+
+  it("bigFiveの値が範囲外（101） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        bigFive: { openness: 101, conscientiousness: 0, extraversion: 0, agreeableness: 0, neuroticism: 0 },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("bigFiveの項目が1つ欠けている → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        bigFive: { openness: 0, conscientiousness: 0, extraversion: 0, agreeableness: 0 },
+      })
+    ).rejects.toThrow();
+  });
+
+  // --- goals ---
+
+  it("goalsを省略 → undefinedのまま読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({});
+
+    expect(pkg?.character.goals).toBeUndefined();
+  });
+
+  it("goalsが妥当 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      goals: [{ key: "g1", description: "目標1", importance: 50 }],
+    });
+
+    expect(pkg?.character.goals).toEqual([{ key: "g1", description: "目標1", importance: 50 }]);
+  });
+
+  it("goalsのkeyが重複 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        goals: [
+          { key: "g1", description: "目標1", importance: 50 },
+          { key: "g1", description: "目標2", importance: 30 },
+        ],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("goalsのdescriptionが空文字 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        goals: [{ key: "g1", description: "", importance: 50 }],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("goalsのimportanceが範囲外（0） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        goals: [{ key: "g1", description: "目標1", importance: 0 }],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("goalsのimportanceが範囲外（101） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        goals: [{ key: "g1", description: "目標1", importance: 101 }],
+      })
+    ).rejects.toThrow();
+  });
+
+  // --- attachmentStyle ---
+
+  it("attachmentStyleを省略 → undefinedのまま読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({});
+
+    expect(pkg?.character.attachmentStyle).toBeUndefined();
+  });
+
+  it.each(["secure", "anxious", "avoidant"] as const)(
+    "attachmentStyleが%sのとき → 読み込める",
+    async (style) => {
+      const pkg = await loadWithCharacterOverrides({ attachmentStyle: style });
+
+      expect(pkg?.character.attachmentStyle).toBe(style);
+    }
+  );
+
+  it("attachmentStyleが不明な値 → 例外", async () => {
+    await expect(loadWithCharacterOverrides({ attachmentStyle: "clingy" })).rejects.toThrow();
+  });
+
+  // --- affectTuning ---
+
+  it("affectTuningを省略 → undefinedのまま読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({});
+
+    expect(pkg?.character.affectTuning).toBeUndefined();
+  });
+
+  it("affectTuning.moodHomeBaseの3軸が範囲内 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      affectTuning: { moodHomeBase: { pleasure: 10, arousal: -10, dominance: 0 } },
+    });
+
+    expect(pkg?.character.affectTuning).toEqual({
+      moodHomeBase: { pleasure: 10, arousal: -10, dominance: 0 },
+    });
+  });
+
+  it("affectTuning.moodHomeBaseの軸が範囲外（101） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        affectTuning: { moodHomeBase: { pleasure: 101, arousal: 0, dominance: 0 } },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("affectTuning.perceptionGainScaleが正の数 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      affectTuning: { perceptionGainScale: 1.5 },
+    });
+
+    expect(pkg?.character.affectTuning?.perceptionGainScale).toBe(1.5);
+  });
+
+  it("affectTuning.perceptionGainScaleが0以下 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        affectTuning: { perceptionGainScale: 0 },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("affectTuningに知らないキーがある → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        affectTuning: { unknownKnob: 1 },
+      })
+    ).rejects.toThrow();
+  });
+
+  // --- relationshipStages[].maxPerception ---
+
+  it("maxPerceptionを省略 → undefinedのまま読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      relationshipStages: twoStages({ secondMinPerception: { familiarity: 20 } }),
+    });
+
+    expect(pkg?.character.relationshipStages[0].maxPerception).toBeUndefined();
+  });
+
+  it("maxPerceptionが範囲内 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      relationshipStages: twoStages({
+        firstMaxPerception: { familiarity: 50 },
+        secondMinPerception: { familiarity: 20 },
+      }),
+    });
+
+    expect(pkg?.character.relationshipStages[0].maxPerception).toEqual({ familiarity: 50 });
+  });
+
+  it("maxPerceptionの値が範囲外（101） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: twoStages({ firstMaxPerception: { familiarity: 101 } }),
+      })
+    ).rejects.toThrow();
+  });
+
+  it("maxPerceptionに知らない軸キーがある → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: twoStages({ firstMaxPerception: { unknownAxis: 50 } }),
+      })
+    ).rejects.toThrow();
+  });
+
+  it("段階Nのmaxperceptionの軸が、段階N+1のpromoteWhen.minPerceptionの同じ軸より低い → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: twoStages({
+          firstMaxPerception: { familiarity: 40 },
+          secondMinPerception: { familiarity: 45 },
+        }),
+      })
+    ).rejects.toThrow();
+  });
+
+  it("段階Nのmaxperceptionの軸が、段階N+1のpromoteWhen.minPerceptionの同じ軸以上 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      relationshipStages: twoStages({
+        firstMaxPerception: { familiarity: 45 },
+        secondMinPerception: { familiarity: 45 },
+      }),
+    });
+
+    expect(pkg?.character.relationshipStages[0].maxPerception).toEqual({ familiarity: 45 });
+  });
+
+  it("段階Nのmaxperceptionに軸を書いていない（上限100とみなす） → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      relationshipStages: twoStages({ secondMinPerception: { familiarity: 90 } }),
+    });
+
+    expect(pkg?.character.relationshipStages[0].maxPerception).toBeUndefined();
+  });
+
+  // --- initialPerception と最初の段階のmaxPerceptionの整合性 ---
+
+  it("initialPerceptionの軸が最初の段階のmaxPerceptionの同じ軸以下 → 読み込める", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      initialPerception: { ...VALID_INITIAL_PERCEPTION, familiarity: 30 },
+      relationshipStages: twoStages({ firstMaxPerception: { familiarity: 30 } }),
+    });
+
+    expect(pkg?.character.initialPerception.familiarity).toBe(30);
+  });
+
+  it("initialPerceptionの軸が最初の段階のmaxPerceptionの同じ軸を超える → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        initialPerception: { ...VALID_INITIAL_PERCEPTION, familiarity: 31 },
+        relationshipStages: twoStages({ firstMaxPerception: { familiarity: 30 } }),
+      })
+    ).rejects.toThrow();
+  });
+
+  // --- lifestyle: ScheduleSlot.fatigueChangePerHour ---
+
+  it("fatigueChangePerHourを省略 → undefinedのまま読み込める", async () => {
+    const pkg = await loadWithLifestyleOverrides({});
+
+    expect(pkg?.lifestyle.schedules.weekday[0].fatigueChangePerHour).toBeUndefined();
+  });
+
+  it("fatigueChangePerHourが範囲内の数値 → 読み込める", async () => {
+    const pkg = await loadWithLifestyleOverrides({ fatigueChangePerHour: -10 });
+
+    expect(pkg?.lifestyle.schedules.weekday[0].fatigueChangePerHour).toBe(-10);
+  });
+
+  it("fatigueChangePerHourが範囲外（101） → 例外", async () => {
+    await expect(loadWithLifestyleOverrides({ fatigueChangePerHour: 101 })).rejects.toThrow();
+  });
+
+  it("fatigueChangePerHourが範囲外（-101） → 例外", async () => {
+    await expect(loadWithLifestyleOverrides({ fatigueChangePerHour: -101 })).rejects.toThrow();
   });
 });

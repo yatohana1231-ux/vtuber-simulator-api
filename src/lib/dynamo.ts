@@ -7,20 +7,27 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { EMOTION_KEYS } from "../types.js";
 import type {
   AbsenceEvent,
   AbsenceRecord,
   AbsenceThread,
   Action,
+  CharacterAffectState,
+  CharacterAffectStateItem,
   CharacterMemoryItem,
-  CharacterStateItem,
   ConversationLogItem,
+  Emotions,
   LatestAbsenceRecordItem,
-  Mood,
+  MoodPad,
+  Needs,
+  PendingSession,
   Perception,
+  PerceptionStageBase,
   RelationshipRecord,
   TesterCharacter,
 } from "../types.js";
+import { DEFAULT_AFFECT_CONFIG, PERCEPTION_KEYS } from "./affect/affectConfig.js";
 
 // -------------------------------------------------------
 // クライアント
@@ -59,28 +66,6 @@ export const RELATIONSHIP_INDEX_KEY = "relationship";
 // 関係の段階が変わった節目の重要記憶の memoryType。セリフの生成にも重要記憶の
 // 判定にも使わず、記録としてだけ残す（D-033、検討事項1）
 export const RELATIONSHIP_MILESTONE_MEMORY_TYPE = "relationship_milestone";
-
-// -------------------------------------------------------
-// デフォルト値
-// -------------------------------------------------------
-
-export const DEFAULT_MOOD: Mood = {
-  joy: 35,
-  anxiety: 62,
-  angry: 20,
-  fatigue: 48,
-  confidence: 30,
-  loneliness: 10,
-};
-
-export const DEFAULT_PERCEPTION: Perception = {
-  trust: 72,
-  affection: 55,
-  respect: 80,
-  fear: 12,
-  dependence: 30,
-  familiarity: 65,
-};
 
 // -------------------------------------------------------
 // 会話ログ
@@ -166,20 +151,123 @@ export async function markLogsAsJudged(
 }
 
 // -------------------------------------------------------
-// キャラクター感情・関係値
+// 感情・関係値の状態（stateVersion = 2、D-040）
+//
+// index="state" のレコードに、stateVersion=2 を持つ形（CharacterAffectState）で
+// 読み書きする。stateVersion を持たない古い形（Mood 6項目）のレコードが
+// DynamoDB にまだ残っていることがあるため、getStoredAffectState はその場合に
+// 関係値（perception）だけを legacyPerception として引き継ぐ。
 // -------------------------------------------------------
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isValidDateString(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(new Date(value).getTime());
+}
+
+function isValidEmotions(value: unknown): value is Emotions {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return EMOTION_KEYS.every((key) => isFiniteNumber(v[key]));
+}
+
+function isValidMoodPad(value: unknown): value is MoodPad {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return isFiniteNumber(v.pleasure) && isFiniteNumber(v.arousal) && isFiniteNumber(v.dominance);
+}
+
+function isValidNeeds(value: unknown): value is Needs {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return isFiniteNumber(v.fatigue) && isFiniteNumber(v.loneliness);
+}
+
+function isValidPerception(value: unknown): value is Perception {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return PERCEPTION_KEYS.every((key) => isFiniteNumber(v[key]));
+}
+
+function isValidPerceptionStageBase(value: unknown): value is PerceptionStageBase {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.stageKey === "string" && isValidPerception(v.values);
+}
+
+/** PerceptionContribution（関係値の軸ごとの寄与。書いていない軸は省略可）の形かどうか */
+function isValidPerceptionContribution(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return PERCEPTION_KEYS.every((key) => v[key] === undefined || isFiniteNumber(v[key]));
+}
+
+function isValidPendingSession(value: unknown): value is PendingSession {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.startedAt === "string" &&
+    typeof v.lastMessageAt === "string" &&
+    isFiniteNumber(v.messageCount) &&
+    isValidPerceptionContribution(v.peak) &&
+    isValidPerceptionContribution(v.last)
+  );
+}
+
 /**
- * CHARACTER_MEMORY_TABLE から感情・関係値を取得する。
- * 状態レコードが無い場合や、あっても perception が無い場合は、
- * `initialPerception`（キャラクターの初期値。未指定なら DEFAULT_PERCEPTION）の
- * コピーを perception として返す（D-033）。mood の既定値は変わらず DEFAULT_MOOD。
+ * DynamoDB の生の項目（stateVersion=2 と判定済み）を CharacterAffectState として検証する。
+ * emotions/mood/needs/perception/affectUpdatedAt のいずれかが壊れていれば state は null
+ * （brokenFields にその項目名を入れる）。perceptionStageBase/pendingSession だけが
+ * 壊れている場合は、そこだけ null にして残りは使う（brokenFields には入れない）。
  */
-export async function getCharacterState(
-  characterId: string,
-  initialPerception?: Perception
-): Promise<{ mood: Mood; perception: Perception }> {
-  const defaultPerception = initialPerception ?? DEFAULT_PERCEPTION;
+function parseAffectStateItem(item: Record<string, unknown>): {
+  state: CharacterAffectState | null;
+  brokenFields: string[];
+} {
+  const brokenFields: string[] = [];
+  if (!isValidEmotions(item.emotions)) brokenFields.push("emotions");
+  if (!isValidMoodPad(item.mood)) brokenFields.push("mood");
+  if (!isValidNeeds(item.needs)) brokenFields.push("needs");
+  if (!isValidPerception(item.perception)) brokenFields.push("perception");
+  if (!isValidDateString(item.affectUpdatedAt)) brokenFields.push("affectUpdatedAt");
+
+  if (brokenFields.length > 0) {
+    return { state: null, brokenFields };
+  }
+
+  const perceptionStageBase = isValidPerceptionStageBase(item.perceptionStageBase)
+    ? (item.perceptionStageBase as PerceptionStageBase)
+    : null;
+  const pendingSession = isValidPendingSession(item.pendingSession)
+    ? (item.pendingSession as PendingSession)
+    : null;
+
+  return {
+    state: {
+      emotions: item.emotions as Emotions,
+      mood: item.mood as MoodPad,
+      needs: item.needs as Needs,
+      perception: item.perception as Perception,
+      perceptionStageBase,
+      pendingSession,
+      affectUpdatedAt: item.affectUpdatedAt as string,
+    },
+    brokenFields: [],
+  };
+}
+
+/**
+ * CHARACTER_MEMORY_TABLE から stateVersion=2 の感情・関係値の状態を取得する。
+ * - レコードが無い → { state: null, legacyPerception: null }
+ * - stateVersion=2 で形が正しい → { state, legacyPerception: null }
+ * - stateVersion が無い旧形式や、壊れた stateVersion=2 → { state: null, legacyPerception }
+ *   （旧レコードの perception が6軸の有限の数値なら、関係値だけ引き継ぐために legacyPerception に入れる）
+ */
+export async function getStoredAffectState(
+  characterId: string
+): Promise<{ state: CharacterAffectState | null; legacyPerception: Perception | null }> {
   const result = await dynamo.send(
     new GetCommand({
       TableName: CHARACTER_MEMORY_TABLE,
@@ -187,31 +275,42 @@ export async function getCharacterState(
     })
   );
   if (!result.Item) {
-    console.log(`[getCharacterState] not found, using defaults characterId=${characterId}`);
-    return { mood: { ...DEFAULT_MOOD }, perception: { ...defaultPerception } };
+    console.log(`[getStoredAffectState] not found characterId=${characterId}`);
+    return { state: null, legacyPerception: null };
   }
-  const item = result.Item as CharacterStateItem;
-  return {
-    mood: item.mood ?? { ...DEFAULT_MOOD },
-    perception: item.perception ?? { ...defaultPerception },
-  };
+
+  const item = result.Item as Record<string, unknown>;
+  const legacyPerception = isValidPerception(item.perception) ? (item.perception as Perception) : null;
+
+  if (item.stateVersion !== 2) {
+    console.log(`[getStoredAffectState] legacy record (no stateVersion=2) characterId=${characterId}`);
+    return { state: null, legacyPerception };
+  }
+
+  const { state, brokenFields } = parseAffectStateItem(item);
+  if (!state) {
+    console.warn(
+      `[getStoredAffectState] invalid stateVersion=2 record characterId=${characterId} brokenFields=${brokenFields.join(",")}`
+    );
+    return { state: null, legacyPerception };
+  }
+  return { state, legacyPerception: null };
 }
 
-/** CHARACTER_MEMORY_TABLE に感情・関係値を保存する */
-export async function saveCharacterState(
+/** CHARACTER_MEMORY_TABLE に stateVersion=2 の感情・関係値の状態を保存する */
+export async function saveCharacterAffectState(
   characterId: string,
-  mood: Mood,
-  perception: Perception
+  state: CharacterAffectState
 ): Promise<void> {
-  const item: CharacterStateItem = {
+  const item: CharacterAffectStateItem = {
     memory_id: characterId,
     index: STATE_INDEX_KEY,
-    mood,
-    perception,
+    stateVersion: 2,
+    ...state,
     updatedAt: new Date().toISOString(),
   };
   await dynamo.send(new PutCommand({ TableName: CHARACTER_MEMORY_TABLE, Item: item }));
-  console.log(`[saveCharacterState] saved characterId=${characterId}`);
+  console.log(`[saveCharacterAffectState] saved characterId=${characterId}`);
 }
 
 // -------------------------------------------------------
@@ -254,12 +353,19 @@ export interface GetRelevantMemoriesOptions {
   topK?: number;
   /** この重要度未満の記憶は新しさに関係なく除外する */
   minImportance?: number;
+  /**
+   * 指定すると気分一致効果（Bower 1981）のボーナスを加味する。今の気分の快（−100〜+100）。
+   * 記憶の emotionValence と向きが一致する（快なら positive、不快なら negative）ときだけ
+   * スコアにボーナスをかける。項目なし・neutral・向きが逆・未指定・0 のときはかけない（D-040 フェーズ13a）
+   */
+  moodPleasure?: number;
 }
 
 function scoreMemory(
   memory: CharacterMemoryItem,
   queryText: string | undefined,
-  now: number
+  now: number,
+  moodPleasure: number | undefined
 ): number {
   const importance = memory.importance ?? 0;
   const updatedAt = memory.updatedAt ? new Date(memory.updatedAt).getTime() : now;
@@ -273,25 +379,38 @@ function scoreMemory(
     ).length;
   }
 
-  return importance * recencyDecay * (1 + MEMORY_KEYWORD_MATCH_BONUS * matchedTagCount);
+  const isMoodCongruent =
+    moodPleasure != null &&
+    ((memory.emotionValence === "positive" && moodPleasure > 0) ||
+      (memory.emotionValence === "negative" && moodPleasure < 0));
+  const moodCongruenceBonus = isMoodCongruent
+    ? DEFAULT_AFFECT_CONFIG.memory.moodCongruenceBonusAtFullPleasure * (Math.abs(moodPleasure!) / 100)
+    : 0;
+
+  return (
+    importance *
+    recencyDecay *
+    (1 + MEMORY_KEYWORD_MATCH_BONUS * matchedTagCount) *
+    (1 + moodCongruenceBonus)
+  );
 }
 
 /**
- * キャラクターの重要記憶を「重要度 × 新しさ（＋クエリ文とのタグ一致）」でスコアリングし、
+ * キャラクターの重要記憶を「重要度 × 新しさ（＋クエリ文とのタグ一致・気分一致）」でスコアリングし、
  * 上位 topK 件だけを返す。プロンプトへの全件埋め込みを避けるための絞り込み用途。
  */
 export async function getRelevantMemories(
   characterId: string,
   options: GetRelevantMemoriesOptions = {}
 ): Promise<CharacterMemoryItem[]> {
-  const { queryText, topK = 8, minImportance = 20 } = options;
+  const { queryText, topK = 8, minImportance = 20, moodPleasure } = options;
 
   const memories = await getMemories(characterId);
   const now = Date.now();
 
   const relevant = memories
     .filter((m) => (m.importance ?? 0) >= minImportance)
-    .map((m) => ({ memory: m, score: scoreMemory(m, queryText, now) }))
+    .map((m) => ({ memory: m, score: scoreMemory(m, queryText, now, moodPleasure) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, topK)
     .map((r) => r.memory);

@@ -81,8 +81,15 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | absenceSimulator | `noRepeatOfRecentEvents` | `threshold`（既定 0.5） | 最近の記録の出来事と似た出来事が無い（文字 bigram の Jaccard 係数） |
 | absenceSimulator | `noDuplicateThreads` | `threshold`（既定 0.5） | 続いている話題どうしが似ていない |
 | absenceSimulator | `threadContinued` | `threadTopicIncludes` | その話題の続きの出来事がある |
-| emotionUpdater | `deltaDirection` | `expect`（`mood.joy` などの向き: up/down/flat/notDown/notUp） | 変化の向きが期待どおり |
-| emotionUpdater | `deltaWithin` | `path`（mood/perception）, `max` | その群の変化の絶対値が上限以下 |
+| emotionUpdater | `emotionTriggered` / `emotionNotTriggered` | `anyOf` / `noneOf`（情動のキー） | 挙げた情動のどれかが実行前より 1 以上強くなった／どれも強くなっていない |
+| emotionUpdater | `moodDirection` | `expect`（`pleasure`・`arousal`・`dominance` の向き: up/down/flat/notDown/notUp。flat は絶対値 0.5 未満） | 気分の各軸の変化の向きが期待どおり |
+| emotionUpdater | `appraisalCount` | `min`, `max` | LLM が出した出来事の評価（検証後）の件数が範囲内 |
+| emotionUpdater | `appraisalCause` | `anyOf` または `noneOf`（player/self/other/circumstance） | 評価のどれかの原因が anyOf に入る／どの評価の原因も noneOf に入らない |
+| emotionUpdater | `interactionLabel` | `field`, `expect`（許す値の配列） | やり取りの分類（`interaction`）のその項目が、許す値のどれか |
+| emotionUpdater | `pendingContribution` | `expect`（関係値の軸の向き） | 今回の発言の関係値への寄与（`pendingSession.last`）の向きが期待どおり（`pendingSession` が無ければ不合格） |
+| emotionUpdater | `pendingSessionUntouched` | — | セッションの途中経過が実行前と同じ（process=1 用） |
+| emotionUpdater | `perceptionUnchanged` | — | 関係値が実行前と同じ（関係値は発言では動かない。D-040） |
+| emotionUpdater | `perceptionSettled` | `expect`（軸の向き）, `max` | 終わったセッションの確定で関係値が期待の向きに動き、途中経過が新しいセッション（または空）になった |
 | memoryRetriever | `savedCount` | `min`, `max` | 保存した記憶の件数が範囲内 |
 | memoryRetriever | `savedMustMentionAny` / `savedMustNotMention` | `words` | 保存した記憶にいずれかの語を含む／どの語も含まない |
 
@@ -113,11 +120,16 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | dialogueGenerator | `relationship-stage-close-casual` | 「仲良し」の段階。タメ口で、冗談や小さな本音が出るか |
 | dialogueGenerator | `relationship-stage-special-honest` | 「特別な存在」の段階。素の口調で本音を見せるか |
 | dialogueGenerator | `relationship-stage-demoted-reunion` | 「仲良し」から70日話さず1段階下がった直後の再会（`longTimeFlag: 1`）。「顔なじみ」の口調で、再会のさみしさ・よろこびが出るか |
-| emotionUpdater | `process2-kind-words` | やさしい発言で喜びが上がり、関係値が下がらないか |
-| emotionUpdater | `process2-harsh-words` | 心ない発言で喜びが上がらず、不安が下がらないか |
-| emotionUpdater | `process2-neutral-smalltalk` | 中立の雑談で変化が小さいか |
-| emotionUpdater | `process1-happy-event` | 嬉しい出来事の記録で、喜びが下がらず関係値の変化が小さいか |
-| emotionUpdater | `process1-trouble-event` | トラブルの記録で喜びが上がらないか |
+| emotionUpdater | `process2-kind-words` | やさしい発言で喜び・感謝が起き、原因がプレイヤーになり、関係値は発言では変わらないか |
+| emotionUpdater | `process2-harsh-words` | 心ない発言で悲しみ・怒りが起き、気分の快が下がるか |
+| emotionUpdater | `process2-neutral-smalltalk` | 中立の雑談で、出来事を無理に取り出さず、負の情動が起きないか |
+| emotionUpdater | `process2-responsive-to-disclosure` | 直前にキャラクターがこぼした弱音をプレイヤーが受け止めた → 分類が `responsive` になり、信頼への寄与が上がるか |
+| emotionUpdater | `process2-dismissive-to-disclosure` | 同じ弱音を軽く流した → 分類が `dismissive` になり、信頼への寄与が下がるか |
+| emotionUpdater | `process2-player-self-disclosure` | プレイヤーが悩みを打ち明けた → 気持ちの開示として分類され、親しみへの寄与が上がり、心配が起きるか |
+| emotionUpdater | `process2-player-good-news` | プレイヤーの朗報で、自分のことのような喜びが起きるか |
+| emotionUpdater | `process2-session-settles` | 2時間前に終わったセッションの途中経過があるとき、関係値に確定されるか（上がる幅が上限内か） |
+| emotionUpdater | `process1-happy-event` | 嬉しい出来事の記録で喜びが起き、原因をプレイヤーにせず、セッションの途中経過に触らないか |
+| emotionUpdater | `process1-trouble-event` | トラブルの記録で喜びが起きず、同上 |
 | emotionUpdater | `process1-no-record` | 記録が無ければ LLM を呼ばないか |
 | memoryRetriever | `process2-promise-made` | 約束（映画）を覚えるか |
 | memoryRetriever | `process2-preference-revealed` | プレイヤーの好み（いちご）を覚えるか |

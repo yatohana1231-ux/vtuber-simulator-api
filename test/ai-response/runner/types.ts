@@ -8,9 +8,13 @@
 
 import type {
   AbsenceRecord,
+  CharacterAffectState,
   CharacterMemoryItem,
   ConversationLogItem,
-  Mood,
+  Emotions,
+  MoodPad,
+  Needs,
+  PendingSession,
   Perception,
   RelationshipRecord,
 } from "../../../src/types.js";
@@ -36,10 +40,30 @@ export const TARGET_FUNCTIONS: readonly TargetFunction[] = [
  */
 export type ScenarioDatetime = string;
 
-/** シナリオで DynamoDB に入れておく状態。省略した項目は空（感情・関係値は既定値） */
-export interface ScenarioState {
-  mood?: Mood;
+/**
+ * シナリオで DynamoDB に入れておく感情・関係値の状態（D-040 フェーズ16a）。
+ * 省略した項目は、キャラクターの初期状態（createInitialAffectState + resolveAffectProfile）で埋める。
+ * affect 自体を省略したシナリオは、状態レコードを一切投入しない（本番と同じく初期状態から始まる）。
+ */
+export interface ScenarioAffectState {
+  /** 書いた情動だけを上書きする。書いていない情動は 0（平常） */
+  emotions?: Partial<Emotions>;
+  /** 省略時はキャラクターの気分の平常値（bigFive/affectTuning から決まる） */
+  mood?: MoodPad;
+  /** 書いた欲求だけを上書きする（fatigue は実行時に生活様式から計算し直されるので、実質 loneliness 用） */
+  needs?: Partial<Needs>;
+  /** 省略時は character.initialPerception */
   perception?: Perception;
+  /** 進行中のセッションの途中経過。省略時は無し（null）。明示的に null を書いても同じ */
+  pendingSession?: PendingSession | null;
+  /** 時間による変化の基準の日時。省略時は実行開始時刻（＝時間の変化なし）。相対指定も可 */
+  affectUpdatedAt?: ScenarioDatetime;
+}
+
+/** シナリオで DynamoDB に入れておく状態。省略した項目は空（感情・関係値は affect 参照） */
+export interface ScenarioState {
+  /** 感情・関係値の状態（D-040）。省略時は状態レコードなし（本番の初期状態と同じ） */
+  affect?: ScenarioAffectState;
   /** 重要記憶。memory_id は仕組みが characterId で埋める。updatedAt は相対指定も可 */
   memories?: Array<Omit<CharacterMemoryItem, "memory_id"> & { updatedAt?: ScenarioDatetime }>;
   /** 会話ログ（古い順）。conversation_id は仕組みが埋める。index（時刻）は相対指定も可 */
@@ -60,12 +84,16 @@ export interface ScenarioState {
   relationship?: RelationshipRecord;
 }
 
-/** 機能ごとのリクエストの値（world / character / lifestyle はパッケージから仕組みが埋める） */
+/**
+ * 機能ごとのリクエストの値（world / character / lifestyle はパッケージから仕組みが埋める）。
+ * emotionUpdater の now は D-040 で必須になったため受け取れるようにしてある
+ * （省略時は実行開始時刻を使う。memoryRetriever は process=1/2 とも now を受け取らない）。
+ */
 export type ScenarioRequest =
   | { lastLoginAt: ScenarioDatetime; now: ScenarioDatetime } // absenceSimulator
-  | { message: string; now?: ScenarioDatetime; longTimeFlag?: 0 | 1 } // dialogueGenerator（mood/perceptionはD-032で廃止。初期値はstate.moodで与える）
-  | { process: 1 } // emotionUpdater / memoryRetriever（process=1）
-  | { process: 2; playerMessage: string } // emotionUpdater（process=2）
+  | { message: string; now?: ScenarioDatetime; longTimeFlag?: 0 | 1 } // dialogueGenerator（mood/perceptionはD-032で廃止。初期値はstate.affectで与える）
+  | { process: 1; now?: ScenarioDatetime } // emotionUpdater(process=1) / memoryRetriever(process=1)
+  | { process: 2; playerMessage: string; now?: ScenarioDatetime } // emotionUpdater（process=2）
   | { process: 2 }; // memoryRetriever（process=2）
 
 /** ルールによる判定の指定。type ごとの params は checks の実装が検証する */
@@ -139,6 +167,18 @@ export interface RunResult {
   modelCalls: ModelCallRecord[];
   writes: DynamoWriteRecord[];
   checks: CheckResult[];
+  /**
+   * 実行前の感情・関係値の状態（D-040 フェーズ16。時間を進める前の、投入した状態。
+   * シナリオが state.affect を省略していても、キャラクターの初期状態で埋めた値が入る）。
+   * emotionUpdater の判定・採点（差分の向き・大きさ）や、judge.ts の入力の組み立てに使う。
+   */
+  preAffectState: CharacterAffectState;
+  /**
+   * 実行後の状態レコード（偽の DynamoDB への最後の書き込み。pendingSession を含む）。
+   * 状態レコードへの書き込みが無かった実行（absenceSimulator・memoryRetriever・
+   * dialogueGenerator は書かない。D-040）では undefined。
+   */
+  postAffectState?: CharacterAffectState;
   /** LLM による採点（採点しなかった実行〔例外・Bedrock を呼ばないシナリオ・--no-judge〕では無い） */
   judge?: JudgeResult;
   metrics: {

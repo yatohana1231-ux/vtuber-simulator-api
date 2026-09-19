@@ -1,7 +1,7 @@
 {
   "id": "process1-happy-event",
   "function": "emotionUpdater",
-  "description": "process=1。最新の不在期間の記録に嬉しい出来事（small-joy）があるとき、喜びが下がらず、関係値の変化は小さいこと",
+  "description": "process=1。最新の不在期間の記録に嬉しい出来事（small-joy）があるとき、喜びの情動が起き、プレイヤーが不在中の出来事なので関係値は動かず、原因をプレイヤーのせいにしないこと",
   "state": {
     "absenceRecords": [
       {
@@ -28,18 +28,13 @@
   "checks": [
     { "type": "modelResponded" },
     { "type": "jsonParsed" },
-    {
-      "type": "deltaDirection",
-      "params": {
-        "expect": {
-          "mood.joy": "notDown"
-        }
-      }
-    },
-    { "type": "deltaWithin", "params": { "path": "perception", "max": 3 } }
+    { "type": "emotionTriggered", "params": { "anyOf": ["joy"] } },
+    { "type": "pendingSessionUntouched" },
+    { "type": "appraisalCause", "params": { "noneOf": ["player"] } }
   ],
   "judgeFocus": [
-    "喜びが下がらないなど、記録された嬉しい出来事に対して感情の向きが妥当か。",
-    "プレイヤーが不在中に起きた出来事なので、関係値（perception）の変化が小さく抑えられているか。"
+    "記録された嬉しい出来事に対して、喜びの情動を起こす評価になっているか。",
+    "プレイヤーが不在中に起きた出来事なので、cause を player にする（プレイヤーが原因にする）など、入力に無い原因の取り違えをしていないか。",
+    "出来事の重さ（ちょっとした嬉しい出来事）に対して、評価の点数が大きすぎないか。"
   ]
 }
