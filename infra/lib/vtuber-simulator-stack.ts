@@ -345,6 +345,61 @@ export class VtuberSimulatorStack extends cdk.Stack {
     });
 
     // -------------------------------------------------------
+    // 新規: デバッグ専用 Lambda（POST /debug-character-state）
+    //
+    // mood/perception の値を直接指定して状態レコードを書き換える、デバッグ用の
+    // エンドポイント（.notes/debug-character-state-roadmap.md）。ステージごとに
+    // 有効・無効を切り替える（context.enableDebugEndpoints[stageName] === true の
+    // ときだけ作る。prod では作らない想定）。Bedrock の権限は持たせないため、
+    // 全関数に Bedrock 権限を付与する ENDPOINTS のループには含めない
+    // （TesterCharactersLambda と同じ理由）。
+    // -------------------------------------------------------
+
+    const enableDebugEndpointsByStage = this.node.tryGetContext("enableDebugEndpoints") as
+      | Record<string, boolean>
+      | undefined;
+    const enableDebugEndpoints = enableDebugEndpointsByStage?.[stageName] === true;
+
+    if (enableDebugEndpoints) {
+      const debugCharacterStateFn = new lambda.Function(this, "DebugCharacterStateLambda", {
+        functionName: `vtuber-simu-debug-character-state-${stageName}`,
+        runtime: lambda.Runtime.NODEJS_24_X,
+        handler: "debugCharacterState.handler",
+        code: lambdaCode,
+        // TesterCharactersLambda と同じ timeout/memory（Bedrock を呼ばない軽量な処理）
+        timeout: cdk.Duration.seconds(10),
+        memorySize: 256,
+        // 他の Lambda と同じ理由で logRetention を使う（TesterCharactersLambda のコメント参照）
+        logRetention: logs.RetentionDays.ONE_MONTH,
+        environment: {
+          CHARACTER_MEMORY_TABLE: characterMemoryTable.tableArn,
+          TESTER_CHARACTERS_TABLE: testerCharactersTable.tableName,
+          ENFORCE_CHARACTER_OWNERSHIP: enforceCharacterOwnership,
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
+        },
+      });
+
+      // 状態レコードの読み書きのみ（最小権限。Bedrock の権限は付けない）
+      characterMemoryTable.grant(debugCharacterStateFn, "dynamodb:GetItem", "dynamodb:PutItem");
+      // 持ち主の確認のみ（GetItem のみ。Query・PutItem は無い）
+      testerCharactersTable.grant(debugCharacterStateFn, "dynamodb:GetItem");
+
+      const debugCharacterStateIntegration = new apigateway.LambdaIntegration(
+        debugCharacterStateFn,
+        { timeout: cdk.Duration.seconds(29) }
+      );
+      const debugCharacterStateResource = api.root.addResource("debug-character-state");
+      debugCharacterStateResource.addMethod("POST", debugCharacterStateIntegration, {
+        apiKeyRequired: true,
+      });
+
+      new cdk.CfnOutput(this, "DebugCharacterStateEndpoint", {
+        value: `${api.url}debug-character-state`,
+        description: "デバッグ専用: mood/perception を書き換える API Endpoint（有効なステージのみ）",
+      });
+    }
+
+    // -------------------------------------------------------
     // API 専用の CloudFront（Basic 認証・API キー付与・CORS の絞り込み）
     // api-access-control-roadmap.md フェーズ3
     // -------------------------------------------------------

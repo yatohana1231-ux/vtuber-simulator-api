@@ -364,3 +364,22 @@ export interface DialogueGeneratorRequest {
 export interface DialogueGeneratorResponse {
   reply: string;
 }
+
+// -------------------------------------------------------
+// debugCharacterState（デバッグ専用。.notes/debug-character-state-roadmap.md）
+// -------------------------------------------------------
+
+/**
+ * mood/perception を直接指定して状態レコードを書き換えるデバッグ専用の入力。
+ * `world` は使わない（`character.initialPerception` だけを使う）。
+ * `mood`/`perception` は片方だけの指定、両方省略（読み取りのみ）を許す。
+ */
+export interface DebugCharacterStateRequest {
+  characterId: string;
+  character: CharacterDefinition;
+  mood?: Mood;
+  perception?: Perception;
+}
+
+/** レスポンスは /emotion-updater と同じ形（保存後の値） */
+export type DebugCharacterStateResponse = EmotionUpdaterResponse;

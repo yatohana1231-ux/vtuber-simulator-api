@@ -11,11 +11,12 @@ Vitest で実行する単体テストコード。テストの考え方・方針�
 | [`lib/`](lib/README.md) | `src/lib/` | `bedrock.ts` / `dynamo.ts` / `packages.ts` / `utils.ts` / `timezone.ts` / `random.ts` / `absenceRecordText.ts` / `characterStateText.ts` / `apiHandler.ts` / `relationship.ts` / `relationshipText.ts` / `testerId.ts` などの単体テスト |
 | [`promptPartials/`](promptPartials/README.md) | `src/promptPartials/` | 共有パーシャル（`world.mustache` / `speechExamples.mustache`）と `buildPromptContext` の単体テスト |
 | [`absenceSimulator/`](absenceSimulator/README.md) | `src/absenceSimulator/` | 不在期間のシミュレーション（骨格の生成、プロンプトの組み立て、LLM の出力の突き合わせ、本体 `runAbsenceSimulator`）の単体テスト |
-| [`handlers/`](handlers/README.md) | `src/handlers/` | `absenceSimulator` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator` の4ハンドラーの単体テスト（`run*` はスタブ） |
+| [`handlers/`](handlers/README.md) | `src/handlers/` | `absenceSimulator` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator` の4ハンドラーと、`testerCharacters`・`debugCharacterState` のハンドラーの単体テスト（`run*` はスタブ） |
 | [`emotionUpdater/`](emotionUpdater/README.md) | `src/emotionUpdater/` | `runEmotionUpdater` とプロンプトの層の組み立て（`prompt.ts`）の単体テスト（Bedrock / DynamoDB はスタブ） |
 | [`memoryRetriever/`](memoryRetriever/README.md) | `src/memoryRetriever/` | `runMemoryRetriever` とプロンプトの層の組み立て（`prompt.ts`）の単体テスト（Bedrock / DynamoDB はスタブ） |
 | [`dialogueGenerator/`](dialogueGenerator/README.md) | `src/dialogueGenerator/` | `runDialogueGenerator` とプロンプトの層の組み立て（`prompt.ts`）の単体テスト（Bedrock / DynamoDB はスタブ） |
 | [`testerCharacters/`](testerCharacters/README.md) | `src/testerCharacters/` | `runListTesterCharacters`/`runCreateTesterCharacter` の単体テスト（DynamoDB はスタブ、`packages.js` は本物） |
+| [`debugCharacterState/`](debugCharacterState/README.md) | `src/debugCharacterState/` | `runDebugCharacterState` の単体テスト（DynamoDB はスタブ） |
 | [`infra/`](infra/README.md) | `infra/functions/` | API 専用 CloudFront の viewer request で動く CloudFront Function（`api-auth.js`）の単体テスト。実行環境が無いため、ファイルを文字列として読み `new Function` で評価する |
 | [`scripts/`](scripts/README.md) | `scripts/manage-testers.ts` | テスター登録スクリプトの純粋な関数（`validateTesterId` / `validatePassword` / `createStoredValue` / `parseArgs`）の単体テストと、その値が `infra/functions/api-auth.js`（`test/unit/infra/loadApiAuthHandler.ts` 経由）で実際に通ることの確認。AWS CLI を呼ぶ部分（`execFile`）はテストしない |
 

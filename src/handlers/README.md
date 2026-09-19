@@ -9,6 +9,7 @@ Lambda のエントリーポイント。1ファイル = 1 Lambda = 1 エンド�
 | `memoryRetriever.ts` | `POST /memory-retriever` | `runMemoryRetriever` |
 | `dialogueGenerator.ts` | `POST /dialogue-generator` | `runDialogueGenerator` |
 | `testerCharacters.ts` | `GET`/`POST /characters` | `runListTesterCharacters` / `runCreateTesterCharacter` |
+| `debugCharacterState.ts` | `POST /debug-character-state`（デバッグ専用。stg のみ） | `runDebugCharacterState` |
 
 ## 共通の処理
 
@@ -21,6 +22,8 @@ Lambda のエントリーポイント。1ファイル = 1 Lambda = 1 エンド�
 5. `createResponse(200, …)` でレスポンスを返す。`BadRequestError` 以外の例外は 500
 
 `absenceSimulator.ts` は、`now` が `lastLoginAt` より前なら 400（`lastLoginAt must not be later than now`）を返す（D-020。削除した旧 `/event-resolver` は受け付けてしまっていた、F-020）。パッケージの生活様式（`lifestyle`）も `run*` に渡す。
+
+`debugCharacterState.ts` も同じ流れ（`handleApiRequest` を使うので、持ち主の確認も効く）。固有のチェックは `mood`・`perception` の検証（`validateStateField`。省略可、指定するなら6項目すべてを 1〜100 の整数。不足・余分・`null`・整数でない・範囲外は 400 で、丸めない）で、パッケージの読み込みの後に行う（`character.initialPerception` を `run*` に渡すため）。D-038。
 
 ビジネスロジックは持たない。リクエスト仕様は [`../../README.md`](../../README.md) の「API 仕様」を参照。
 

@@ -26,6 +26,9 @@
     },
     "enforceCharacterOwnership": {
       "stg": true
+    },
+    "enableDebugEndpoints": {
+      "stg": true
     }
   }
 }

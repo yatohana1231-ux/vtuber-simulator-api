@@ -34,7 +34,7 @@ api/
 ├── infra/                              # CDK インフラ定義
 │   ├── bin/                            # CDK エントリーポイント
 │   ├── lib/
-│   │   ├── vtuber-simulator-stack.ts   # メインスタック（Lambda x4, API GW, DynamoDB）
+│   │   ├── vtuber-simulator-stack.ts   # メインスタック（Lambda x4＋`/characters`・デバッグ用, API GW, DynamoDB）
 │   │   └── github-oidc-stack.ts        # GitHub OIDC 認証スタック
 │   ├── cdk.json / package.json / tsconfig.json
 ├── scripts/
@@ -46,12 +46,16 @@ api/
 │   │   ├── absenceSimulator.ts
 │   │   ├── emotionUpdater.ts
 │   │   ├── memoryRetriever.ts
-│   │   └── dialogueGenerator.ts
+│   │   ├── dialogueGenerator.ts
+│   │   ├── testerCharacters.ts         # GET/POST /characters
+│   │   └── debugCharacterState.ts      # POST /debug-character-state（デバッグ専用。stg のみ）
 │   ├── types.ts                        # 型定義
 │   ├── absenceSimulator/{index.ts, skeleton.ts, actionSlots.ts, eventKindSelection.ts, prompt.ts, modelOutput.ts, prompts/}  # 不在期間のシミュレーション
 │   ├── emotionUpdater/{index.ts, prompt.ts, prompts/}      # 感情値更新
 │   ├── memoryRetriever/{index.ts, prompt.ts, prompts/}     # 重要記憶管理
 │   ├── dialogueGenerator/{index.ts, prompt.ts, prompts/}   # セリフ生成
+│   ├── testerCharacters/               # テスターのキャラクターの一覧・作成
+│   ├── debugCharacterState/index.ts    # mood/perception の読み取り・書き換え（デバッグ専用）
 │   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 各テンプレート共有のパーシャル
 │   └── lib/{bedrock.ts, modelProfiles.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts, absenceRecordText.ts}
 ├── test/
@@ -685,6 +689,26 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 - `GET /characters` → `200 { "characters": [ { "characterId", "packageId", "label", "createdAt" } ] }`（作成日時の古い順）
 - `POST /characters`（本文 `{ "packageId"?: string, "label"?: string }`。`packageId` の省略時は `yui-modern-tokyo`、`label` は前後の空白を除いて1〜30文字、省略時は「キャラクター{n}」）→ `201 { "characterId", "packageId", "label", "createdAt" }`。`characterId` はサーバーが UUID で発番する。不正な `packageId`・`label` は 400、1人あたりの上限（5つ）に達していたら `409 { "error": "character limit reached" }`
 
+### `POST /debug-character-state`（デバッグ専用）
+
+2026-09-19 に追加（`.notes/debug-character-state-roadmap.md`、D-038）。状態レコード（キャラクター記憶テーブルの `index = "state"`）の `mood`・`perception` を直接読み書きする。ブラウザのデモ（`front-web`）のデバッグパネルの「状態」タブが使う。**`infra/cdk.json` の `context.enableDebugEndpoints.<stage>` が `true` のステージ（stg）にだけ作る。**専用の Lambda で、Bedrock の権限は持たない（キャラクター記憶テーブルの GetItem・PutItem と、持ち主の確認のテスターのキャラクターテーブルの GetItem だけ）。持ち主の確認は4つのエンドポイントと同じく共通処理（`src/lib/apiHandler.ts`）で行う。
+
+**リクエスト**:
+```json
+{
+  "characterId": "c9f0...",
+  "packageId": "yui-modern-tokyo",
+  "mood": { "joy": 80, "anxiety": 10, "angry": 5, "fatigue": 20, "confidence": 60, "loneliness": 15 },
+  "perception": { "trust": 70, "affection": 75, "respect": 50, "fear": 5, "dependence": 30, "familiarity": 65 }
+}
+```
+
+- `mood`・`perception` はどちらも省略可。指定するなら6項目すべてを 1〜100 の整数で指定する。項目の不足・余分・`null`・数値でない・整数でない・範囲外は 400（丸めない）。
+- 片方だけ指定したときは、もう片方は今の値（状態レコードが無ければ既定値。`perception` はキャラクターの `initialPerception`）のまま保存する。どちらも省略したときは保存せずに今の値を返す（読み取り）。
+- 関係の段階・会話ログ・重要記憶には触らない。ただし `perception` を上げると、次の `/dialogue-generator` で関係の段階が上がることがある（段階の条件は履歴と関係値の両方。D-033）。
+
+**レスポンス**: `{ "mood": { ... }, "perception": { ... } }`（保存後の値。`/emotion-updater` と同じ形）
+
 ### アクセス制限
 
 2026-09-19 に追加（`.notes/done/api-access-control-roadmap.md`、D-025・D-027）。ブラウザのデモ（`front-web`）を第三者に公開するため、API の入口を API 専用の CloudFront に絞っている。
@@ -697,13 +721,13 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ```
 
 - **資格情報:** テスターごとに ID とパスワードを発行し、KeyValueStore（`vtuber-simu-testers-{stage}`）に `ID → salt:sha256(salt + ":" + パスワード)` を登録する。登録・削除・一覧は `scripts/manage-testers.ts`（`npx tsx scripts/manage-testers.ts add <ID>` など。`scripts/README.md`）。反映に1分ほどかかることがある（2026-09-19 の確認では約45秒。反映前は正しい資格情報でも 401 になる）。ID に `:` は使えない。
-- **API キー:** 4つの POST と `/characters` の GET・POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
+- **API キー:** 4つの POST と `/characters` の GET・POST、`/debug-character-state`（有効なステージのみ）は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
 - **API キーの作り直し:** CloudFormation の動的参照はテンプレートの文字列が変わらないと再解決されないため、Secrets Manager の値を変えるだけでは API キー・CloudFront のヘッダーに反映されない。作り直すときは `infra/cdk.json` の `context.apiKeyVersion.<stage>` を1つ上げて `develop` に push する（`ApiEntrance` がシークレット・API キーの Construct ID・リソース名に版番号を含めるため、新しいシークレット・API キーが作られる）。デプロイ後、古いシークレット・古い API キーは CloudFormation が削除する（古いキーはその時点で使えなくなる）。版1は導入前と同じ ID・名前（`ApiKeySecret`・`ApiKey`、名前は版番号なし）のまま。
 - **ログの保持期間:** 4つの Lambda のロググループの保持期間は30日（`infra/lib/vtuber-simulator-stack.ts` の `logRetention`）。それ以前はログが無期限に残る設定だった（2026-09-19 に修正、`.notes/done/tester-character-ownership-roadmap.md` 検討事項7）。あわせて、共通処理（`handleApiRequest`）のログ出力を、イベント全体ではなく `httpMethod`・`path`・`requestId`・`body` のみの要約に変更した（`headers`・`multiValueHeaders` には CloudFront が付けた `x-api-key`・`x-tester-id` などの秘密が含まれるため）。
 - **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
 - **料金の監視:** AWS Budgets の予算アラートは CDK では作らない（通知先のメールアドレスをリポジトリに置かないため）。AWS コンソールの「Billing and Cost Management → Budgets」で、月額の予算とメールの通知を手動で設定する。
 - **テスターの ID の受け渡し:** CloudFront Function は、資格情報を確かめたあと、その ID を UTF-8 の base64url にして `x-tester-id` ヘッダーで API Gateway に渡す。クライアントが送った `x-tester-id` は先に消す。Lambda は `src/lib/testerId.ts` の `getTesterIdFromEvent` で取り出す。
-- **キャラクターの持ち主の確認:** 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が `"true"` のとき（`infra/cdk.json` の `context.enforceCharacterOwnership.<stage>`。stg は 2026-09-19 に `true` にした）、4つのエンドポイントは、テスターがその `characterId` の持ち主であることを確かめる（`src/lib/apiHandler.ts`）。`x-tester-id` が無い・持ち主でない・存在しない `characterId` は `403 { "error": "forbidden" }`。登録されている `packageId` とリクエストの `packageId` が違えば 400、省略されていれば登録されている `packageId` を使う（`characterId` とパッケージの対応の検証。F-010）。
+- **キャラクターの持ち主の確認:** 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が `"true"` のとき（`infra/cdk.json` の `context.enforceCharacterOwnership.<stage>`。stg は 2026-09-19 に `true` にした）、4つのエンドポイントと `/debug-character-state` は、テスターがその `characterId` の持ち主であることを確かめる（`src/lib/apiHandler.ts`）。`x-tester-id` が無い・持ち主でない・存在しない `characterId` は `403 { "error": "forbidden" }`。登録されている `packageId` とリクエストの `packageId` が違えば 400、省略されていれば登録されている `packageId` を使う（`characterId` とパッケージの対応の検証。F-010）。
 - **信頼の前提:** `x-tester-id` を信頼できるのは、API キー（`x-api-key`）が API 用の CloudFront と Secrets Manager の中にしか無いから。API キーを持つ者（Secrets Manager を読める AWS の権限を持つ者）は、API Gateway を直接呼んで任意の `x-tester-id` を名乗れる（2026-09-19 の確認で 200 になった）。API キーを画面・ログ・リポジトリに出さないこと（ログからは D-034 で除いた）。
 - 構成は `infra/lib/api-entrance.ts`、関数の仕様は `infra/functions/README.md`。
 
@@ -712,7 +736,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 - **400** — 入力が不正な場合: `{ "error": "..." }`。チェックは次の順に行い、最初に当てはまったものを返す。
   - body が JSON として壊れている（`invalid JSON body`）／JSON だがオブジェクトでない〔`null`・配列・数値・文字列など〕（`request body must be a JSON object`）
   - `characterId` が未指定・文字列以外・空文字（`characterId must be a non-empty string`）
-  - 各エンドポイント固有のチェック: `process` が 1,2 以外（`/emotion-updater`・`/memory-retriever`）／日時フォーマット不正／`now` が `lastLoginAt` より前（`/absence-simulator`）
+  - 各エンドポイント固有のチェック: `process` が 1,2 以外（`/emotion-updater`・`/memory-retriever`）／日時フォーマット不正／`now` が `lastLoginAt` より前（`/absence-simulator`）／`mood`・`perception` の形・値の不正（`/debug-character-state`）
   - 不明な `packageId`（`unknown packageId`）
 - **401** — 資格情報が無い・誤っている（API 用の CloudFront が返す）: `{ "error": "unauthorized" }`
 - **403** — API Gateway を直接呼んだ（API キーが無い）／持ち主の確認が有効なとき、`x-tester-id` が無い・キャラクターの持ち主でない（`{ "error": "forbidden" }`）
@@ -745,6 +769,7 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 # build:bundle の中身
 # esbuild src/handlers/absenceSimulator.ts src/handlers/emotionUpdater.ts \
 #   src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts \
+#   src/handlers/testerCharacters.ts src/handlers/debugCharacterState.ts \
 #   --bundle --platform=node --target=node24 --format=esm \
 #   --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text
 ```
