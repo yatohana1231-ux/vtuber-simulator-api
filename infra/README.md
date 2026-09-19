@@ -7,7 +7,7 @@
 | `bin/infra.ts` | CDK アプリのエントリーポイント（`VtuberSimulatorStack`・`GithubOidcStack`） |
 | `lib/vtuber-simulator-stack.ts` | アプリ本体のスタック（Lambda・API Gateway・DynamoDB・API の入口） |
 | `lib/api-entrance.ts` | API 専用の CloudFront（資格情報の検証・API キーの付与・CORS） |
-| `lib/github-oidc-stack.ts` | GitHub Actions の stg デプロイ用のロール（手動デプロイ専用） |
+| `lib/github-oidc-stack.ts` | GitHub Actions の stg デプロイ用のロール（`vtuber-simulator-api` 用と `vtuber-simulator-front-web` 用の2つ。D-036・D-039。手動デプロイ専用） |
 | `functions/` | CloudFront Function（[`functions/README.md`](functions/README.md)） |
 | `test/` | CDK のテスト（`npm test`。`aws-cdk-lib/assertions`。CI ではまだ実行していない。F-033） |
 | `cdk.json` | CDK の設定と、ステージごとのコンテキスト（下記） |

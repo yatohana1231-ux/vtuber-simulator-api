@@ -257,6 +257,8 @@ graph LR
 
 CI の IAM ロール（`github-actions-vtuber-simu-stg`、`infra/lib/github-oidc-stack.ts` の `GithubOidcStack`。手動デプロイ専用）は、`develop` ブランチからの GitHub OIDC だけを信頼し、権限は CDK のブートストラップのロールのうち deploy（CloudFormation の操作）と file-publishing（アセットの S3 への公開）を引き受けることだけに絞っている（`.notes/decision-history.md` の D-036）。実際のリソースの作成は、CloudFormation がブートストラップの実行ロール（`cdk-hnb659fds-cfn-exec-role-*`。CDK の既定で `AdministratorAccess`。絞り込みは `.notes` の F-035）で行う。Docker イメージのアセットや `fromLookup` などのコンテキストの参照を使うようにしたら、image-publishing・lookup のロールを引き受ける権限を足してから `GithubOidcStack` をデプロイし直すこと。
 
+`GithubOidcStack` は、`front-web`（ブラウザのデモ。別リポジトリ `vtuber-simulator-front-web`）の CI 用のロール `github-actions-vtuber-simu-front-web-stg` も持つ（2026-09-19〜、`.notes/decision-history.md` の D-039）。信頼するのは `front-web` リポジトリの `develop` からの OIDC だけで、権限は上と同じ。どちらのリポジトリも GitHub の「immutable subject」が有効なので、信頼ポリシーの `sub` は `repo:<owner>@<ownerId>/<repo>@<repoId>:ref:...` の形になる（`gh api repos/<owner>/<repo>/actions/oidc/customization/sub` で確認できる）。
+
 ## リクエスト処理フロー
 
 以下はいずれも**フロント側が実行する**呼び出し順序（=旧 `processChat.ts` が担っていた判断）。バックエンドは個々のエンドポイントを提供するのみで、この順序決定には関与しない。
