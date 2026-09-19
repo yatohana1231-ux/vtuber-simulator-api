@@ -30,4 +30,9 @@ new GithubOidcStack(app, "GithubOidcStack", {
   // "Use immutable subject" が有効なため owner/repo の数値IDを含む形式が必要
   // (詳細は GithubOidcStackProps.githubOidcSubjectPrefix のコメント参照)
   githubOidcSubjectPrefix: "yatohana1231-ux@250690137/vtuber-simulator-api@1306115303",
+  frontWebGithubRepo: "yatohana1231-ux/vtuber-simulator-front-web",
+  // "Use immutable subject" が有効なため owner/repo の数値IDを含む形式が必要
+  // (詳細は GithubOidcStackProps.frontWebGithubOidcSubjectPrefix のコメント参照)
+  frontWebGithubOidcSubjectPrefix:
+    "yatohana1231-ux@250690137/vtuber-simulator-front-web@1376745123",
 });
