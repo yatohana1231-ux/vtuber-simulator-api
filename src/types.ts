@@ -254,6 +254,23 @@ export interface AbsenceRecord {
 // オーケストレーション（どの順で呼ぶか）はフロント側の責務になる。
 // -------------------------------------------------------
 
+export interface AbsenceSimulatorRequest {
+  characterId: string;
+  world: World;
+  character: CharacterDefinition;
+  lifestyle: Lifestyle;
+  lastLoginAt: string; // ISO8601（now より後にならないことはハンドラーで検証済み）
+  now: string; // ISO8601
+}
+
+/** /absence-simulator のレスポンス。フロントは表示に使ってもよいが、後段に中継する必要はない */
+export interface AbsenceSimulatorResult {
+  startDatetime: string;
+  endDatetime: string;
+  events: Array<Pick<AbsenceEvent, "kind" | "summary" | "detail">>;
+  actions: Action[];
+}
+
 export interface EventResolverRequest {
   characterId: string;
   world: World;
