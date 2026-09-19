@@ -175,7 +175,7 @@ graph TB
 
 API 用の CloudFront・API キー・使用量プランは「API 仕様」の「アクセス制限」を参照。ブラウザのデモ（`front-web`）も、Unity と同じくこの入口から呼ぶ。
 
-DynamoDB の権限は、`/absence-simulator` だけ実際に使う操作（キャラクター記憶テーブルの GetItem・Query・PutItem、イベントテーブルの PutItem・GSI の Query）に絞っている（D-021）。ほかの3つは CDK の `grantReadData`/`grantReadWriteData` で広めに付けたまま（`.notes/_followup.md` の F-022）。
+DynamoDB の権限は、`/absence-simulator` と `/dialogue-generator` は実際に使う操作に絞っている（`/absence-simulator` はキャラクター記憶テーブルの GetItem・Query・PutItem とイベントテーブルの PutItem・GSI の Query。D-021。`/dialogue-generator` はキャラクター記憶テーブルの GetItem・Query・PutItem。D-033）。ほかの2つと、`/dialogue-generator` の会話ログテーブルは CDK の `grantReadData`/`grantReadWriteData` で広めに付けたまま（`.notes/_followup.md` の F-022）。
 
 ### アプリケーション内部コンポーネント構成図
 
@@ -305,8 +305,10 @@ sequenceDiagram
 
     Front->>DG: POST { characterId, packageId, now, message:"", longTimeFlag }
     DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
-    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories / getLatestAbsenceRecord（並行）
-    DG->>BK: invokeModel([固定部, 最新の記録, 可変部], "（プレイヤーが来た）")
+    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories / getLatestAbsenceRecord / getRelationshipRecord（並行）
+    Note over DG: 関係の段階を進める（advanceRelationship。D-033）
+    DG->>DB: saveRelationshipRecord（段階が変わったら節目の記憶も saveMemory）
+    DG->>BK: invokeModel([固定部, 今の関係＋最新の記録, 可変部], "（プレイヤーが来た）")
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
@@ -332,8 +334,10 @@ sequenceDiagram
 
     Front->>DG: POST { characterId, packageId, now, message }
     DG->>DB: saveConversationLog(user, message)
-    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories(queryText=message) / getLatestAbsenceRecord（並行）
-    DG->>BK: invokeModel([固定部, 最新の記録, 可変部], message)
+    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories(queryText=message) / getLatestAbsenceRecord / getRelationshipRecord（並行）
+    Note over DG: 関係の段階を進める（advanceRelationship。D-033）
+    DG->>DB: saveRelationshipRecord（段階が変わったら節目の記憶も saveMemory）
+    DG->>BK: invokeModel([固定部, 今の関係＋最新の記録, 可変部], message)
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
@@ -478,17 +482,18 @@ erDiagram
 
 ### キャラクター記憶テーブル
 
-感情状態と重要記憶の2種類を1テーブルで管理するマルチパーパステーブル。PK `memory_id`（`characterId`）/ SK `index`。状態レコードと記憶レコードは同じ `memory_id` の下に同居する。
+感情状態・重要記憶・最新の不在期間の記録・関係の記録を1テーブルで管理するマルチパーパステーブル。PK `memory_id`（`characterId`）/ SK `index`。状態レコードと記憶レコードは同じ `memory_id` の下に同居する。
 
 | レコード種別 | `index` の値 | `memory_id` の値 | 用途 |
 |-------------|-------------|-----------------|------|
 | 状態レコード | `"state"` | characterId (UUID) | 感情値・関係値の現在値（`mood`, `perception`, `updatedAt`） |
 | 記憶レコード | `{ISO8601}_{UUID8桁}` | characterId | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
 | 最新の不在期間の記録 | `"absence-latest"` | characterId | 最新の不在期間の記録（`record`: イベントテーブルに保存した `AbsenceRecord` と同じ内容、`updatedAt`）。書き込み直後でも確実に読めるよう、強い整合性の GetItem で読む（`.notes/decision-history.md` の D-019）。`absenceSimulator`（続きの話題の引き継ぎ）と、後段の3機能（`dialogueGenerator` は会話のたびに、`emotionUpdater`・`memoryRetriever` は process=1 で）が読む |
+| 関係の記録 | `"relationship"` | characterId | 関係の段階と履歴（D-033）。`firstMetAt`・`lastConversationAt`・`lastConversationDate`・`conversationCount`・`conversationDays`・`stageKey`・`highestStageKey`・`recoveryRemaining`・`lastDemotedAt`・`updatedAt` を項目としてそのまま持つ。`dialogueGenerator` が毎回、強い整合性の GetItem で読み、段階を進めて PutItem で保存する。`emotionUpdater` が状態レコードを丸ごと書き換えるので、状態レコードとは分けている |
 
-アクセスパターン: `getCharacterState(characterId)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)` / `getLatestAbsenceRecord(characterId)`（`saveAbsenceRecord` はイベントテーブルとこのテーブルにトランザクションで同時に書き込む）
+アクセスパターン: `getCharacterState(characterId, initialPerception?)`（状態レコードが無ければ、キャラクターの `initialPerception` を初期値として返す。D-033）/ `getRelationshipRecord(characterId)` / `saveRelationshipRecord(characterId, record)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)` / `getLatestAbsenceRecord(characterId)`（`saveAbsenceRecord` はイベントテーブルとこのテーブルにトランザクションで同時に書き込む）
 
-`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得し（`index = "state"` の状態レコードと `index = "absence-latest"` の最新の不在期間の記録は除外）、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
+`getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得し（`index = "state"` の状態レコード、`index = "absence-latest"` の最新の不在期間の記録、`index = "relationship"` の関係の記録、`memoryType = "relationship_milestone"` の節目の記憶は除外。節目の記憶は、関係の段階が変わったことの記録で、プレイヤーに伝えないためセリフの生成にも重要記憶の判定にも使わない。D-033）、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
 
 | 呼び出し元 | `queryText` | `topK` | `minImportance` |
 |---|---|---|---|
@@ -652,7 +657,9 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 |-----------|------|------|------|
 | `message` | string | No | `""` の場合は「プレイヤーが来た」という代替テキストで生成（ログイン時のセリフ生成に使う） |
 | `longTimeFlag` | 0 or 1 | No | 省略時 0 |
-| `now` | string (ISO8601) | No | 現在日時（プロンプトの現在時刻）。省略時はサーバー現在時刻 |
+| `now` | string (ISO8601) | No | 現在日時（プロンプトの現在時刻）。省略時はサーバー現在時刻。関係の履歴（出会った日・話した日数など）もこの日時で数える |
+
+関係の段階（D-033）: 呼ばれるたびに関係の記録を読み、段階を進めて保存する。段階はキャラクターごとに `content/characters/*.json` の `relationshipStages` で決まり、今の段階の話し方・距離感と、関係の履歴がプロンプトに入る。`message` が空（ログイン時の挨拶）のときは、発言の回数・日数を数えない。段階が変わったこと（節目）は重要記憶とログにだけ残し、セリフではプレイヤーに伝えない。レスポンスには段階を含めない。
 
 感情値・関係値（`mood`/`perception`）は、常に DynamoDB の現在値を使う。2026-09-19 にリクエストの `mood`/`perception` を廃止した（D-032。送られてきても無視する）。
 

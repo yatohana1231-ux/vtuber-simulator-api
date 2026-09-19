@@ -74,6 +74,69 @@ describe("resolveScenarioDatetimes", () => {
     expect((scenario.request as { now: string }).now).toBe("now");
   });
 
+  it("state.relationship の日時（firstMetAt・lastConversationAt・lastDemotedAt・updatedAt）を解決する。lastConversationDate はそのまま", () => {
+    const scenario: Scenario = {
+      id: "s3",
+      function: "dialogueGenerator",
+      description: "test",
+      state: {
+        relationship: {
+          firstMetAt: "now-20d",
+          lastConversationAt: "now-3h",
+          lastConversationDate: "2026-01-14",
+          conversationCount: 10,
+          conversationDays: 5,
+          stageKey: "close",
+          highestStageKey: "close",
+          recoveryRemaining: 0,
+          lastDemotedAt: "now-30d",
+          updatedAt: "now-3h",
+        },
+      },
+      request: { message: "hi" },
+    };
+
+    const resolved = resolveScenarioDatetimes(scenario, BASE);
+    const relationship = resolved.state?.relationship;
+
+    expect(relationship?.firstMetAt).toBe("2025-12-26T00:00:00.000Z");
+    expect(relationship?.lastConversationAt).toBe("2026-01-14T21:00:00.000Z");
+    expect(relationship?.lastDemotedAt).toBe("2025-12-16T00:00:00.000Z");
+    expect(relationship?.updatedAt).toBe("2026-01-14T21:00:00.000Z");
+    // 暦日（YYYY-MM-DD）は相対指定の対象にしないので、そのまま
+    expect(relationship?.lastConversationDate).toBe("2026-01-14");
+  });
+
+  it("state.relationship の lastConversationAt/lastDemotedAt が null → 解決せずそのまま null", () => {
+    const scenario: Scenario = {
+      id: "s4",
+      function: "dialogueGenerator",
+      description: "test",
+      state: {
+        relationship: {
+          firstMetAt: "now",
+          lastConversationAt: null,
+          lastConversationDate: null,
+          conversationCount: 0,
+          conversationDays: 0,
+          stageKey: "first",
+          highestStageKey: "first",
+          recoveryRemaining: 0,
+          lastDemotedAt: null,
+          updatedAt: "now",
+        },
+      },
+      request: { message: "hi" },
+    };
+
+    const resolved = resolveScenarioDatetimes(scenario, BASE);
+    const relationship = resolved.state?.relationship;
+
+    expect(relationship?.lastConversationAt).toBeNull();
+    expect(relationship?.lastDemotedAt).toBeNull();
+    expect(relationship?.firstMetAt).toBe("2026-01-15T00:00:00.000Z");
+  });
+
   it("dialogueGeneratorのrequest.nowが未指定 → そのままundefined", () => {
     const scenario: Scenario = {
       id: "s2",

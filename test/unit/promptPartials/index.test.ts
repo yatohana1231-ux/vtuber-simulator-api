@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PROMPT_PARTIALS, buildPromptContext } from "../../../src/promptPartials/index.js";
+import { PROMPT_PARTIALS, buildPromptContext, buildSpeechExamplesContext } from "../../../src/promptPartials/index.js";
 import type { CharacterDefinition, World } from "../../../src/types.js";
 
 // .mustache 変換プラグイン（vitest.config.ts）が機能していることの確認も兼ねる。
@@ -32,6 +32,24 @@ describe("buildPromptContext", () => {
     relationship: "友人",
     background: "テスト用の背景設定",
     speechExamples: [],
+    initialPerception: {
+      trust: 50,
+      affection: 50,
+      respect: 50,
+      fear: 10,
+      dependence: 10,
+      familiarity: 50,
+    },
+    relationshipStages: [
+      {
+        key: "first",
+        label: "テスト段階",
+        description: "テスト用の説明",
+        speechStyle: "テスト用の話し方",
+        speechExamples: [],
+        promoteWhen: null,
+      },
+    ],
   };
 
   it("forbiddenElementsが空配列 → hasForbiddenElementsはfalse、forbiddenElementsTextは空文字", () => {
@@ -49,18 +67,20 @@ describe("buildPromptContext", () => {
     expect(ctx.hasForbiddenElements).toBe(true);
     expect(ctx.forbiddenElementsText).toBe("暴力表現、政治的発言");
   });
+});
 
-  it("speechExamplesが空配列 → hasSpeechExamplesはfalse", () => {
-    const ctx = buildPromptContext(baseWorld, baseCharacter);
+describe("buildSpeechExamplesContext", () => {
+  it("examplesが空配列 → hasSpeechExamplesはfalseで、speechExamplesは空配列のまま返す", () => {
+    const ctx = buildSpeechExamplesContext("テストキャラ", []);
     expect(ctx.hasSpeechExamples).toBe(false);
+    expect(ctx.speechExamples).toEqual([]);
+    expect(ctx.characterName).toBe("テストキャラ");
   });
 
-  it("speechExamplesが1件以上 → hasSpeechExamplesはtrue", () => {
-    const character: CharacterDefinition = {
-      ...baseCharacter,
-      speechExamples: [{ player: "こんにちは", reply: "やっほー！" }],
-    };
-    const ctx = buildPromptContext(baseWorld, character);
+  it("examplesが1件以上 → hasSpeechExamplesはtrueで、渡した配列がそのまま入る", () => {
+    const examples = [{ player: "こんにちは", reply: "やっほー！" }];
+    const ctx = buildSpeechExamplesContext("テストキャラ", examples);
     expect(ctx.hasSpeechExamples).toBe(true);
+    expect(ctx.speechExamples).toEqual(examples);
   });
 });

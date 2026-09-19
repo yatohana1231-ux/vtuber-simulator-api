@@ -55,6 +55,24 @@ const character: CharacterDefinition = {
   relationship: "",
   background: "",
   speechExamples: [],
+  initialPerception: {
+    trust: 50,
+    affection: 50,
+    respect: 50,
+    fear: 10,
+    dependence: 10,
+    familiarity: 50,
+  },
+  relationshipStages: [
+    {
+      key: "first",
+      label: "テスト段階",
+      description: "テスト用の説明",
+      speechStyle: "テスト用の話し方",
+      speechExamples: [],
+      promoteWhen: null,
+    },
+  ],
 };
 
 function process1Req(overrides: Partial<EmotionUpdaterRequest> = {}): EmotionUpdaterRequest {
@@ -234,6 +252,14 @@ describe("DynamoDBに状態が無い場合", () => {
 
     expect(result.mood.joy).toBe(DEFAULT_MOOD.joy + 5);
     expect(result.perception.trust).toBe(DEFAULT_PERCEPTION.trust + 3);
+  });
+});
+
+describe("getCharacterStateの呼び出し（D-033: 初期値にcharacter.initialPerceptionを渡す）", () => {
+  it("characterIdとcharacter.initialPerceptionでgetCharacterStateが呼ばれる", async () => {
+    await runEmotionUpdater(process1Req({ characterId: "char-xyz" }));
+
+    expect(mockedGetCharacterState).toHaveBeenCalledWith("char-xyz", character.initialPerception);
   });
 });
 

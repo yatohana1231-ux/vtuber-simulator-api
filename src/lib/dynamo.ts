@@ -18,6 +18,7 @@ import type {
   LatestAbsenceRecordItem,
   Mood,
   Perception,
+  RelationshipRecord,
 } from "../types.js";
 
 // -------------------------------------------------------
@@ -49,6 +50,11 @@ export const EVENTS_TABLE = extractTableName(process.env.EVENTS_TABLE ?? "events
 export const STATE_INDEX_KEY = "state";
 // 最新の不在期間の記録の固定ソートキー（D-019）
 export const LATEST_ABSENCE_RECORD_INDEX_KEY = "absence-latest";
+// 関係の記録（関係の段階・履歴）の固定ソートキー（D-033）
+export const RELATIONSHIP_INDEX_KEY = "relationship";
+// 関係の段階が変わった節目の重要記憶の memoryType。セリフの生成にも重要記憶の
+// 判定にも使わず、記録としてだけ残す（D-033、検討事項1）
+export const RELATIONSHIP_MILESTONE_MEMORY_TYPE = "relationship_milestone";
 
 // -------------------------------------------------------
 // デフォルト値
@@ -159,10 +165,17 @@ export async function markLogsAsJudged(
 // キャラクター感情・関係値
 // -------------------------------------------------------
 
-/** CHARACTER_MEMORY_TABLE から感情・関係値を取得する */
+/**
+ * CHARACTER_MEMORY_TABLE から感情・関係値を取得する。
+ * 状態レコードが無い場合や、あっても perception が無い場合は、
+ * `initialPerception`（キャラクターの初期値。未指定なら DEFAULT_PERCEPTION）の
+ * コピーを perception として返す（D-033）。mood の既定値は変わらず DEFAULT_MOOD。
+ */
 export async function getCharacterState(
-  characterId: string
+  characterId: string,
+  initialPerception?: Perception
 ): Promise<{ mood: Mood; perception: Perception }> {
+  const defaultPerception = initialPerception ?? DEFAULT_PERCEPTION;
   const result = await dynamo.send(
     new GetCommand({
       TableName: CHARACTER_MEMORY_TABLE,
@@ -171,12 +184,12 @@ export async function getCharacterState(
   );
   if (!result.Item) {
     console.log(`[getCharacterState] not found, using defaults characterId=${characterId}`);
-    return { mood: { ...DEFAULT_MOOD }, perception: { ...DEFAULT_PERCEPTION } };
+    return { mood: { ...DEFAULT_MOOD }, perception: { ...defaultPerception } };
   }
   const item = result.Item as CharacterStateItem;
   return {
     mood: item.mood ?? { ...DEFAULT_MOOD },
-    perception: item.perception ?? { ...DEFAULT_PERCEPTION },
+    perception: item.perception ?? { ...defaultPerception },
   };
 }
 
@@ -211,9 +224,15 @@ async function getMemories(characterId: string): Promise<CharacterMemoryItem[]> 
     })
   );
   // 同じ memory_id に感情状態レコード（index="state"）・最新の不在期間の記録
-  // （index="absence-latest"）が同居しているため除外する
+  // （index="absence-latest"）・関係の記録（index="relationship"）が同居しているため
+  // 除外する。あわせて、関係の段階が変わった節目の記憶（memoryType="relationship_milestone"）
+  // も、セリフの生成にも重要記憶の判定にも使わない記録専用の項目なので除外する（D-033）
   const memories = ((result.Items ?? []) as CharacterMemoryItem[]).filter(
-    (item) => item.index !== STATE_INDEX_KEY && item.index !== LATEST_ABSENCE_RECORD_INDEX_KEY
+    (item) =>
+      item.index !== STATE_INDEX_KEY &&
+      item.index !== LATEST_ABSENCE_RECORD_INDEX_KEY &&
+      item.index !== RELATIONSHIP_INDEX_KEY &&
+      item.memoryType !== RELATIONSHIP_MILESTONE_MEMORY_TYPE
   );
   console.log(`[getMemories] ${memories.length} memories for characterId=${characterId}`);
   return memories;
@@ -447,4 +466,79 @@ export async function getRecentAbsenceRecords(
     `[getRecentAbsenceRecords] ${records.length} records for characterId=${characterId}`
   );
   return records;
+}
+
+// -------------------------------------------------------
+// 関係の記録（D-033）
+//
+// キャラクター記憶テーブルに index="relationship" の専用レコードとして持つ
+// （感情状態の index="state" とは別レコード。emotionUpdater が state を PutItem で
+// 丸ごと書き換えるため、同じレコードに入れると dialogueGenerator 側が書いた
+// 関係の記録を上書きしてしまう）。absence-latest と違い、record を専用フィールドに
+// ラップせず、memory_id・index と record の中身をそのまま並べて保存する。
+// -------------------------------------------------------
+
+/** キャラクター記憶テーブルに置く、関係の記録の項目形 */
+type RelationshipRecordItem = RelationshipRecord & {
+  memory_id: string;
+  index: typeof RELATIONSHIP_INDEX_KEY;
+};
+
+/** 値が現行形式の RelationshipRecord かどうかを判定する */
+function isRelationshipRecord(value: unknown): value is RelationshipRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.firstMetAt === "string" &&
+    (v.lastConversationAt === null || typeof v.lastConversationAt === "string") &&
+    (v.lastConversationDate === null || typeof v.lastConversationDate === "string") &&
+    typeof v.conversationCount === "number" &&
+    typeof v.conversationDays === "number" &&
+    typeof v.stageKey === "string" &&
+    typeof v.highestStageKey === "string" &&
+    typeof v.recoveryRemaining === "number" &&
+    (v.lastDemotedAt === null || typeof v.lastDemotedAt === "string") &&
+    typeof v.updatedAt === "string"
+  );
+}
+
+/**
+ * キャラクター記憶テーブルから、関係の記録を強い整合性で取得する。
+ * 項目が無い、または形式が現行の RelationshipRecord と合わない場合は null を返す。
+ */
+export async function getRelationshipRecord(
+  characterId: string
+): Promise<RelationshipRecord | null> {
+  const result = await dynamo.send(
+    new GetCommand({
+      TableName: CHARACTER_MEMORY_TABLE,
+      Key: { memory_id: characterId, index: RELATIONSHIP_INDEX_KEY },
+      ConsistentRead: true,
+    })
+  );
+  if (!result.Item) {
+    console.log(`[getRelationshipRecord] not found characterId=${characterId}`);
+    return null;
+  }
+  if (!isRelationshipRecord(result.Item)) {
+    console.warn(`[getRelationshipRecord] invalid record shape characterId=${characterId}`);
+    return null;
+  }
+  // memory_id・index を除いた record の中身だけを返す
+  const { memory_id: _memoryId, index: _index, ...record } = result.Item as RelationshipRecordItem;
+  return record;
+}
+
+/** キャラクター記憶テーブルに関係の記録を保存する */
+export async function saveRelationshipRecord(
+  characterId: string,
+  record: RelationshipRecord
+): Promise<void> {
+  const item: RelationshipRecordItem = {
+    memory_id: characterId,
+    index: RELATIONSHIP_INDEX_KEY,
+    ...record,
+  };
+  await dynamo.send(new PutCommand({ TableName: CHARACTER_MEMORY_TABLE, Item: item }));
+  console.log(`[saveRelationshipRecord] saved characterId=${characterId}`);
 }

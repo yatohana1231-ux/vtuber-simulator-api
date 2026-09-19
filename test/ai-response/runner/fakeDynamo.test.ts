@@ -3,7 +3,14 @@ import { QueryCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb"
 
 import { createFakeDynamo, selectWritesForCharacter, type FakeDynamo } from "./fakeDynamo.js";
 import type * as DynamoModule from "../../../src/lib/dynamo.js";
-import type { AbsenceRecord, CharacterMemoryItem, ConversationLogItem, Mood, Perception } from "../../../src/types.js";
+import type {
+  AbsenceRecord,
+  CharacterMemoryItem,
+  ConversationLogItem,
+  Mood,
+  Perception,
+  RelationshipRecord,
+} from "../../../src/types.js";
 
 let dynamoModule: typeof DynamoModule;
 let fake: FakeDynamo;
@@ -207,6 +214,51 @@ describe("不在期間の記録", () => {
 
     const recent = await dynamoModule.getRecentAbsenceRecords("char-1", 5);
     expect(recent).toEqual([record]);
+  });
+});
+
+function relationshipRecordInput(overrides: Partial<RelationshipRecord> = {}): RelationshipRecord {
+  return {
+    firstMetAt: "2026-01-01T00:00:00.000Z",
+    lastConversationAt: "2026-01-13T00:00:00.000Z",
+    lastConversationDate: "2026-01-13",
+    conversationCount: 42,
+    conversationDays: 10,
+    stageKey: "close",
+    highestStageKey: "close",
+    recoveryRemaining: 0,
+    lastDemotedAt: null,
+    updatedAt: "2026-01-13T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("関係の記録", () => {
+  it("seed した関係の記録を getRelationshipRecord で読める", async () => {
+    fake.seed("char-1", { relationship: relationshipRecordInput({ stageKey: "special" }) });
+
+    const record = await dynamoModule.getRelationshipRecord("char-1");
+
+    expect(record?.stageKey).toBe("special");
+    expect(record?.conversationCount).toBe(42);
+  });
+
+  it("関係の記録を省略 → getRelationshipRecord は null を返す", async () => {
+    fake.seed("char-1", {});
+
+    const record = await dynamoModule.getRelationshipRecord("char-1");
+
+    expect(record).toBeNull();
+  });
+
+  it("saveRelationshipRecord で書き込みが記録され、読み直せる", async () => {
+    await dynamoModule.saveRelationshipRecord("char-1", relationshipRecordInput({ stageKey: "acquainted" }));
+
+    const record = await dynamoModule.getRelationshipRecord("char-1");
+    expect(record?.stageKey).toBe("acquainted");
+
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.writes[0]).toMatchObject({ table: "characterMemory", operation: "put" });
   });
 });
 

@@ -8,7 +8,7 @@ Vitest で実行する単体テストコード。テストの考え方・方針�
 
 | フォルダ | 対応する `src/`（または `infra/`・`scripts/`） | 内容 |
 |---|---|---|
-| [`lib/`](lib/README.md) | `src/lib/` | `bedrock.ts` / `dynamo.ts` / `packages.ts` / `utils.ts` / `timezone.ts` / `random.ts` / `absenceRecordText.ts` の単体テスト |
+| [`lib/`](lib/README.md) | `src/lib/` | `bedrock.ts` / `dynamo.ts` / `packages.ts` / `utils.ts` / `timezone.ts` / `random.ts` / `absenceRecordText.ts` / `characterStateText.ts` / `apiHandler.ts` / `relationship.ts` / `relationshipText.ts` などの単体テスト |
 | [`promptPartials/`](promptPartials/README.md) | `src/promptPartials/` | 共有パーシャル（`world.mustache` / `speechExamples.mustache`）と `buildPromptContext` の単体テスト |
 | [`absenceSimulator/`](absenceSimulator/README.md) | `src/absenceSimulator/` | 不在期間のシミュレーション（骨格の生成、プロンプトの組み立て、LLM の出力の突き合わせ、本体 `runAbsenceSimulator`）の単体テスト |
 | [`handlers/`](handlers/README.md) | `src/handlers/` | `absenceSimulator` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator` の4ハンドラーの単体テスト（`run*` はスタブ） |

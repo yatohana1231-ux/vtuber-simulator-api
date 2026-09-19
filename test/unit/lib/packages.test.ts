@@ -88,6 +88,35 @@ describe("loadPackage（本物のapi/content/を読む）", () => {
 
     expect(pkg?.lifestyle.eventKinds.length).toBeGreaterThan(0);
   });
+
+  it("character.initialPerceptionの6軸が読み込まれる", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+    const perception = pkg?.character.initialPerception;
+
+    expect(perception).toBeDefined();
+    for (const key of ["trust", "affection", "respect", "fear", "dependence", "familiarity"] as const) {
+      expect(Number.isInteger(perception?.[key])).toBe(true);
+      expect(perception?.[key]).toBeGreaterThanOrEqual(1);
+      expect(perception?.[key]).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("character.relationshipStagesが4段階あり、先頭のpromoteWhenがnull", async () => {
+    const pkg = await loadPackage(DEFAULT_PACKAGE_ID);
+    const stages = pkg?.character.relationshipStages;
+
+    expect(stages).toHaveLength(4);
+    expect(stages?.[0].promoteWhen).toBeNull();
+    for (const stage of stages ?? []) {
+      expect(stage.key.length).toBeGreaterThan(0);
+      expect(stage.label.length).toBeGreaterThan(0);
+      expect(stage.description.length).toBeGreaterThan(0);
+      expect(stage.speechStyle.length).toBeGreaterThan(0);
+    }
+    for (const stage of (stages ?? []).slice(1)) {
+      expect(stage.promoteWhen).not.toBeNull();
+    }
+  });
 });
 
 describe("isValidPackageId", () => {
@@ -127,18 +156,30 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
     vi.resetModules();
   });
 
-  async function writeMinimalWorldAndCharacter() {
-    await writeFile(
-      path.join(tmpDir, "worlds", "test-world.json"),
-      JSON.stringify({
-        key: "test-world",
-        name: "テスト世界",
-        description: "テスト用",
-        rules: [],
-        forbiddenElements: [],
-        timezone: "Asia/Tokyo",
-      })
-    );
+  /** initialPerceptionの検証を通る、6軸すべて有効な値 */
+  const VALID_INITIAL_PERCEPTION = {
+    trust: 50,
+    affection: 50,
+    respect: 50,
+    fear: 10,
+    dependence: 10,
+    familiarity: 50,
+  };
+
+  /** relationshipStagesの検証を通る、先頭1段階（promoteWhenがnull）だけの最小構成 */
+  const VALID_RELATIONSHIP_STAGES = [
+    {
+      key: "first",
+      label: "はじめまして",
+      description: "テスト用の説明",
+      speechStyle: "テスト用の話し方",
+      speechExamples: [],
+      promoteWhen: null,
+    },
+  ];
+
+  /** 最小構成の有効なキャラクター（characters/test-character.json）を書き込む。overridesで一部を上書きできる */
+  async function writeCharacter(overrides: Record<string, unknown> = {}) {
     await writeFile(
       path.join(tmpDir, "characters", "test-character.json"),
       JSON.stringify({
@@ -152,8 +193,26 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
           player: `質問${i}`,
           reply: `返答${i}`,
         })),
+        initialPerception: VALID_INITIAL_PERCEPTION,
+        relationshipStages: VALID_RELATIONSHIP_STAGES,
+        ...overrides,
       })
     );
+  }
+
+  async function writeMinimalWorldAndCharacter() {
+    await writeFile(
+      path.join(tmpDir, "worlds", "test-world.json"),
+      JSON.stringify({
+        key: "test-world",
+        name: "テスト世界",
+        description: "テスト用",
+        rules: [],
+        forbiddenElements: [],
+        timezone: "Asia/Tokyo",
+      })
+    );
+    await writeCharacter();
   }
 
   /** 最小構成の有効な生活様式（lifestyles/test-lifestyle.json）を書き込む。overridesで一部を上書きできる */
@@ -474,6 +533,194 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
     ]);
   });
 
+  /** 有効な世界観・生活様式・パッケージを書き込み、キャラクターだけ overrides で差し替えて読み込む */
+  async function loadWithCharacterOverrides(overrides: Record<string, unknown>) {
+    await writeFile(
+      path.join(tmpDir, "worlds", "test-world.json"),
+      JSON.stringify({
+        key: "test-world",
+        name: "テスト世界",
+        description: "テスト用",
+        rules: [],
+        forbiddenElements: [],
+        timezone: "Asia/Tokyo",
+      })
+    );
+    await writeCharacter(overrides);
+    await writeMinimalLifestyle();
+    await writeFile(
+      path.join(tmpDir, "packages", "character-validation-pkg.json"),
+      JSON.stringify({
+        id: "character-validation-pkg",
+        displayName: "test",
+        world: "test-world",
+        character: "test-character",
+        lifestyle: "test-lifestyle",
+      })
+    );
+    vi.stubEnv("CONTENT_DIR", tmpDir);
+
+    const mod = await import("../../../src/lib/packages.js");
+    return mod.loadPackage("character-validation-pkg");
+  }
+
+  it("initialPerceptionの軸が1つ欠けている → 例外", async () => {
+    const { familiarity, ...rest } = VALID_INITIAL_PERCEPTION;
+    await expect(
+      loadWithCharacterOverrides({ initialPerception: rest })
+    ).rejects.toThrow();
+  });
+
+  it("initialPerceptionの値が範囲外（101） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        initialPerception: { ...VALID_INITIAL_PERCEPTION, trust: 101 },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("initialPerceptionの値が0 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        initialPerception: { ...VALID_INITIAL_PERCEPTION, trust: 0 },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("initialPerceptionの値が整数でない（小数） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        initialPerception: { ...VALID_INITIAL_PERCEPTION, trust: 50.5 },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("relationshipStagesが空配列 → 例外", async () => {
+    await expect(loadWithCharacterOverrides({ relationshipStages: [] })).rejects.toThrow();
+  });
+
+  it("relationshipStagesのkeyが重複 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: [
+          { ...VALID_RELATIONSHIP_STAGES[0] },
+          {
+            key: "first",
+            label: "顔なじみ",
+            description: "テスト用の説明2",
+            speechStyle: "テスト用の話し方2",
+            speechExamples: [],
+            promoteWhen: { minConversationDays: 1, minConversationCount: 1, minPerception: {} },
+          },
+        ],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("relationshipStagesの先頭のpromoteWhenがnullでない → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: [
+          {
+            ...VALID_RELATIONSHIP_STAGES[0],
+            promoteWhen: { minConversationDays: 0, minConversationCount: 0, minPerception: {} },
+          },
+        ],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("relationshipStagesの2番目以降にpromoteWhenが無い → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: [
+          { ...VALID_RELATIONSHIP_STAGES[0] },
+          {
+            key: "acquainted",
+            label: "顔なじみ",
+            description: "テスト用の説明2",
+            speechStyle: "テスト用の話し方2",
+            speechExamples: [],
+            promoteWhen: null,
+          },
+        ],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("relationshipStagesのdescriptionが空文字 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: [{ ...VALID_RELATIONSHIP_STAGES[0], description: "" }],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("promoteWhen.minConversationDaysが負の数 → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: [
+          { ...VALID_RELATIONSHIP_STAGES[0] },
+          {
+            key: "acquainted",
+            label: "顔なじみ",
+            description: "テスト用の説明2",
+            speechStyle: "テスト用の話し方2",
+            speechExamples: [],
+            promoteWhen: { minConversationDays: -1, minConversationCount: 0, minPerception: {} },
+          },
+        ],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("promoteWhen.minPerceptionの値が範囲外（101） → 例外", async () => {
+    await expect(
+      loadWithCharacterOverrides({
+        relationshipStages: [
+          { ...VALID_RELATIONSHIP_STAGES[0] },
+          {
+            key: "acquainted",
+            label: "顔なじみ",
+            description: "テスト用の説明2",
+            speechStyle: "テスト用の話し方2",
+            speechExamples: [],
+            promoteWhen: {
+              minConversationDays: 0,
+              minConversationCount: 0,
+              minPerception: { familiarity: 101 },
+            },
+          },
+        ],
+      })
+    ).rejects.toThrow();
+  });
+
+  it("段階のspeechExamplesが5件（MAX_SPEECH_EXAMPLES）に切り詰められる", async () => {
+    const pkg = await loadWithCharacterOverrides({
+      relationshipStages: [
+        {
+          ...VALID_RELATIONSHIP_STAGES[0],
+          speechExamples: Array.from({ length: 7 }, (_, i) => ({
+            player: `段階の質問${i}`,
+            reply: `段階の返答${i}`,
+          })),
+        },
+      ],
+    });
+
+    expect(pkg?.character.relationshipStages[0].speechExamples).toHaveLength(5);
+  });
+
+  it("段階のspeechExamplesを省略 → 空配列として扱う", async () => {
+    const { speechExamples, ...stageWithoutExamples } = VALID_RELATIONSHIP_STAGES[0];
+    const pkg = await loadWithCharacterOverrides({
+      relationshipStages: [stageWithoutExamples],
+    });
+
+    expect(pkg?.character.relationshipStages[0].speechExamples).toEqual([]);
+  });
+
   it("CONTENT_DIRもLAMBDA_TASK_ROOTも無い → 例外", async () => {
     vi.stubEnv("CONTENT_DIR", undefined);
     vi.stubEnv("LAMBDA_TASK_ROOT", undefined);
@@ -514,6 +761,24 @@ describe("loadPackage（一時ディレクトリのcontentを使う異常系）"
         relationship: "",
         background: "",
         speechExamples: [],
+        initialPerception: {
+          trust: 50,
+          affection: 50,
+          respect: 50,
+          fear: 10,
+          dependence: 10,
+          familiarity: 50,
+        },
+        relationshipStages: [
+          {
+            key: "first",
+            label: "はじめまして",
+            description: "テスト用の説明",
+            speechStyle: "テスト用の話し方",
+            speechExamples: [],
+            promoteWhen: null,
+          },
+        ],
       })
     );
     await writeFile(

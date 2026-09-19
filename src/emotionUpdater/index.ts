@@ -32,8 +32,10 @@ export async function runEmotionUpdater(
   console.log(`[emotionUpdater] start process=${req.process}`);
 
   const { characterId, world, character } = req;
-  const { mood: currentMood, perception: currentPerception } =
-    await getCharacterState(characterId);
+  const { mood: currentMood, perception: currentPerception } = await getCharacterState(
+    characterId,
+    character.initialPerception
+  );
 
   let inputText: string;
 

@@ -87,7 +87,14 @@ const ENDPOINTS: EndpointDef[] = [
     resourcePath: "dialogue-generator",
     // D-024: 対話生成は Claude Haiku 4.5 を使用
     bedrockModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
-    tables: { characterMemory: "read", conversationLogs: "readwrite" },
+    tables: {
+      // キャラクター記憶テーブル: 感情状態・最新の不在期間の記録・関係の記録の読み出し
+      // （getCharacterState / getLatestAbsenceRecord / getRelationshipRecord、GetItem）、
+      // 重要記憶の読み出し（getRelevantMemories、Query）、関係の記録と節目の記憶の保存
+      // （saveRelationshipRecord / saveMemory、PutItem。D-033）。
+      characterMemory: { actions: ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"] },
+      conversationLogs: "readwrite",
+    },
   },
 ];
 

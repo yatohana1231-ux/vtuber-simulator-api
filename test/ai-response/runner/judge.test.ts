@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { buildJudgeSystemPrompt, buildJudgeUserMessage, shouldJudge, type JudgeRunArgs } from "./judge.js";
-import { makeContext, makeModelCall, makeRunResult, makeScenario } from "./checks/fixtures.js";
+import { makeCharacter, makeContext, makeModelCall, makeRunResult, makeScenario } from "./checks/fixtures.js";
 import type { ModelPrice, RubricCriterion } from "./types.js";
 
 // judgeRun は src/lib/bedrock.ts 経由で BedrockRuntimeClient.prototype.send を呼び、
@@ -118,6 +118,117 @@ describe("buildJudgeUserMessage", () => {
     expect(message).toContain("はじめまして、よろしくお願いします。");
     expect(message).not.toContain("nova-lite");
     expect(message).not.toContain("apac.amazon.nova-lite-v1:0");
+  });
+
+  it("dialogueGenerator: state.relationship.stageKey に合う段階の説明・話し方・例文が入る（キャラクター共通の例文ではない）", () => {
+    const character = makeCharacter({
+      name: "テストちゃん",
+      speechExamples: [{ player: "共通の例文", reply: "共通の返答" }],
+      relationshipStages: [
+        {
+          key: "first",
+          label: "はじめまして段階",
+          description: "最初の段階の説明",
+          speechStyle: "最初の段階の話し方",
+          speechExamples: [{ player: "最初の例文", reply: "最初の返答" }],
+          promoteWhen: null,
+        },
+        {
+          key: "close",
+          label: "仲良し段階",
+          description: "仲良し段階の説明",
+          speechStyle: "仲良し段階の話し方",
+          speechExamples: [{ player: "仲良しの例文", reply: "仲良しの返答" }],
+          promoteWhen: { minConversationDays: 1, minConversationCount: 1, minPerception: {} },
+        },
+      ],
+    });
+    const scenario = makeScenario({
+      function: "dialogueGenerator",
+      description: "仲良し段階のシナリオ",
+      request: { message: "今日どうだった？" },
+      state: {
+        relationship: {
+          firstMetAt: "2026-01-01T00:00:00.000Z",
+          lastConversationAt: "2026-01-13T00:00:00.000Z",
+          lastConversationDate: "2026-01-13",
+          conversationCount: 42,
+          conversationDays: 10,
+          stageKey: "close",
+          highestStageKey: "close",
+          recoveryRemaining: 0,
+          lastDemotedAt: null,
+          updatedAt: "2026-01-13T00:00:00.000Z",
+        },
+      },
+    });
+    const context = makeContext({ character, resolvedScenario: scenario });
+    const result = makeRunResult({ function: "dialogueGenerator", output: "今日は楽しかったよ" });
+
+    const message = buildJudgeUserMessage(scenario, result, context);
+
+    expect(message).toContain("仲良し段階の説明");
+    expect(message).toContain("仲良し段階の話し方");
+    expect(message).toContain("仲良しの例文");
+    expect(message).not.toContain("最初の段階の説明");
+    // 「今の関係の段階」の口調の例文には、段階の例文だけが入り、
+    // キャラクター共通の例文（## キャラクター 側に別途入るもの）は入らない
+    const stageSection = message.slice(message.indexOf("今の関係の段階"), message.indexOf("感情値"));
+    expect(stageSection).not.toContain("共通の例文");
+  });
+
+  it("dialogueGenerator: state.relationship が無い → 先頭の段階（最初の段階）を使う", () => {
+    const character = makeCharacter({
+      relationshipStages: [
+        {
+          key: "first",
+          label: "はじめまして段階",
+          description: "最初の段階の説明",
+          speechStyle: "最初の段階の話し方",
+          speechExamples: [],
+          promoteWhen: null,
+        },
+        {
+          key: "close",
+          label: "仲良し段階",
+          description: "仲良し段階の説明",
+          speechStyle: "仲良し段階の話し方",
+          speechExamples: [],
+          promoteWhen: { minConversationDays: 1, minConversationCount: 1, minPerception: {} },
+        },
+      ],
+    });
+    const scenario = makeScenario({ function: "dialogueGenerator", request: { message: "はじめまして" } });
+    const context = makeContext({ character, resolvedScenario: scenario });
+    const result = makeRunResult({ function: "dialogueGenerator", output: "よろしくお願いします" });
+
+    const message = buildJudgeUserMessage(scenario, result, context);
+
+    expect(message).toContain("最初の段階の説明");
+    expect(message).not.toContain("仲良し段階の説明");
+  });
+
+  it("dialogueGenerator: 段階の口調の例文が空 → キャラクター共通の例文を使う", () => {
+    const character = makeCharacter({
+      speechExamples: [{ player: "共通の例文", reply: "共通の返答" }],
+      relationshipStages: [
+        {
+          key: "first",
+          label: "はじめまして段階",
+          description: "最初の段階の説明",
+          speechStyle: "最初の段階の話し方",
+          speechExamples: [],
+          promoteWhen: null,
+        },
+      ],
+    });
+    const scenario = makeScenario({ function: "dialogueGenerator", request: { message: "こんにちは" } });
+    const context = makeContext({ character, resolvedScenario: scenario });
+    const result = makeRunResult({ function: "dialogueGenerator", output: "こんにちは" });
+
+    const message = buildJudgeUserMessage(scenario, result, context);
+
+    expect(message).toContain("共通の例文");
   });
 
   it("absenceSimulator: 出力の行動の時刻が世界観のタイムゾーン表記で入る", () => {

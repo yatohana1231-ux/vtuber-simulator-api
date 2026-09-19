@@ -69,6 +69,13 @@ export function resolveScenarioDatetimes(scenario: Scenario, baseTime: Date): Sc
         thread.openedAt = dt(thread.openedAt);
       }
     }
+    if (resolved.state.relationship) {
+      const relationship = resolved.state.relationship;
+      relationship.firstMetAt = dt(relationship.firstMetAt);
+      if (relationship.lastConversationAt !== null) relationship.lastConversationAt = dt(relationship.lastConversationAt);
+      if (relationship.lastDemotedAt !== null) relationship.lastDemotedAt = dt(relationship.lastDemotedAt);
+      relationship.updatedAt = dt(relationship.updatedAt);
+    }
   }
 
   const request = resolved.request as Record<string, unknown>;

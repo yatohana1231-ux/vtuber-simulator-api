@@ -12,6 +12,7 @@ import type {
   ConversationLogItem,
   Mood,
   Perception,
+  RelationshipRecord,
 } from "../../../src/types.js";
 
 /** LLM を呼ぶ4つの機能 */
@@ -48,6 +49,15 @@ export interface ScenarioState {
    * すべてがイベントテーブルの履歴に入る。event_id・characterId は仕組みが埋める。日時は相対指定も可
    */
   absenceRecords?: Array<Omit<AbsenceRecord, "event_id" | "characterId">>;
+  /**
+   * 関係の記録（キャラクター記憶テーブルの index = "relationship"。D-033）。省略時は記録なし
+   * （dialogueGenerator は最初の段階から記録を始める）。保存の形は dynamo.ts の
+   * saveRelationshipRecord と同じ（memory_id・index は仕組みが埋める）。日時
+   * （firstMetAt・lastConversationAt・lastDemotedAt・updatedAt）は相対指定も可。
+   * lastConversationDate（暦日 YYYY-MM-DD）は、プレイヤーの発言がある呼び出しでその日の
+   * 会話かどうかの判定にだけ使われるため、シナリオでは厳密な値でなくてよい。
+   */
+  relationship?: RelationshipRecord;
 }
 
 /** 機能ごとのリクエストの値（world / character / lifestyle はパッケージから仕組みが埋める） */

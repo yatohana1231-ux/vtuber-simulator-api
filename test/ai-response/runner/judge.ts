@@ -27,6 +27,7 @@ import type {
   EmotionUpdaterResponse,
   Mood,
   Perception,
+  RelationshipStage,
   World,
 } from "../../../src/types.js";
 import type { JudgeResult, ModelPrice, RubricCriterion, RunResult, Scenario, ScenarioRequest } from "./types.js";
@@ -109,6 +110,36 @@ function formatCharacterSection(character: CharacterDefinition): string {
     `関係性: ${character.relationship}`,
     `設定: ${character.background}`,
     `口調の例文:\n${examples}`,
+  ].join("\n");
+}
+
+/**
+ * 今の関係の段階（D-033）を、シナリオの state.relationship.stageKey から解決する。
+ * シナリオに関係の記録が無ければ、dialogueGenerator 本体と同じく先頭の段階（最初の段階）を使う。
+ * stageKey が character.relationshipStages に見つからない場合も先頭の段階にする。
+ */
+function resolveCurrentRelationshipStage(scenario: Scenario, character: CharacterDefinition): RelationshipStage {
+  const stageKey = scenario.state?.relationship?.stageKey;
+  const stages = character.relationshipStages;
+  const found = stageKey ? stages.find((s) => s.key === stageKey) : undefined;
+  return found ?? stages[0];
+}
+
+/**
+ * 今の関係の段階の説明・話し方・口調の例文（段階に無ければキャラクター共通の例文）を、
+ * 採点者が「今の段階に合った口調・距離感か」を判断できる形にする（D-033）。
+ */
+function formatRelationshipStageSection(character: CharacterDefinition, stage: RelationshipStage): string {
+  const examples = stage.speechExamples.length > 0 ? stage.speechExamples : character.speechExamples;
+  const examplesText =
+    examples.length > 0
+      ? examples.map((e) => `- プレイヤー「${e.player}」→ ${character.name}「${e.reply}」`).join("\n")
+      : "（なし）";
+  return [
+    `段階: ${stage.label}`,
+    `関係と距離感: ${stage.description}`,
+    `この段階の話し方: ${stage.speechStyle}`,
+    `この段階の口調の例文:\n${examplesText}`,
   ].join("\n");
 }
 
@@ -197,10 +228,12 @@ function buildDialogueGeneratorSection(scenario: Scenario, result: RunResult, co
   const logs = scenario.state?.conversationLogs ?? [];
   const absenceRecords = scenario.state?.absenceRecords ?? [];
   const latest = absenceRecords[absenceRecords.length - 1];
+  const currentStage = resolveCurrentRelationshipStage(scenario, context.character);
 
   const input = [
     `プレイヤーの発言: ${req.message === "" ? "（不在。プレイヤーが来た）" : req.message}`,
     `長期不在フラグ（longTimeFlag）: ${req.longTimeFlag === 1 ? "1（長期不在明け）" : "0"}`,
+    `今の関係の段階:\n${formatRelationshipStageSection(context.character, currentStage)}`,
     `感情値: ${formatMood(mood)}`,
     `関係値: ${formatPerception(perception)}`,
     `重要記憶:\n${formatMemoriesText(memories)}`,

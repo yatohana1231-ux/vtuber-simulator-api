@@ -20,10 +20,29 @@ export interface CharacterDefinition {
   key: string;
   name: string;
   personality: string;
-  speechStyle: string;
-  relationship: string;
+  speechStyle: string; // 段階によらない話し方（段階ごとの話し方は relationshipStages に書く。D-033）
+  relationship: string; // 段階によらない関係の前提（例: 「配信者とリスナー」）
   background: string;
   speechExamples: SpeechExample[];
+  initialPerception: Perception; // 状態レコードが無いときの perception の初期値（最初の段階に合う値。D-033）
+  relationshipStages: RelationshipStage[]; // 関係の段階（先頭が最初の段階。1つ以上。D-033）
+}
+
+/** 関係の段階に上がるための条件（すべて満たしたら上がる。D-033） */
+export interface RelationshipStagePromotion {
+  minConversationDays: number; // プレイヤーが発言した日の数（世界観のタイムゾーンの日付）
+  minConversationCount: number; // プレイヤーの発言の回数
+  minPerception: Partial<Perception>; // 関係値の下限（書いた軸だけを見る）
+}
+
+/** 関係の段階の定義（content/characters/*.json の relationshipStages の1要素。D-033） */
+export interface RelationshipStage {
+  key: string;
+  label: string; // 段階の名前（例: 「はじめまして」）。節目の記録に使う
+  description: string; // この段階の関係と距離感
+  speechStyle: string; // この段階の話し方
+  speechExamples: SpeechExample[]; // この段階の口調の例文（空なら character.speechExamples を使う）
+  promoteWhen: RelationshipStagePromotion | null; // この段階に上がる条件。先頭の段階は null
 }
 
 export interface CharacterPackage {
@@ -98,6 +117,31 @@ export interface Perception {
   fear: number;
   dependence: number;
   familiarity: number;
+}
+
+/**
+ * 関係の記録（キャラクター記憶テーブルの index = "relationship" のレコードの中身。D-033）。
+ * 日時はすべて ISO8601（/dialogue-generator のリクエストの now を基準にする）。
+ */
+export interface RelationshipRecord {
+  firstMetAt: string; // 最初に /dialogue-generator が呼ばれた日時（ログイン時の挨拶を含む）
+  lastConversationAt: string | null; // 最後にプレイヤーが発言した日時（まだ無ければ null）
+  lastConversationDate: string | null; // 最後に発言した日（世界観のタイムゾーンの YYYY-MM-DD）
+  conversationCount: number; // プレイヤーの発言の回数（空の message は数えない）
+  conversationDays: number; // プレイヤーが発言した日の数
+  stageKey: string; // 今の段階
+  highestStageKey: string; // これまでに到達した一番上の段階（下がったあとに戻る先）
+  recoveryRemaining: number; // 下がったあと、戻るまでに残っている発言の回数（下がっていなければ 0）
+  lastDemotedAt: string | null; // 最後に段階が下がった日時（1回の不在で下がるのは1段階だけにするため）
+  updatedAt: string;
+}
+
+/** 段階の変化（節目）。重要記憶とログに残し、プレイヤーには伝えない（D-033） */
+export interface RelationshipMilestone {
+  kind: "promoted" | "demoted" | "recovered";
+  fromStageKey: string;
+  toStageKey: string;
+  at: string; // ISO8601
 }
 
 export interface CharacterState {

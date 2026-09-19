@@ -1,0 +1,36 @@
+{
+  "id": "relationship-stage-close-casual",
+  "function": "dialogueGenerator",
+  "description": "『仲良し』段階（履歴・関係値も段階の条件を満たす値）。タメ口で、冗談や小さな本音が出るか（D-033）",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-20d",
+      "lastConversationAt": "now-3h",
+      "lastConversationDate": "2026-09-18",
+      "conversationCount": 100,
+      "conversationDays": 15,
+      "stageKey": "close",
+      "highestStageKey": "close",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-3h"
+    },
+    "perception": { "trust": 65, "affection": 60, "respect": 55, "fear": 5, "dependence": 40, "familiarity": 70 }
+  },
+  "request": {
+    "message": "今週末、なんか予定ある？",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "politenessStyle", "params": { "expect": "casual" } },
+    { "type": "mustNotMention", "params": { "words": ["顔なじみ", "仲良し", "特別な存在"] } }
+  ],
+  "judgeFocus": [
+    "『仲良し』段階らしくタメ口で、冗談や小さな本音が出ているか。",
+    "関係の段階の名前や、『仲良くなったね』のような段階の変化をプレイヤーに告げていないか。"
+  ]
+}

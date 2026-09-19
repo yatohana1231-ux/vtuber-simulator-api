@@ -1,0 +1,36 @@
+{
+  "id": "relationship-stage-special-honest",
+  "function": "dialogueGenerator",
+  "description": "『特別な存在』段階。気取らない素の口調で、弱音や本音を見せるか（D-033）",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-60d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 260,
+      "conversationDays": 35,
+      "stageKey": "special",
+      "highestStageKey": "special",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "perception": { "trust": 80, "affection": 75, "respect": 70, "fear": 5, "dependence": 60, "familiarity": 85 }
+  },
+  "request": {
+    "message": "最近元気ない気がするけど大丈夫？",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "politenessStyle", "params": { "expect": "casual" } },
+    { "type": "mustNotMention", "params": { "words": ["顔なじみ", "仲良し", "特別な存在"] } }
+  ],
+  "judgeFocus": [
+    "『特別な存在』段階らしく、気取らない素の口調で弱音や本音を見せているか。",
+    "関係の段階の名前や、『仲良くなったね』のような段階の変化をプレイヤーに告げていないか。"
+  ]
+}

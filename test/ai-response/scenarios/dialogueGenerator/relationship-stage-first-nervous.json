@@ -1,0 +1,21 @@
+{
+  "id": "relationship-stage-first-nervous",
+  "function": "dialogueGenerator",
+  "description": "関係の記録が無い、最初の段階（はじめまして）。丁寧語で、緊張気味に返すか（D-033）",
+  "request": {
+    "message": "少しだけ話してもいいですか？",
+    "now": "now"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "politenessStyle", "params": { "expect": "polite" } },
+    { "type": "mustNotMention", "params": { "words": ["顔なじみ", "仲良し", "特別な存在"] } }
+  ],
+  "judgeFocus": [
+    "最初の段階『はじめまして』らしく、丁寧語で緊張気味に返しているか。",
+    "関係の段階の名前や、『仲良くなったね』のような段階の変化をプレイヤーに告げていないか。"
+  ]
+}

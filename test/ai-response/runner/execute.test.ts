@@ -150,8 +150,9 @@ describe("executeRun", () => {
     expect(result.output).toBe("{}");
     expect(result.modelCalls).toHaveLength(1);
     expect(result.modelCalls[0].modelId).toBe("test-model-id");
-    // saveConversationLog がプレイヤー発言・キャラクターの返答の2回呼ばれる
-    expect(result.writes).toHaveLength(2);
+    // saveConversationLog（プレイヤー発言・キャラクターの返答）2回 + saveRelationshipRecord 1回
+    // （関係の記録が無いシナリオなので、節目の記憶〔saveMemory〕は発生しない。D-033）
+    expect(result.writes).toHaveLength(3);
   });
 
   it("emotionUpdater: run* が動き、RunResultが埋まる", async () => {
@@ -218,8 +219,8 @@ describe("executeRun", () => {
     expect(result.output).toBeUndefined();
     expect(result.modelCalls).toHaveLength(1);
     expect(result.modelCalls[0].error).toMatch(/boom/);
-    // プレイヤー発言の保存だけは例外の前に完了している
-    expect(result.writes).toHaveLength(1);
+    // プレイヤー発言の保存と関係の記録の保存（D-033）は、Bedrock 呼び出し（例外）の前に完了している
+    expect(result.writes).toHaveLength(2);
   });
 
   it("modelごとにcharacterIdが異なり、writesが混ざらない", async () => {
@@ -244,9 +245,9 @@ describe("executeRun", () => {
       pricing: {},
     });
 
-    expect(result1.writes).toHaveLength(2);
-    expect(result2.writes).toHaveLength(2);
+    expect(result1.writes).toHaveLength(3);
+    expect(result2.writes).toHaveLength(3);
     // 2回分の書き込みが fake.writes に累積している
-    expect(fake.writes.length).toBeGreaterThanOrEqual(4);
+    expect(fake.writes.length).toBeGreaterThanOrEqual(6);
   });
 });

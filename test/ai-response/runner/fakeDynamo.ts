@@ -218,6 +218,14 @@ class FakeDynamoImpl implements FakeDynamo {
       });
     }
 
+    if (state.relationship) {
+      this.characterMemory.put({
+        memory_id: characterId,
+        index: dynamoModule.RELATIONSHIP_INDEX_KEY,
+        ...state.relationship,
+      });
+    }
+
     for (const memory of state.memories ?? []) {
       const item: CharacterMemoryItem = { ...memory, memory_id: characterId };
       this.characterMemory.put(item as unknown as StoredItem);

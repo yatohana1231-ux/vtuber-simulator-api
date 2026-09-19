@@ -18,7 +18,11 @@ import {
   saveAbsenceRecord,
   getLatestAbsenceRecord,
   getRecentAbsenceRecords,
+  getRelationshipRecord,
+  saveRelationshipRecord,
   LATEST_ABSENCE_RECORD_INDEX_KEY,
+  RELATIONSHIP_INDEX_KEY,
+  RELATIONSHIP_MILESTONE_MEMORY_TYPE,
   CHARACTER_MEMORY_TABLE,
   EVENTS_TABLE,
 } from "../../../src/lib/dynamo.js";
@@ -28,6 +32,8 @@ import type {
   CharacterStateItem,
   ConversationLogItem,
   LatestAbsenceRecordItem,
+  Perception,
+  RelationshipRecord,
 } from "../../../src/types.js";
 
 function memory(overrides: Partial<CharacterMemoryItem>): CharacterMemoryItem {
@@ -58,6 +64,22 @@ function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
       },
     ],
     threads: [{ id: "thread-1", topic: "来週テストがある", status: "open", openedAt: "2026-01-14T21:00:00.000Z" }],
+    ...overrides,
+  };
+}
+
+function relationshipRecord(overrides: Partial<RelationshipRecord> = {}): RelationshipRecord {
+  return {
+    firstMetAt: "2026-01-01T00:00:00.000Z",
+    lastConversationAt: "2026-01-15T00:00:00.000Z",
+    lastConversationDate: "2026-01-15",
+    conversationCount: 12,
+    conversationDays: 3,
+    stageKey: "first",
+    highestStageKey: "first",
+    recoveryRemaining: 0,
+    lastDemotedAt: null,
+    updatedAt: "2026-01-15T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -97,6 +119,38 @@ describe("getRelevantMemories", () => {
     vi.spyOn(dynamo, "send").mockResolvedValue({
       Items: [
         memory({ index: LATEST_ABSENCE_RECORD_INDEX_KEY, importance: 100 }),
+        memory({ index: "mem-1", importance: 50 }),
+      ],
+    } as never);
+
+    const result = await getRelevantMemories("char-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].index).toBe("mem-1");
+  });
+
+  it("index: 'relationship' のレコードは除外される", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({
+      Items: [
+        memory({ index: RELATIONSHIP_INDEX_KEY, importance: 100 }),
+        memory({ index: "mem-1", importance: 50 }),
+      ],
+    } as never);
+
+    const result = await getRelevantMemories("char-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].index).toBe("mem-1");
+  });
+
+  it("memoryType: 'relationship_milestone' の記憶は除外される", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({
+      Items: [
+        memory({
+          index: "mem-milestone",
+          importance: 100,
+          memoryType: RELATIONSHIP_MILESTONE_MEMORY_TYPE,
+        }),
         memory({ index: "mem-1", importance: 50 }),
       ],
     } as never);
@@ -271,6 +325,168 @@ describe("getCharacterState", () => {
 
     expect(result.mood).toEqual(item.mood);
     expect(result.perception).toEqual(item.perception);
+  });
+
+  it("Itemなし・initialPerception指定あり → mood既定値とinitialPerceptionのコピーを返す", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+    const initialPerception: Perception = {
+      trust: 35,
+      affection: 35,
+      respect: 50,
+      fear: 15,
+      dependence: 10,
+      familiarity: 20,
+    };
+
+    const result = await getCharacterState("char-1", initialPerception);
+
+    expect(result.mood).toEqual(DEFAULT_MOOD);
+    expect(result.perception).toEqual(initialPerception);
+
+    // コピーであること（返り値を変更しても渡した引数が変わらない）
+    result.perception.trust = 999;
+    expect(initialPerception.trust).not.toBe(999);
+  });
+
+  it("Itemなし・initialPerception未指定 → DEFAULT_PERCEPTIONのコピーを返す", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    const result = await getCharacterState("char-1");
+
+    expect(result.perception).toEqual(DEFAULT_PERCEPTION);
+  });
+
+  it("Itemはあるがperceptionが無い・initialPerception指定あり → initialPerceptionのコピーを返す", async () => {
+    const item = {
+      memory_id: "char-1",
+      index: "state",
+      mood: { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 },
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+    const initialPerception: Perception = {
+      trust: 35,
+      affection: 35,
+      respect: 50,
+      fear: 15,
+      dependence: 10,
+      familiarity: 20,
+    };
+
+    const result = await getCharacterState("char-1", initialPerception);
+
+    expect(result.mood).toEqual(item.mood);
+    expect(result.perception).toEqual(initialPerception);
+  });
+
+  it("Itemあり（mood/perceptionとも入っている） → initialPerceptionを指定してもDB上の値をそのまま返す", async () => {
+    const item: CharacterStateItem = {
+      memory_id: "char-1",
+      index: "state",
+      mood: { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 },
+      perception: { trust: 7, affection: 8, respect: 9, fear: 10, dependence: 11, familiarity: 12 },
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+    const initialPerception: Perception = {
+      trust: 35,
+      affection: 35,
+      respect: 50,
+      fear: 15,
+      dependence: 10,
+      familiarity: 20,
+    };
+
+    const result = await getCharacterState("char-1", initialPerception);
+
+    expect(result.perception).toEqual(item.perception);
+  });
+});
+
+describe("getRelationshipRecord", () => {
+  it("呼び出す → ConsistentRead:trueとKeyでGetCommandを送信する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    await getRelationshipRecord("char-1");
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as GetCommand;
+    expect(command.input.TableName).toBe(CHARACTER_MEMORY_TABLE);
+    expect(command.input.Key).toEqual({
+      memory_id: "char-1",
+      index: RELATIONSHIP_INDEX_KEY,
+    });
+    expect(command.input.ConsistentRead).toBe(true);
+  });
+
+  it("項目なし → null", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    const result = await getRelationshipRecord("char-1");
+
+    expect(result).toBeNull();
+  });
+
+  it("項目あり（現行形式） → recordを返す", async () => {
+    const record = relationshipRecord();
+    const item = { memory_id: "char-1", index: RELATIONSHIP_INDEX_KEY, ...record };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+
+    const result = await getRelationshipRecord("char-1");
+
+    expect(result).toEqual(record);
+  });
+
+  it("項目はあるが形式が不正（必須項目が無い） → null", async () => {
+    const item = {
+      memory_id: "char-1",
+      index: RELATIONSHIP_INDEX_KEY,
+      // stageKey・highestStageKey等が無い壊れた形
+      firstMetAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-15T00:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+
+    const result = await getRelationshipRecord("char-1");
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("saveRelationshipRecord", () => {
+  it("呼び出す → PutCommandにmemory_id・index・recordの中身が入っている", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({} as never);
+    const record = relationshipRecord();
+
+    await saveRelationshipRecord("char-1", record);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as PutCommand;
+    expect(command.input.TableName).toBe(CHARACTER_MEMORY_TABLE);
+    const item = command.input.Item as Record<string, unknown>;
+    expect(item.memory_id).toBe("char-1");
+    expect(item.index).toBe(RELATIONSHIP_INDEX_KEY);
+    expect(item).toMatchObject(record);
+  });
+
+  it("保存した内容をgetRelationshipRecordで読むと同じ値になる（往復）", async () => {
+    const record = relationshipRecord({ stageKey: "acquainted", conversationCount: 30 });
+    let savedItem: Record<string, unknown> | undefined;
+    vi.spyOn(dynamo, "send").mockImplementation(async (command) => {
+      if (command instanceof PutCommand) {
+        savedItem = command.input.Item as Record<string, unknown>;
+        return {} as never;
+      }
+      if (command instanceof GetCommand) {
+        return { Item: savedItem } as never;
+      }
+      throw new Error("unexpected command");
+    });
+
+    await saveRelationshipRecord("char-1", record);
+    const result = await getRelationshipRecord("char-1");
+
+    expect(result).toEqual(record);
   });
 });
 

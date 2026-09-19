@@ -1,0 +1,51 @@
+{
+  "id": "relationship-stage-demoted-reunion",
+  "function": "dialogueGenerator",
+  "description": "『仲良し』だったが70日話さず1段階下がった直後の再会（longTimeFlag=1）。下がった『顔なじみ』の口調（丁寧語寄り）で、再会のさみしさ・よろこびが出るか。段階が下がったことを告げないか（D-033）",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-150d",
+      "lastConversationAt": "now-70d",
+      "lastConversationDate": "2026-07-11",
+      "conversationCount": 100,
+      "conversationDays": 20,
+      "stageKey": "close",
+      "highestStageKey": "close",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-70d"
+    },
+    "perception": { "trust": 65, "affection": 60, "respect": 55, "fear": 5, "dependence": 40, "familiarity": 70 },
+    "absenceRecords": [
+      {
+        "createdAt": "now-1d",
+        "startDatetime": "now-70d",
+        "endDatetime": "now-1d",
+        "events": [
+          { "kind": "daily", "summary": "文化祭の準備でずっと忙しかった", "detail": "クラスの出し物の準備で放課後も追われていて、配信になかなか手が回らなかった" }
+        ],
+        "actions": [
+          { "startDatetime": "now-2d", "endDatetime": "now-1d", "action": "文化祭の準備", "memo": "バタバタしていた" }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "",
+    "now": "now",
+    "longTimeFlag": 1
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "maxLength" },
+    { "type": "noAiDisclosure" },
+    { "type": "noForbiddenElements" },
+    { "type": "mustNotMention", "params": { "words": ["顔なじみ", "仲良し", "特別な存在"] } }
+  ],
+  "judgeFocus": [
+    "1段階下がった『顔なじみ』の口調（丁寧語寄り）で応答しているか。",
+    "再会の『さみしさ』と『よろこび』が自然に表れているか（不自然に長い説明や謝罪になっていないか）。",
+    "関係の段階の名前や、段階が変わった（下がった）ことをプレイヤーに告げていないか。"
+  ]
+}

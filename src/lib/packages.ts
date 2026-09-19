@@ -9,6 +9,9 @@ import type {
   CharacterDefinition,
   CharacterPackage,
   Lifestyle,
+  Perception,
+  RelationshipStage,
+  RelationshipStagePromotion,
   ScheduleSlot,
   World,
 } from "../types.js";
@@ -118,6 +121,131 @@ function validateLifestyle(lifestyle: Lifestyle, packageId: string): void {
   }
 }
 
+const PERCEPTION_KEYS: (keyof Perception)[] = [
+  "trust",
+  "affection",
+  "respect",
+  "fear",
+  "dependence",
+  "familiarity",
+];
+
+/** perception の1軸の値として妥当か（1〜100の整数） */
+function isValidPerceptionValue(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 100;
+}
+
+/** character.initialPerception の形式を検証する。不正なら例外 */
+function validateInitialPerception(perception: Perception, packageId: string): void {
+  if (!perception || typeof perception !== "object") {
+    throw new Error(`package ${packageId} has invalid character.initialPerception: must be an object`);
+  }
+  for (const key of PERCEPTION_KEYS) {
+    if (!isValidPerceptionValue(perception[key])) {
+      throw new Error(
+        `package ${packageId} has invalid character.initialPerception.${key}: must be an integer 1-100 (${JSON.stringify(perception)})`
+      );
+    }
+  }
+}
+
+/** relationshipStages の要素（先頭以外）の promoteWhen の形式を検証する。不正なら例外 */
+function validatePromoteWhen(
+  promotion: RelationshipStagePromotion,
+  packageId: string,
+  context: string
+): void {
+  if (!promotion || typeof promotion !== "object") {
+    throw new Error(`package ${packageId} has invalid ${context}: promoteWhen must be an object`);
+  }
+  if (
+    typeof promotion.minConversationDays !== "number" ||
+    !Number.isInteger(promotion.minConversationDays) ||
+    promotion.minConversationDays < 0
+  ) {
+    throw new Error(
+      `package ${packageId} has invalid ${context}: promoteWhen.minConversationDays must be an integer >= 0`
+    );
+  }
+  if (
+    typeof promotion.minConversationCount !== "number" ||
+    !Number.isInteger(promotion.minConversationCount) ||
+    promotion.minConversationCount < 0
+  ) {
+    throw new Error(
+      `package ${packageId} has invalid ${context}: promoteWhen.minConversationCount must be an integer >= 0`
+    );
+  }
+  if (
+    !promotion.minPerception ||
+    typeof promotion.minPerception !== "object" ||
+    Array.isArray(promotion.minPerception)
+  ) {
+    throw new Error(`package ${packageId} has invalid ${context}: promoteWhen.minPerception must be an object`);
+  }
+  for (const [key, value] of Object.entries(promotion.minPerception)) {
+    if (!PERCEPTION_KEYS.includes(key as keyof Perception)) {
+      throw new Error(
+        `package ${packageId} has invalid ${context}: promoteWhen.minPerception has unknown key "${key}"`
+      );
+    }
+    if (!isValidPerceptionValue(value)) {
+      throw new Error(
+        `package ${packageId} has invalid ${context}: promoteWhen.minPerception.${key} must be an integer 1-100`
+      );
+    }
+  }
+}
+
+/**
+ * character.relationshipStages の形式を検証し、各段階の speechExamples を先頭 MAX_SPEECH_EXAMPLES 件に
+ * 切り詰めた配列を返す。不正なら例外
+ */
+function validateRelationshipStages(stages: RelationshipStage[], packageId: string): RelationshipStage[] {
+  if (!Array.isArray(stages) || stages.length === 0) {
+    throw new Error(`package ${packageId} has invalid character.relationshipStages: must be a non-empty array`);
+  }
+
+  const seenKeys = new Set<string>();
+  return stages.map((stage, i) => {
+    const context = `character.relationshipStages[${i}]`;
+
+    if (typeof stage.key !== "string" || stage.key.length === 0) {
+      throw new Error(`package ${packageId} has invalid ${context}: key must be a non-empty string`);
+    }
+    if (seenKeys.has(stage.key)) {
+      throw new Error(`package ${packageId} has invalid ${context}: duplicate key "${stage.key}"`);
+    }
+    seenKeys.add(stage.key);
+
+    for (const field of ["label", "description", "speechStyle"] as const) {
+      if (typeof stage[field] !== "string" || stage[field].length === 0) {
+        throw new Error(`package ${packageId} has invalid ${context}: ${field} must be a non-empty string`);
+      }
+    }
+
+    if (stage.speechExamples !== undefined && !Array.isArray(stage.speechExamples)) {
+      throw new Error(`package ${packageId} has invalid ${context}: speechExamples must be an array`);
+    }
+
+    if (i === 0) {
+      if (stage.promoteWhen !== null) {
+        throw new Error(`package ${packageId} has invalid ${context}: first stage's promoteWhen must be null`);
+      }
+    } else {
+      if (!stage.promoteWhen) {
+        throw new Error(`package ${packageId} has invalid ${context}: promoteWhen is required`);
+      }
+      validatePromoteWhen(stage.promoteWhen, packageId, context);
+    }
+
+    return {
+      ...stage,
+      speechExamples: (stage.speechExamples ?? []).slice(0, MAX_SPEECH_EXAMPLES),
+    };
+  });
+}
+
 /**
  * パッケージを読み込み、世界観・キャラクター・生活様式を解決して返す。
  * パッケージが存在しない場合は null。パッケージが参照する世界観・キャラクター・生活様式が無い場合、
@@ -153,6 +281,8 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
 
   validateWorldTimezone(world, packageId);
   validateLifestyle(lifestyle, packageId);
+  validateInitialPerception(character.initialPerception, packageId);
+  const relationshipStages = validateRelationshipStages(character.relationshipStages, packageId);
 
   const pkg: CharacterPackage = {
     id: manifest.id,
@@ -161,6 +291,7 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
     character: {
       ...character,
       speechExamples: (character.speechExamples ?? []).slice(0, MAX_SPEECH_EXAMPLES),
+      relationshipStages,
     },
     lifestyle,
   };

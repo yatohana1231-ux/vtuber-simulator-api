@@ -32,6 +32,24 @@ export function makeCharacter(overrides: Partial<CharacterDefinition> = {}): Cha
     relationship: "友達",
     background: "",
     speechExamples: [],
+    initialPerception: {
+      trust: 50,
+      affection: 50,
+      respect: 50,
+      fear: 10,
+      dependence: 10,
+      familiarity: 50,
+    },
+    relationshipStages: [
+      {
+        key: "first",
+        label: "テスト段階",
+        description: "テスト用の説明",
+        speechStyle: "テスト用の話し方",
+        speechExamples: [],
+        promoteWhen: null,
+      },
+    ],
     ...overrides,
   };
 }

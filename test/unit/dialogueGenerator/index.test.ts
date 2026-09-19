@@ -12,7 +12,10 @@ vi.mock("../../../src/lib/dynamo.js", async (importOriginal) => {
     getRelevantMemories: vi.fn(),
     getRecentLogs: vi.fn(),
     getLatestAbsenceRecord: vi.fn(),
+    getRelationshipRecord: vi.fn(),
     saveConversationLog: vi.fn(),
+    saveRelationshipRecord: vi.fn(),
+    saveMemory: vi.fn(),
   };
 });
 
@@ -23,15 +26,21 @@ import {
   getRelevantMemories,
   getRecentLogs,
   getLatestAbsenceRecord,
+  getRelationshipRecord,
   saveConversationLog,
+  saveRelationshipRecord,
+  saveMemory,
   DEFAULT_MOOD,
   DEFAULT_PERCEPTION,
+  RELATIONSHIP_MILESTONE_MEMORY_TYPE,
 } from "../../../src/lib/dynamo.js";
 import type {
   AbsenceRecord,
   CharacterDefinition,
   ConversationLogItem,
   DialogueGeneratorRequest,
+  RelationshipRecord,
+  RelationshipStage,
   World,
 } from "../../../src/types.js";
 
@@ -40,7 +49,10 @@ const mockedGetCharacterState = vi.mocked(getCharacterState);
 const mockedGetRelevantMemories = vi.mocked(getRelevantMemories);
 const mockedGetRecentLogs = vi.mocked(getRecentLogs);
 const mockedGetLatestAbsenceRecord = vi.mocked(getLatestAbsenceRecord);
+const mockedGetRelationshipRecord = vi.mocked(getRelationshipRecord);
 const mockedSaveConversationLog = vi.mocked(saveConversationLog);
+const mockedSaveRelationshipRecord = vi.mocked(saveRelationshipRecord);
+const mockedSaveMemory = vi.mocked(saveMemory);
 
 const world: World = {
   key: "test-world",
@@ -59,12 +71,61 @@ const character: CharacterDefinition = {
   relationship: "",
   background: "",
   speechExamples: [],
+  initialPerception: {
+    trust: 50,
+    affection: 50,
+    respect: 50,
+    fear: 10,
+    dependence: 10,
+    familiarity: 50,
+  },
+  relationshipStages: [
+    {
+      key: "first",
+      label: "テスト段階",
+      description: "テスト用の説明",
+      speechStyle: "テスト用の話し方",
+      speechExamples: [],
+      promoteWhen: null,
+    },
+  ],
 };
 
 const characterWithSpeechExamples: CharacterDefinition = {
   ...character,
   speechExamples: [{ player: "元気？", reply: "元気だよ、ありがとう！というマーカー返答" }],
 };
+
+// 段階が上がる条件を、発言1回・当日中に満たす段階（節目のテスト用。D-033）
+const promotableSecondStage: RelationshipStage = {
+  key: "second",
+  label: "テスト段階2",
+  description: "テスト用の説明2",
+  speechStyle: "テスト用の話し方2",
+  speechExamples: [],
+  promoteWhen: { minConversationDays: 0, minConversationCount: 1, minPerception: {} },
+};
+
+const characterWithPromotableStage: CharacterDefinition = {
+  ...character,
+  relationshipStages: [character.relationshipStages[0], promotableSecondStage],
+};
+
+function relationshipRecord(overrides: Partial<RelationshipRecord> = {}): RelationshipRecord {
+  return {
+    firstMetAt: "2026-08-01T00:00:00.000Z",
+    lastConversationAt: "2026-08-10T00:00:00.000Z",
+    lastConversationDate: "2026-08-10",
+    conversationCount: 5,
+    conversationDays: 3,
+    stageKey: "first",
+    highestStageKey: "first",
+    recoveryRemaining: 0,
+    lastDemotedAt: null,
+    updatedAt: "2026-08-10T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 function baseReq(overrides: Partial<DialogueGeneratorRequest> = {}): DialogueGeneratorRequest {
   return {
@@ -122,7 +183,10 @@ beforeEach(() => {
   mockedGetRelevantMemories.mockResolvedValue([]);
   mockedGetRecentLogs.mockResolvedValue([]);
   mockedGetLatestAbsenceRecord.mockResolvedValue(null);
+  mockedGetRelationshipRecord.mockResolvedValue(null);
   mockedSaveConversationLog.mockResolvedValue(undefined);
+  mockedSaveRelationshipRecord.mockResolvedValue(undefined);
+  mockedSaveMemory.mockResolvedValue(undefined);
   mockedInvokeModel.mockResolvedValue("セリフの返答");
 });
 
@@ -173,7 +237,7 @@ describe("mood/perception（D-032: リクエストでは受け取らず常にDB�
 
     await runDialogueGenerator(baseReq({ characterId: "char-xyz" }));
 
-    expect(mockedGetCharacterState).toHaveBeenCalledWith("char-xyz");
+    expect(mockedGetCharacterState).toHaveBeenCalledWith("char-xyz", character.initialPerception);
     expect(mockedGetCharacterState).toHaveBeenCalledTimes(1);
     expect(promptText()).toContain("喜び：1（ほとんど感じない）");
     expect(promptText()).toContain("信頼：11（ほとんど感じない）");
@@ -187,6 +251,27 @@ describe("mood/perception（D-032: リクエストでは受け取らず常にDB�
     const prompt = promptText();
     expect(prompt).toContain(`喜び：${DEFAULT_MOOD.joy}`);
     expect(prompt).toContain(`信頼：${DEFAULT_PERCEPTION.trust}`);
+  });
+
+  it("D-033: character.initialPerceptionがgetCharacterStateの第2引数に渡る（キャラクターごとに異なる値でも）", async () => {
+    const characterWithCustomInitialPerception = {
+      ...character,
+      initialPerception: {
+        trust: 35,
+        affection: 35,
+        respect: 50,
+        fear: 15,
+        dependence: 10,
+        familiarity: 20,
+      },
+    };
+
+    await runDialogueGenerator(baseReq({ character: characterWithCustomInitialPerception }));
+
+    expect(mockedGetCharacterState).toHaveBeenCalledWith(
+      "char-1",
+      characterWithCustomInitialPerception.initialPerception
+    );
   });
 });
 
@@ -272,13 +357,124 @@ describe("最新の不在期間の記録（getLatestAbsenceRecord）", () => {
     expect(promptText()).toContain("雨が降ったマーカー要約");
   });
 
-  it("記録が無い場合 → invokeModelに渡るセッション部（層の2番目）が空文字になる", async () => {
+  it("記録が無い場合 → invokeModelに渡るセッション部（層の2番目）は空文字にならない（今の関係の段階が入るため。D-033）が、出来事の見出しは入らない", async () => {
     mockedGetLatestAbsenceRecord.mockResolvedValue(null);
 
     await runDialogueGenerator(baseReq());
 
     const layers = mockedInvokeModel.mock.calls[0][0] as string[];
-    expect(layers[1]).toBe("");
+    expect(layers[1]).not.toBe("");
+    expect(layers[1]).not.toContain("最近の不在期間の出来事");
+  });
+});
+
+describe("関係の記録（getRelationshipRecord・advanceRelationship・saveRelationshipRecord。D-033）", () => {
+  it("getRelationshipRecordはcharacterIdで呼ばれる", async () => {
+    await runDialogueGenerator(baseReq({ characterId: "char-xyz" }));
+
+    expect(mockedGetRelationshipRecord).toHaveBeenCalledWith("char-xyz");
+  });
+
+  it("記録が無い（はじめて）場合 → firstMetAtがnowの記録が保存される", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(null);
+
+    await runDialogueGenerator(baseReq({ now: "2026-08-11T14:30:00.000Z", message: "こんにちは" }));
+
+    expect(mockedSaveRelationshipRecord).toHaveBeenCalledTimes(1);
+    const [savedCharacterId, savedRecord] = mockedSaveRelationshipRecord.mock.calls[0];
+    expect(savedCharacterId).toBe("char-1");
+    expect(savedRecord.firstMetAt).toBe("2026-08-11T14:30:00.000Z");
+  });
+
+  it("プレイヤーの発言がある場合 → conversationCountが1増える", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(relationshipRecord({ conversationCount: 5 }));
+
+    await runDialogueGenerator(baseReq({ message: "こんにちは" }));
+
+    const savedRecord = mockedSaveRelationshipRecord.mock.calls[0][1];
+    expect(savedRecord.conversationCount).toBe(6);
+  });
+
+  it("プレイヤーの発言が無い（ログイン時の挨拶）場合 → conversationCountは変わらない", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(relationshipRecord({ conversationCount: 5 }));
+
+    await runDialogueGenerator(baseReq({ message: "" }));
+
+    const savedRecord = mockedSaveRelationshipRecord.mock.calls[0][1];
+    expect(savedRecord.conversationCount).toBe(5);
+  });
+
+  it("characterIdで保存される", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(relationshipRecord());
+
+    await runDialogueGenerator(baseReq({ characterId: "char-xyz" }));
+
+    expect(mockedSaveRelationshipRecord).toHaveBeenCalledWith("char-xyz", expect.any(Object));
+  });
+});
+
+describe("節目（段階が変わったとき。プレイヤーには伝えず重要記憶とログにだけ残す。D-033）", () => {
+  it("段階が上がる条件を満たすと、relationship_milestoneの重要記憶として保存される", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(null);
+
+    await runDialogueGenerator(baseReq({ character: characterWithPromotableStage, message: "こんにちは" }));
+
+    expect(mockedSaveMemory).toHaveBeenCalledTimes(1);
+    const savedMemory = mockedSaveMemory.mock.calls[0][0];
+    expect(savedMemory.memory_id).toBe("char-1");
+    expect(savedMemory.memoryType).toBe(RELATIONSHIP_MILESTONE_MEMORY_TYPE);
+    expect(savedMemory.memoryType).toBe("relationship_milestone");
+    expect(savedMemory.eventSummary).toBe("プレイヤーとの関係が「テスト段階」から「テスト段階2」に上がった");
+  });
+
+  it("節目はプロンプトに入らない（プレイヤーには伝えない）", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(null);
+
+    await runDialogueGenerator(baseReq({ character: characterWithPromotableStage, message: "こんにちは" }));
+
+    expect(promptText()).not.toContain("に上がった");
+    expect(promptText()).not.toContain("relationship_milestone");
+  });
+
+  it("段階が変わらないとき → saveMemoryは呼ばれない", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(relationshipRecord());
+
+    await runDialogueGenerator(baseReq({ message: "こんにちは" }));
+
+    expect(mockedSaveMemory).not.toHaveBeenCalled();
+  });
+
+  it("節目の保存（saveRelationshipRecord・saveMemory）はinvokeModelより前に行われる", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(null);
+    const calls: string[] = [];
+    mockedSaveRelationshipRecord.mockImplementation(async () => {
+      calls.push("saveRelationshipRecord");
+    });
+    mockedSaveMemory.mockImplementation(async () => {
+      calls.push("saveMemory");
+    });
+    mockedInvokeModel.mockImplementation(async () => {
+      calls.push("invokeModel");
+      return "セリフの返答";
+    });
+
+    await runDialogueGenerator(baseReq({ character: characterWithPromotableStage, message: "こんにちは" }));
+
+    expect(calls).toContain("saveRelationshipRecord");
+    expect(calls).toContain("saveMemory");
+    expect(calls.indexOf("invokeModel")).toBeGreaterThan(calls.indexOf("saveRelationshipRecord"));
+    expect(calls.indexOf("invokeModel")).toBeGreaterThan(calls.indexOf("saveMemory"));
+  });
+});
+
+describe("今の段階の文面（プロンプトの②に入ること。D-033）", () => {
+  it("記録の段階（stageKey）に対応する段階の説明・話し方がプロンプトに入る", async () => {
+    mockedGetRelationshipRecord.mockResolvedValue(relationshipRecord({ stageKey: "first" }));
+
+    await runDialogueGenerator(baseReq());
+
+    expect(promptText()).toContain("テスト用の説明");
+    expect(promptText()).toContain("テスト用の話し方");
   });
 });
 

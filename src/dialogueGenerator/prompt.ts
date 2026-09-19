@@ -4,11 +4,15 @@
 // プロンプトキャッシュ（D-017・D-022）のため、変わる頻度ごとに層を分けて
 // テンプレートファイルも分割している。
 // - ① 固定部（conversation.fixed.mustache）: 同じパッケージなら毎回まったく同じ文字列。
-//   日時・感情・記録・長期不在フラグなど毎回変わる値は入れない。
-// - ② セッション部（conversation.session.mustache）: 最新の不在期間の記録。
-//   記録が無ければ空文字（bedrock.ts の invokeModel が空の層を除く）。
-// - ③ 可変部（conversation.variable.mustache）: 現在時刻・感情・関係値・
-//   長期不在の備考・重要な記憶・最近の会話など、会話のたびに変わる入力。
+//   段階・記録によって変わる内容（口調の例文・今の関係・日時・感情・記録・
+//   長期不在フラグなど）は入れない。
+// - ② セッション部（conversation.session.mustache）: 今の関係の段階（説明・話し方・
+//   口調の例文。段階に例文が無ければキャラクター共通の例文）と、最新の不在期間の
+//   記録（あれば続けて入れる）。段階は必ずあるので、記録が無くても空文字にはならない
+//   （D-033）。
+// - ③ 可変部（conversation.variable.mustache）: 現在時刻・感情・関係値・関係の履歴
+//   （【これまでの関係】）・長期不在の備考・重要な記憶・最近の会話など、会話のたびに
+//   変わる入力。
 // -------------------------------------------------------
 
 import Mustache from "mustache";
@@ -16,7 +20,7 @@ import Mustache from "mustache";
 import FIXED_TEMPLATE from "./prompts/conversation.fixed.mustache";
 import SESSION_TEMPLATE from "./prompts/conversation.session.mustache";
 import VARIABLE_TEMPLATE from "./prompts/conversation.variable.mustache";
-import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
+import { buildPromptContext, buildSpeechExamplesContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import { formatAbsenceRecordForPrompt } from "../lib/absenceRecordText.js";
 import { formatLocalDateTime } from "../lib/timezone.js";
 import { formatMoodForPrompt, formatPerceptionForPrompt } from "../lib/characterStateText.js";
@@ -26,6 +30,7 @@ import type {
   CharacterMemoryItem,
   Mood,
   Perception,
+  RelationshipStage,
   World,
 } from "../types.js";
 
@@ -42,7 +47,9 @@ export interface DialogueGeneratorPromptInput {
   perception: Perception;
   memories: CharacterMemoryItem[];
   historyLogs: HistoryLogForPrompt[];
-  latestAbsenceRecord: AbsenceRecord | null; // 無ければセッション部は空文字にする
+  latestAbsenceRecord: AbsenceRecord | null; // 無ければセッション部の不在期間の記録の部分だけ省く
+  currentStage: RelationshipStage; // 今の関係の段階（D-033）。呼び出し元が record.stageKey から解決して渡す
+  relationshipHistoryText: string; // formatRelationshipHistoryForPrompt の文章（D-033）
   now: Date;
   longTimeFlag: 0 | 1;
 }
@@ -61,6 +68,8 @@ export function buildDialogueGeneratorPromptLayers(input: DialogueGeneratorPromp
     memories,
     historyLogs,
     latestAbsenceRecord,
+    currentStage,
+    relationshipHistoryText,
     now,
     longTimeFlag,
   } = input;
@@ -68,14 +77,22 @@ export function buildDialogueGeneratorPromptLayers(input: DialogueGeneratorPromp
 
   const fixed = Mustache.render(FIXED_TEMPLATE, buildPromptContext(world, character), PROMPT_PARTIALS);
 
-  const session = latestAbsenceRecord
-    ? Mustache.render(SESSION_TEMPLATE, formatAbsenceRecordForPrompt(latestAbsenceRecord, timeZone))
-    : "";
+  // 段階に口調の例文があればそれを、無ければキャラクター共通の例文を使う（D-033）
+  const stageSpeechExamples =
+    currentStage.speechExamples.length > 0 ? currentStage.speechExamples : character.speechExamples;
+  const sessionContext = {
+    stage: currentStage,
+    ...buildSpeechExamplesContext(character.name, stageSpeechExamples),
+    hasAbsenceRecord: latestAbsenceRecord !== null,
+    ...(latestAbsenceRecord ? formatAbsenceRecordForPrompt(latestAbsenceRecord, timeZone) : {}),
+  };
+  const session = Mustache.render(SESSION_TEMPLATE, sessionContext, PROMPT_PARTIALS);
 
   const variable = Mustache.render(VARIABLE_TEMPLATE, {
     currentDatetime: formatLocalDateTime(now, timeZone),
     moodText: formatMoodForPrompt(mood),
     perceptionText: formatPerceptionForPrompt(perception),
+    relationshipHistoryText,
     memoriesText: formatMemoriesText(memories),
     historyText: formatHistoryText(historyLogs, character.name, timeZone),
     hasLongTimeFlag: longTimeFlag === 1,

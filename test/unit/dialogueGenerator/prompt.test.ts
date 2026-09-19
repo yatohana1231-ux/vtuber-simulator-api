@@ -9,6 +9,7 @@ import type {
   AbsenceRecord,
   CharacterDefinition,
   CharacterMemoryItem,
+  RelationshipStage,
   World,
 } from "../../../src/types.js";
 
@@ -58,6 +59,32 @@ function memory(overrides: Partial<CharacterMemoryItem> = {}): CharacterMemoryIt
   };
 }
 
+/** 段階の例文を持つ段階（②に段階の例文が入ることを確認するためのマーカー入り） */
+function stageWithOwnExamples(overrides: Partial<RelationshipStage> = {}): RelationshipStage {
+  return {
+    key: "stage-with-examples",
+    label: "段階ラベルマーカー",
+    description: "段階の説明マーカー",
+    speechStyle: "段階の話し方マーカー",
+    speechExamples: [{ player: "段階の例文プレイヤー発言マーカー", reply: "段階の例文キャラ返答マーカー" }],
+    promoteWhen: null,
+    ...overrides,
+  };
+}
+
+/** 段階に例文が無い段階（②にキャラクター共通の例文が入ることを確認するため） */
+function stageWithoutExamples(overrides: Partial<RelationshipStage> = {}): RelationshipStage {
+  return {
+    key: "stage-without-examples",
+    label: "段階ラベルマーカー2",
+    description: "段階の説明マーカー2",
+    speechStyle: "段階の話し方マーカー2",
+    speechExamples: [],
+    promoteWhen: null,
+    ...overrides,
+  };
+}
+
 function baseInput(overrides: Partial<DialogueGeneratorPromptInput> = {}): DialogueGeneratorPromptInput {
   return {
     world,
@@ -67,6 +94,8 @@ function baseInput(overrides: Partial<DialogueGeneratorPromptInput> = {}): Dialo
     memories: [memory()],
     historyLogs: [{ role: "user", content: "こんにちは", index: "2026-09-18T10:00:00.000Z" }],
     latestAbsenceRecord: absenceRecord(),
+    currentStage: stageWithOwnExamples(),
+    relationshipHistoryText: "出会ってから23日目。話した日は15日、会話は120回。最後に話したのは3日前という関係の履歴マーカー。",
     now: new Date("2026-09-18T10:30:00.000Z"),
     longTimeFlag: 0,
     ...overrides,
@@ -84,7 +113,7 @@ describe("buildDialogueGeneratorPromptLayers", () => {
   });
 
   describe("固定部（① プロンプトキャッシュのための性質）", () => {
-    it("感情・記憶・会話・現在時刻・記録・長期不在フラグが違う2つの入力で、固定部は完全に同じ文字列になる", () => {
+    it("感情・記憶・会話・現在時刻・記録・長期不在フラグ・段階・関係の履歴が違う2つの入力で、固定部は完全に同じ文字列になる", () => {
       const [fixedA] = buildDialogueGeneratorPromptLayers(baseInput());
       const [fixedB] = buildDialogueGeneratorPromptLayers(
         baseInput({
@@ -93,6 +122,8 @@ describe("buildDialogueGeneratorPromptLayers", () => {
           memories: [],
           historyLogs: [],
           latestAbsenceRecord: null,
+          currentStage: stageWithoutExamples(),
+          relationshipHistoryText: "今日はじめて会った、という別の関係の履歴マーカー。",
           now: new Date("2026-01-01T00:00:00.000Z"),
           longTimeFlag: 1,
         })
@@ -101,11 +132,19 @@ describe("buildDialogueGeneratorPromptLayers", () => {
       expect(fixedA).toBe(fixedB);
     });
 
-    it("キャラクター名・世界観の説明・口調の例文が入る", () => {
+    it("キャラクター名・世界観の説明が入る", () => {
       const [fixed] = buildDialogueGeneratorPromptLayers(baseInput());
 
       expect(fixed).toContain(character.name);
       expect(fixed).toContain(world.description);
+    });
+
+    it("段階の説明・話し方・例文（②に移した内容）を含まない", () => {
+      const [fixed] = buildDialogueGeneratorPromptLayers(baseInput());
+
+      expect(fixed).not.toContain("段階の説明マーカー");
+      expect(fixed).not.toContain("段階の話し方マーカー");
+      expect(fixed).not.toContain("段階の例文プレイヤー発言マーカー");
     });
 
     it("日時の表記が入らない（YYYY/MM/DD(曜) 形式が含まれない）", () => {
@@ -115,8 +154,8 @@ describe("buildDialogueGeneratorPromptLayers", () => {
     });
   });
 
-  describe("セッション部（② 最新の不在期間の記録）", () => {
-    it("同じ記録なら now・mood・会話が違っても同じ文字列になる", () => {
+  describe("セッション部（② 今の関係の段階・最新の不在期間の記録）", () => {
+    it("段階・記録が同じなら now・mood・会話が違っても同じ文字列になる", () => {
       const [, sessionA] = buildDialogueGeneratorPromptLayers(baseInput());
       const [, sessionB] = buildDialogueGeneratorPromptLayers(
         baseInput({
@@ -129,10 +168,68 @@ describe("buildDialogueGeneratorPromptLayers", () => {
       expect(sessionA).toBe(sessionB);
     });
 
-    it("記録が無い（null） → 空文字になる", () => {
+    it("今の段階の説明・話し方が入る", () => {
+      const [, session] = buildDialogueGeneratorPromptLayers(
+        baseInput({ currentStage: stageWithOwnExamples() })
+      );
+
+      expect(session).toContain("段階の説明マーカー");
+      expect(session).toContain("段階の話し方マーカー");
+    });
+
+    it("段階に口調の例文があれば、その例文が入る", () => {
+      const [, session] = buildDialogueGeneratorPromptLayers(
+        baseInput({ currentStage: stageWithOwnExamples() })
+      );
+
+      expect(session).toContain("段階の例文プレイヤー発言マーカー");
+      expect(session).toContain("段階の例文キャラ返答マーカー");
+    });
+
+    it("段階に口調の例文が無ければ、キャラクター共通の例文が入る", () => {
+      const characterWithExamples: CharacterDefinition = {
+        ...character,
+        speechExamples: [{ player: "キャラ共通の例文プレイヤー発言マーカー", reply: "キャラ共通の例文キャラ返答マーカー" }],
+      };
+
+      const [, session] = buildDialogueGeneratorPromptLayers(
+        baseInput({ character: characterWithExamples, currentStage: stageWithoutExamples() })
+      );
+
+      expect(session).toContain("キャラ共通の例文プレイヤー発言マーカー");
+      expect(session).toContain("キャラ共通の例文キャラ返答マーカー");
+    });
+
+    it("段階にもキャラクターにも例文が無ければ、口調の例の見出しが入らない", () => {
+      const characterWithoutExamples: CharacterDefinition = { ...character, speechExamples: [] };
+
+      const [, session] = buildDialogueGeneratorPromptLayers(
+        baseInput({ character: characterWithoutExamples, currentStage: stageWithoutExamples() })
+      );
+
+      expect(session).not.toContain("の口調の手本です");
+    });
+
+    it("最新の不在期間の記録が無くても空文字にならない（段階の内容が入るため）", () => {
       const [, session] = buildDialogueGeneratorPromptLayers(baseInput({ latestAbsenceRecord: null }));
 
-      expect(session).toBe("");
+      expect(session).not.toBe("");
+      expect(session).toContain("段階の説明マーカー");
+    });
+
+    it("最新の不在期間の記録が無い場合、出来事の見出しは入らない", () => {
+      const [, session] = buildDialogueGeneratorPromptLayers(baseInput({ latestAbsenceRecord: null }));
+
+      expect(session).not.toContain("最近の不在期間の出来事");
+    });
+
+    it("最新の不在期間の記録があれば、段階の内容に続けて出来事・行動が入る", () => {
+      const [, session] = buildDialogueGeneratorPromptLayers(baseInput());
+
+      expect(session).toContain("段階の説明マーカー");
+      const stageIndex = session.indexOf("段階の説明マーカー");
+      const eventIndex = session.indexOf("授業で発表したマーカー要約");
+      expect(eventIndex).toBeGreaterThan(stageIndex);
     });
 
     it("出来事の summary・detail が入る", () => {
@@ -193,6 +290,15 @@ describe("buildDialogueGeneratorPromptLayers", () => {
       const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput());
 
       expect(variable).toContain("文化祭の準備を手伝った");
+    });
+
+    it("関係の履歴の文章（【これまでの関係】）が入る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput());
+
+      expect(variable).toContain("【これまでの関係】");
+      expect(variable).toContain(
+        "出会ってから23日目。話した日は15日、会話は120回。最後に話したのは3日前という関係の履歴マーカー。"
+      );
     });
 
     it("最近の会話が入る", () => {

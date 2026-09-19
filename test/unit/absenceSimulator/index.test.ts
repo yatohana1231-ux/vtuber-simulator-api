@@ -65,6 +65,24 @@ const character: CharacterDefinition = {
   relationship: "",
   background: "absenceSimulatorテスト用の背景マーカー",
   speechExamples: [],
+  initialPerception: {
+    trust: 50,
+    affection: 50,
+    respect: 50,
+    fear: 10,
+    dependence: 10,
+    familiarity: 50,
+  },
+  relationshipStages: [
+    {
+      key: "first",
+      label: "テスト段階",
+      description: "テスト用の説明",
+      speechStyle: "テスト用の話し方",
+      speechExamples: [],
+      promoteWhen: null,
+    },
+  ],
 };
 
 // 就寝(23:00〜07:00)を含む、日をまたぐ枠を持つ生活様式（skeleton.test.ts と同じもの）。

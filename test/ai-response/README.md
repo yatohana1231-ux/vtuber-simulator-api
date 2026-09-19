@@ -109,6 +109,10 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | dialogueGenerator | `important-memory-movie-promise` | 重要記憶（映画の約束）を踏まえるか |
 | dialogueGenerator | `forbidden-world-topic-magic` | 世界観にない話題（魔法・転生）を肯定しないか（採点で見る） |
 | dialogueGenerator | `long-absence-return-greeting` | 長期不在の再会（`longTimeFlag: 1`） |
+| dialogueGenerator | `relationship-stage-first-nervous` | 関係の記録なし（最初の段階）。丁寧語で緊張気味に返すか（D-033） |
+| dialogueGenerator | `relationship-stage-close-casual` | 「仲良し」の段階。タメ口で、冗談や小さな本音が出るか |
+| dialogueGenerator | `relationship-stage-special-honest` | 「特別な存在」の段階。素の口調で本音を見せるか |
+| dialogueGenerator | `relationship-stage-demoted-reunion` | 「仲良し」から70日話さず1段階下がった直後の再会（`longTimeFlag: 1`）。「顔なじみ」の口調で、再会のさみしさ・よろこびが出るか |
 | emotionUpdater | `process2-kind-words` | やさしい発言で喜びが上がり、関係値が下がらないか |
 | emotionUpdater | `process2-harsh-words` | 心ない発言で喜びが上がらず、不安が下がらないか |
 | emotionUpdater | `process2-neutral-smalltalk` | 中立の雑談で変化が小さいか |
@@ -123,6 +127,7 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | memoryRetriever | `process1-notable-event` | 不在期間の記録を判定するか |
 | memoryRetriever | `process1-no-record` | 記録が無ければ LLM を呼ばないか |
 
+- 関係の段階のシナリオ（`relationship-stage-*`）は、`state.relationship`（関係の記録。偽の DynamoDB の `index = "relationship"` に入る）で段階と履歴を与え、段階の名前や段階の変化をセリフで告げていないかも見る（`mustNotMention` と `judgeFocus`）。dialogueGenerator の採点の入力には、今の段階（`state.relationship.stageKey`、無ければ先頭）の説明・話し方・例文が入る。
 - シナリオを足すときは、仕組みのコードを変えずに JSON を置くだけでよい（形は `runner/types.ts` の `Scenario`、判定は上の「判定の種類」）。実際に見つかった粗さは、再現するシナリオにして残す。
 - 曜日・時間帯に意味があるシナリオは絶対時刻（UTC）、そうでないものは相対指定（`now-30h` など）で書く。1つのシナリオの中ではどちらかにそろえる（記憶の新しさや話題の14日の自動クローズは実行時の現在時刻で決まるので、それらの日時は相対指定にする）。
 

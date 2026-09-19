@@ -15,10 +15,26 @@
 | `key` | string | 識別子。ファイル名（拡張子なし）と同じ値 |
 | `name` | string | キャラクター名 |
 | `personality` | string | 性格 |
-| `speechStyle` | string | 話し方の説明 |
-| `relationship` | string | プレイヤーとの関係性 |
+| `speechStyle` | string | 段階によらない話し方（口ぐせ・テンションなど）。丁寧語かくだけた口調かなど、関係によって変わる部分は `relationshipStages` に書く |
+| `relationship` | string | 段階によらない、プレイヤーとの関係の前提（例: 「配信者とリスナー」）。ゆいの値は後で見直す（`.notes` の F-030） |
 | `background` | string | キャラクター固有の設定（年齢・所属・境遇など）。5つのプロンプトすべてに渡る |
-| `speechExamples` | `{ player, reply }[]` | 口調の例文（few-shot）。`dialogueGenerator` のプロンプトにだけ渡る。読み込み時に先頭5件までに切り詰める |
+| `speechExamples` | `{ player, reply }[]` | 口調の例文（few-shot）。`dialogueGenerator` のプロンプトにだけ渡る。読み込み時に先頭5件までに切り詰める。今の段階に例文が無いときだけ使う |
+| `initialPerception` | `Perception`（6軸、1〜100の整数） | 状態レコードが無い（初めての）ときの関係値（`perception`）の初期値。最初の段階に合う低めの値にする（D-033） |
+| `relationshipStages` | 段階の配列（1つ以上） | 関係の段階（D-033）。先頭が最初の段階。段階はサーバーが決め、今の段階の内容を `dialogueGenerator` のプロンプトに入れる。各要素は下の表 |
+
+### `relationshipStages` の要素
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `key` | string | 段階の識別子（重複不可） |
+| `label` | string | 段階の名前（例: 「仲良し」）。節目の記録（重要記憶・ログ）に使い、プロンプトには入れない |
+| `description` | string | この段階の関係と距離感 |
+| `speechStyle` | string | この段階の話し方（丁寧語かくだけた口調か、話題の広さなど） |
+| `speechExamples` | `{ player, reply }[]` | この段階の口調の例文。省略・空ならキャラクター共通の例文を使う。先頭5件までに切り詰める |
+| `promoteWhen` | object または null | この段階に上がる条件。先頭の段階は `null`。`minConversationDays`（発言した日数）・`minConversationCount`（発言の回数）・`minPerception`（関係値の下限。書いた軸だけを見る）をすべて満たすと上がる |
+
+- 段階が下がる・戻る決まり（60日話さないと1段階下がり、そのあと5回の発言で戻る）は、キャラクターによらないサーバーの定数（`src/lib/relationship.ts`）。
+- 段階ごとの例文には、段階が変わったことを告げるセリフ（「仲良くなったね」など）を入れない（節目はプレイヤーに伝えない方針）。設定に無い具体的な事実（趣味など）や、決めていない呼び方も入れない（例文の内容が設定として定着しやすいため）。
 
 ## 例文を書くときの注意
 
