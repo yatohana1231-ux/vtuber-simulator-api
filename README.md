@@ -515,7 +515,7 @@ erDiagram
 
 ### テスターのキャラクターのテーブル
 
-2026-09-19 に追加（`.notes/tester-character-ownership-roadmap.md`）。どのテスターがどのキャラクターを持っているかを記録する。
+2026-09-19 に追加（`.notes/done/tester-character-ownership-roadmap.md`）。どのテスターがどのキャラクターを持っているかを記録する。
 
 - テーブル名: `v-simu-tester-characters-{stage}`（CDK が作る。環境変数 `TESTER_CHARACTERS_TABLE`）
 - キー: PK `tester_id`（テスターの ID）/ SK `character_id`（サーバーが発番した UUID）
@@ -699,11 +699,12 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 - **資格情報:** テスターごとに ID とパスワードを発行し、KeyValueStore（`vtuber-simu-testers-{stage}`）に `ID → salt:sha256(salt + ":" + パスワード)` を登録する。登録・削除・一覧は `scripts/manage-testers.ts`（`npx tsx scripts/manage-testers.ts add <ID>` など。`scripts/README.md`）。反映に1分ほどかかることがある（2026-09-19 の確認では約45秒。反映前は正しい資格情報でも 401 になる）。ID に `:` は使えない。
 - **API キー:** 4つの POST と `/characters` の GET・POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
 - **API キーの作り直し:** CloudFormation の動的参照はテンプレートの文字列が変わらないと再解決されないため、Secrets Manager の値を変えるだけでは API キー・CloudFront のヘッダーに反映されない。作り直すときは `infra/cdk.json` の `context.apiKeyVersion.<stage>` を1つ上げて `develop` に push する（`ApiEntrance` がシークレット・API キーの Construct ID・リソース名に版番号を含めるため、新しいシークレット・API キーが作られる）。デプロイ後、古いシークレット・古い API キーは CloudFormation が削除する（古いキーはその時点で使えなくなる）。版1は導入前と同じ ID・名前（`ApiKeySecret`・`ApiKey`、名前は版番号なし）のまま。
-- **ログの保持期間:** 4つの Lambda のロググループの保持期間は30日（`infra/lib/vtuber-simulator-stack.ts` の `logRetention`）。それ以前はログが無期限に残る設定だった（2026-09-19 に修正、`.notes/tester-character-ownership-roadmap.md` 検討事項7）。あわせて、共通処理（`handleApiRequest`）のログ出力を、イベント全体ではなく `httpMethod`・`path`・`requestId`・`body` のみの要約に変更した（`headers`・`multiValueHeaders` には CloudFront が付けた `x-api-key`・`x-tester-id` などの秘密が含まれるため）。
+- **ログの保持期間:** 4つの Lambda のロググループの保持期間は30日（`infra/lib/vtuber-simulator-stack.ts` の `logRetention`）。それ以前はログが無期限に残る設定だった（2026-09-19 に修正、`.notes/done/tester-character-ownership-roadmap.md` 検討事項7）。あわせて、共通処理（`handleApiRequest`）のログ出力を、イベント全体ではなく `httpMethod`・`path`・`requestId`・`body` のみの要約に変更した（`headers`・`multiValueHeaders` には CloudFront が付けた `x-api-key`・`x-tester-id` などの秘密が含まれるため）。
 - **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
 - **料金の監視:** AWS Budgets の予算アラートは CDK では作らない（通知先のメールアドレスをリポジトリに置かないため）。AWS コンソールの「Billing and Cost Management → Budgets」で、月額の予算とメールの通知を手動で設定する。
 - **テスターの ID の受け渡し:** CloudFront Function は、資格情報を確かめたあと、その ID を UTF-8 の base64url にして `x-tester-id` ヘッダーで API Gateway に渡す。クライアントが送った `x-tester-id` は先に消す。Lambda は `src/lib/testerId.ts` の `getTesterIdFromEvent` で取り出す。
 - **キャラクターの持ち主の確認:** 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が `"true"` のとき（`infra/cdk.json` の `context.enforceCharacterOwnership.<stage>`。stg は 2026-09-19 に `true` にした）、4つのエンドポイントは、テスターがその `characterId` の持ち主であることを確かめる（`src/lib/apiHandler.ts`）。`x-tester-id` が無い・持ち主でない・存在しない `characterId` は `403 { "error": "forbidden" }`。登録されている `packageId` とリクエストの `packageId` が違えば 400、省略されていれば登録されている `packageId` を使う（`characterId` とパッケージの対応の検証。F-010）。
+- **信頼の前提:** `x-tester-id` を信頼できるのは、API キー（`x-api-key`）が API 用の CloudFront と Secrets Manager の中にしか無いから。API キーを持つ者（Secrets Manager を読める AWS の権限を持つ者）は、API Gateway を直接呼んで任意の `x-tester-id` を名乗れる（2026-09-19 の確認で 200 になった）。API キーを画面・ログ・リポジトリに出さないこと（ログからは D-034 で除いた）。
 - 構成は `infra/lib/api-entrance.ts`、関数の仕様は `infra/functions/README.md`。
 
 ### エラーレスポンス（全エンドポイント共通）

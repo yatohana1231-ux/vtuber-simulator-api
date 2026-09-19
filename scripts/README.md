@@ -7,7 +7,7 @@
 | `copy-content.mjs` | `content/` を `dist/content/` にコピーする（README は除く）。`npm run build`（`build:content`）から実行される |
 | `test-runner.ts` | 各機能の `run*` を実際の AWS（Bedrock＋stg の DynamoDB）に対して直接呼ぶ CLI。`--package <id>` でパッケージを指定する。`npx tsx scripts/test-runner.ts --help` |
 | `clear-tables.mjs` | stg の DynamoDB テーブルを全削除する。会話ログも含めて消えるため注意 |
-| `manage-testers.ts` | API 専用 CloudFront（`.notes/done/api-access-control-roadmap.md`）が照合するテスターの資格情報を CloudFront KeyValueStore に登録・削除・一覧する CLI。`npm run testers:add` / `testers:remove` / `testers:list` から呼べる。既存の `characterId` をテスターに割り当てる・一覧する・外す（`testers:assign` / `testers:characters` / `testers:unassign`、`.notes/tester-character-ownership-roadmap.md` 検討事項1）も持つ。下の「`manage-testers.ts`」節を参照 |
+| `manage-testers.ts` | API 専用 CloudFront（`.notes/done/api-access-control-roadmap.md`）が照合するテスターの資格情報を CloudFront KeyValueStore に登録・削除・一覧する CLI。`npm run testers:add` / `testers:remove` / `testers:list` から呼べる。既存の `characterId` をテスターに割り当てる・一覧する・外す（`testers:assign` / `testers:characters` / `testers:unassign`、`.notes/done/tester-character-ownership-roadmap.md` 検討事項1）も持つ。下の「`manage-testers.ts`」節を参照 |
 
 ## 注意
 
@@ -16,7 +16,7 @@
 
 ## `manage-testers.ts`
 
-API 専用 CloudFront の viewer request で動く CloudFront Function（`infra/functions/api-auth.js`）が照合する、テスターの ID・パスワードを CloudFront KeyValueStore に登録・削除・一覧するローカル実行用のスクリプト。あわせて、既存の `characterId`（ブラウザ側で作られたもの）をテスターに割り当てる・一覧する・外すコマンドも持つ（`.notes/tester-character-ownership-roadmap.md` 検討事項1・方針2）。**このスクリプト自身は AWS への読み取り操作（`describe-key-value-store`/`describe-stacks`/`list-keys`/`query`）に加え、`add`/`remove`/`assign`/`unassign` では変更操作（`put-key`/`delete-key`/`put-item`/`delete-item`）を実行する。**KeyValueStore を持つスタック（`ApiEntrance` Construct、`.notes/done/api-access-control-roadmap.md` フェーズ3）、および TesterCharactersTable を持つスタック（`.notes/tester-character-ownership-roadmap.md` フェーズ4）がデプロイ済みであることが前提。
+API 専用 CloudFront の viewer request で動く CloudFront Function（`infra/functions/api-auth.js`）が照合する、テスターの ID・パスワードを CloudFront KeyValueStore に登録・削除・一覧するローカル実行用のスクリプト。あわせて、既存の `characterId`（ブラウザ側で作られたもの）をテスターに割り当てる・一覧する・外すコマンドも持つ（`.notes/done/tester-character-ownership-roadmap.md` 検討事項1・方針2）。**このスクリプト自身は AWS への読み取り操作（`describe-key-value-store`/`describe-stacks`/`list-keys`/`query`）に加え、`add`/`remove`/`assign`/`unassign` では変更操作（`put-key`/`delete-key`/`put-item`/`delete-item`）を実行する。**KeyValueStore を持つスタック（`ApiEntrance` Construct、`.notes/done/api-access-control-roadmap.md` フェーズ3）、および TesterCharactersTable を持つスタック（`.notes/done/tester-character-ownership-roadmap.md` フェーズ4）がデプロイ済みであることが前提。
 
 ### 使い方（資格情報: add/remove/list）
 
@@ -49,7 +49,7 @@ npx tsx scripts/manage-testers.ts --help
 
 ### 使い方（キャラクターの割り当て: assign/characters/unassign）
 
-ブラウザ側で既に作られている `characterId`（サーバーが `POST /characters` で発番したもの。`.notes/tester-character-ownership-roadmap.md`）を、テスターの持ち物として DynamoDB の TesterCharactersTable に登録する。テスターの資格情報（`add`）とは別の操作で、キャラクターのデータ（会話ログ・記憶など）自体はこのコマンドでは作らない・消さない。
+ブラウザ側で既に作られている `characterId`（サーバーが `POST /characters` で発番したもの。`.notes/done/tester-character-ownership-roadmap.md`）を、テスターの持ち物として DynamoDB の TesterCharactersTable に登録する。テスターの資格情報（`add`）とは別の操作で、キャラクターのデータ（会話ログ・記憶など）自体はこのコマンドでは作らない・消さない。
 
 ```bash
 npm run testers:assign -- <testerId> <characterId>

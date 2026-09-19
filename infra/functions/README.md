@@ -17,7 +17,7 @@ viewer request イベントに紐付ける CloudFront Function（ランタイム
 
 ### `x-tester-id` ヘッダー（テスターの ID の受け渡し）
 
-`.notes/tester-character-ownership-roadmap.md` の「API の契約」に基づく。API 専用 CloudFront は API キー（CloudFront しか持たない）を付けて API Gateway を呼ぶため、`x-tester-id` はこの関数が付けたものしか API Gateway には届かない。
+`.notes/done/tester-character-ownership-roadmap.md` の「API の契約」に基づく。API 専用 CloudFront は API キー（CloudFront しか持たない）を付けて API Gateway を呼ぶため、`x-tester-id` はこの関数が付けたものしか API Gateway には届かない。
 
 - **付けるタイミング:** Basic 認証の資格情報の照合に成功したリクエストにのみ、`Authorization` を削除するのと同時に付ける。`OPTIONS`・401 応答には付かない。
 - **符号化:** 照合した ID（UTF-8 文字列）を base64url（パディングなし。`+` → `-`、`/` → `_`、末尾の `=` を除く）にした文字列を値にする。標準の `Buffer.from(str, "utf8").toString("base64")` を作ったうえで、上記の置き換え・除去を自前のループで行っている（正規表現・`Buffer` の `"base64url"` エンコーディングは使わない）。理由: cloudfront-js-2.0 で `Buffer.from(str, "base64url")`/`toString("base64url")` が使えるかはフェーズ1で確認できておらず（確認できたのは `"base64"` のみ。[`api-access-control-roadmap.md`](../../../.notes/done/api-access-control-roadmap.md) の「フェーズ1の確認結果」参照）、不安があるため自前実装にした。

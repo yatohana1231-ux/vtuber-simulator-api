@@ -1,6 +1,6 @@
 # testerCharacters
 
-テスターごとのキャラクターの一覧・作成（`GET`/`POST /characters`）。`.notes/tester-character-ownership-roadmap.md` のフェーズ3b。
+テスターごとのキャラクターの一覧・作成（`GET`/`POST /characters`）。`.notes/done/tester-character-ownership-roadmap.md` のフェーズ3b。
 
 | パス | 内容 |
 |---|---|
