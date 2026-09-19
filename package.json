@@ -9,7 +9,10 @@
     "build:watch": "npm run build:content && npm run build:bundle -- --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ai": "node test/ai-response/run.mjs"
+    "test:ai": "node test/ai-response/run.mjs",
+    "testers:add": "tsx scripts/manage-testers.ts add",
+    "testers:remove": "tsx scripts/manage-testers.ts remove",
+    "testers:list": "tsx scripts/manage-testers.ts list"
   },
   "engines": {
     "node": ">=24"
@@ -24,6 +27,7 @@
     "@types/mustache": "^4.2.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.28.2",
+    "tsx": "^4.23.13",
     "typescript": "^5.4.0",
     "vitest": "^5.0.1"
   }

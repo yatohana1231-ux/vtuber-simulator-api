@@ -660,7 +660,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 ### アクセス制限
 
-2026-09-19 に追加（`.notes/api-access-control-roadmap.md`、D-025・D-027）。ブラウザのデモ（`front-web`）を第三者に公開するため、API の入口を API 専用の CloudFront に絞っている。
+2026-09-19 に追加（`.notes/done/api-access-control-roadmap.md`、D-025・D-027）。ブラウザのデモ（`front-web`）を第三者に公開するため、API の入口を API 専用の CloudFront に絞っている。
 
 ```
 クライアント ──(Authorization: Basic)──▶ CloudFront（API 用）──(x-api-key)──▶ API Gateway ──▶ Lambda

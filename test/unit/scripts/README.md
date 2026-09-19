@@ -1,6 +1,6 @@
 # api/test/unit/scripts
 
-`scripts/manage-testers.ts`（API 専用 CloudFront が照合するテスターの資格情報を CloudFront KeyValueStore に登録・削除・一覧するローカル用スクリプト。`.notes/api-access-control-roadmap.md` フェーズ4）の単体テスト。対象の概要・使い方は [`../../../scripts/README.md`](../../../scripts/README.md) を参照。
+`scripts/manage-testers.ts`（API 専用 CloudFront が照合するテスターの資格情報を CloudFront KeyValueStore に登録・削除・一覧するローカル用スクリプト。`.notes/done/api-access-control-roadmap.md` フェーズ4）の単体テスト。対象の概要・使い方は [`../../../scripts/README.md`](../../../scripts/README.md) を参照。
 
 | テストファイル | 対象 | 内容 |
 |---|---|---|

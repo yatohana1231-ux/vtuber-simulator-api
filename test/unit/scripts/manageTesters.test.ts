@@ -5,6 +5,7 @@ import {
   validatePassword,
   createStoredValue,
   generateSalt,
+  generatePassword,
   parseArgs,
   readLineFromStdin,
   MAX_TESTER_ID_BYTES,
@@ -83,6 +84,24 @@ describe("createStoredValue", () => {
   });
 });
 
+describe("generatePassword", () => {
+  it("validatePassword を満たす", () => {
+    expect(validatePassword(generatePassword())).toBeNull();
+  });
+
+  it("20文字・base64urlの文字（英数字・'-'・'_'）だけである", () => {
+    const password = generatePassword();
+    expect(password).toHaveLength(20);
+    expect(password).toMatch(/^[A-Za-z0-9_-]{20}$/);
+  });
+
+  it("呼ぶたびに違う値になる", () => {
+    const first = generatePassword();
+    const second = generatePassword();
+    expect(first).not.toBe(second);
+  });
+});
+
 describe("parseArgs", () => {
   it("add <id> → command/idが読み取れ、stageは既定でstg", () => {
     const parsed = parseArgs(["add", "tester1"]);
@@ -134,6 +153,24 @@ describe("parseArgs", () => {
 
   it("--stage に値が無い → 例外", () => {
     expect(() => parseArgs(["list", "--stage"])).toThrow();
+  });
+
+  it("add --generate → generateがtrueになる", () => {
+    const parsed = parseArgs(["add", "tester1", "--generate"]);
+    expect(parsed.generate).toBe(true);
+  });
+
+  it("--generate を指定しない → generateはfalse", () => {
+    const parsed = parseArgs(["add", "tester1"]);
+    expect(parsed.generate).toBe(false);
+  });
+
+  it("remove --generate → 例外（add でのみ有効）", () => {
+    expect(() => parseArgs(["remove", "tester1", "--generate"])).toThrow();
+  });
+
+  it("list --generate → 例外（add でのみ有効）", () => {
+    expect(() => parseArgs(["list", "--generate"])).toThrow();
   });
 });
 

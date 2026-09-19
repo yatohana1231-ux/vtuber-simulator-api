@@ -1,6 +1,6 @@
 # api/infra/functions
 
-API 専用 CloudFront（`api-access-control-roadmap.md` フェーズ3で構築予定）に組み込む CloudFront Function のコードを置くフォルダ。単体テストは [`../../test/unit/infra/README.md`](../../test/unit/infra/README.md) を参照。
+API 専用 CloudFront（`infra/lib/api-entrance.ts`。`.notes/done/api-access-control-roadmap.md`、2026-09-19 に stg にデプロイ済み）に組み込む CloudFront Function のコードを置くフォルダ。単体テストは [`../../test/unit/infra/README.md`](../../test/unit/infra/README.md) を参照。
 
 ## `api-auth.js`
 
@@ -11,7 +11,7 @@ viewer request イベントに紐付ける CloudFront Function（ランタイム
 1. `OPTIONS`（CORS のプリフライト）は資格情報なしでそのまま通す。
 2. `authorization` ヘッダーが `Basic <base64(id:password)>` の形でなければ 401。base64 をデコードし、最初の `:` で ID とパスワードに分ける（パスワードに `:` が含まれていてもよい）。ID・パスワードのどちらかが空でも 401。
 3. KeyValueStore（`cf.kvs()`、1関数に1つ）から ID をキーに値を読む。キーが無い（未登録の ID）と例外になるため捕まえて 401 にする。値の形式が不正（`salt:hash` の形でない、どちらかが空）でも 401。
-4. `sha256(salt + ":" + password)` を計算し、KVS の `hash` と**全長比較の定数時間比較**（長さが違えば即 false、同じなら全文字の XOR を OR で集めて 0 かどうか）で照合する。`crypto.timingSafeEqual` は cloudfront-js-2.0 に無いための自前実装（[`api-access-control-roadmap.md`](../../../.notes/api-access-control-roadmap.md) の「フェーズ1の確認結果」参照）。一致しなければ 401。
+4. `sha256(salt + ":" + password)` を計算し、KVS の `hash` と**全長比較の定数時間比較**（長さが違えば即 false、同じなら全文字の XOR を OR で集めて 0 かどうか）で照合する。`crypto.timingSafeEqual` は cloudfront-js-2.0 に無いための自前実装（[`api-access-control-roadmap.md`](../../../.notes/done/api-access-control-roadmap.md) の「フェーズ1の確認結果」参照）。一致しなければ 401。
 5. 通れば `delete request.headers.authorization` してから `request` を返す。
 
 ### KeyValueStore の値の形式
@@ -43,6 +43,6 @@ viewer request イベントに紐付ける CloudFront Function（ランタイム
 
 ### CDK への組み込み（`../lib/api-entrance.ts`）
 
-`api-access-control-roadmap.md` フェーズ3で実装。`ApiEntrance` Construct が、このファイルをテキストとして読み込み（`fs.readFileSync`）、`__ALLOWED_ORIGINS__`（先頭コメント内の記述も含めすべて）を `props.allowedOrigins` の JSON 配列文字列に置換したうえで `cloudfront.FunctionCode.fromInline` に渡す。置換後のコードを `cloudfront.Function`（`runtime: FunctionRuntime.JS_2_0`）として作成し、`keyValueStore` に `cloudfront.KeyValueStore`（名前 `vtuber-simu-testers-${stageName}`。テスター登録スクリプトは次のフェーズ4で実装）を関連付ける。関数は API 専用 `cloudfront.Distribution` の `defaultBehavior.functionAssociations`（`eventType: FunctionEventType.VIEWER_REQUEST`）に紐付け、レスポンスヘッダーポリシー（CORS、`originOverride: true`）と併用する。
+`.notes/done/api-access-control-roadmap.md` のフェーズ3で実装。`ApiEntrance` Construct が、このファイルをテキストとして読み込み（`fs.readFileSync`）、`__ALLOWED_ORIGINS__`（先頭コメント内の記述も含めすべて）を `props.allowedOrigins` の JSON 配列文字列に置換したうえで `cloudfront.FunctionCode.fromInline` に渡す。置換後のコードを `cloudfront.Function`（`runtime: FunctionRuntime.JS_2_0`）として作成し、`keyValueStore` に `cloudfront.KeyValueStore`（名前 `vtuber-simu-testers-${stageName}`。テスター登録スクリプトは次のフェーズ4で実装）を関連付ける。関数は API 専用 `cloudfront.Distribution` の `defaultBehavior.functionAssociations`（`eventType: FunctionEventType.VIEWER_REQUEST`）に紐付け、レスポンスヘッダーポリシー（CORS、`originOverride: true`）と併用する。
 
 `ApiEntrance` はほかに、API キーの値を保持する Secrets Manager のシークレット（`generateSecretString`、英数字32文字）、API Gateway の使用量プラン（スロットル・日次クォータ）と API キー、CloudFront のオリジンへのカスタムヘッダー `x-api-key`（シークレットの動的参照）も持つ。`../lib/vtuber-simulator-stack.ts` 側は、4つの POST に `apiKeyRequired: true` を付け、`defaultCorsPreflightOptions.allowOrigins` を `cdk.json` の `context.corsAllowedOrigins[stageName]` に絞ったうえで `ApiEntrance` を組み込む。CDK のアサーションテストは `../test/api-entrance.test.ts`（`npm test`。事前に `api/` で `npm run build` して `api/dist/` を作っておく必要がある。Lambda のコードアセットが無いと synth できないため）。

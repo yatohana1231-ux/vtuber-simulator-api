@@ -5,13 +5,23 @@
  *
  * `.notes/api-access-control-roadmap.md` フェーズ4。
  *
- * 使い方:
+ * 使い方（`api/` 配下で npm scripts 経由。`--` の後がこのスクリプトへの引数）:
+ *   npm run testers:add -- <id> [options]
+ *   npm run testers:add -- <id> --generate [options]
+ *   npm run testers:remove -- <id> [options]
+ *   npm run testers:list -- [options]
+ *   npm run testers:list -- --help
+ *
+ *   直接 tsx を呼ぶ場合:
  *   npx tsx scripts/manage-testers.ts add <id> [options]
  *   npx tsx scripts/manage-testers.ts remove <id> [options]
  *   npx tsx scripts/manage-testers.ts list [options]
  *   npx tsx scripts/manage-testers.ts --help
  *
  * オプション:
+ *   --generate         （add のみ）パスワードを対話入力させず、自動生成する。
+ *                       登録に成功した場合のみ、生成したパスワードを標準出力に
+ *                       1回だけ表示する（ファイル・ログには書かない）。
  *   --stage <name>     ステージ名（既定: stg）。現時点ではスタック名は固定
  *                       （`VtuberSimulatorStack`）のため、--kvs-arn 省略時の
  *                       解決には使っていない（将来ステージごとにスタックを
@@ -28,8 +38,12 @@
  *
  * パスワードの扱い:
  *   - コマンドライン引数では受け取らない（シェルの履歴に残るため）。
- *   - TTY のときはエコーを切って2回入力させ、一致を確認する。
- *   - パイプ経由の標準入力（TTY でない）のときは1行読み取る（確認なし）。
+ *   - --generate を付けない場合、TTY のときはエコーを切って2回入力させ、一致を
+ *     確認する。パイプ経由の標準入力（TTY でない）のときは1行読み取る（確認なし）。
+ *   - --generate を付けた場合、`crypto.randomBytes` から作った強いパスワード
+ *     （base64url で20文字）を自動生成する。登録に成功したときだけ、標準出力に
+ *     1回だけ表示するので、その場でテスターに安全な方法（対面・別経路のチャット等）
+ *     で伝えること。チャットの共有ログなどに貼らないこと。
  *   - パスワード・salt・hash・put-key のコマンドライン全体は、ログにも画面にも
  *     出力しない（AWS CLI のエラーメッセージも、値を含みうる部分は組み立て直す）。
  *
@@ -92,6 +106,18 @@ export function generateSalt(): string {
 }
 
 /**
+ * `add --generate` 用のパスワードを自動生成する。
+ * `crypto.randomBytes(15)`（15バイト = 120ビット）を base64url 化すると、
+ * 15 が3の倍数のためパディングなしでちょうど20文字になる。
+ * base64url の文字（英数字・"-"・"_"）のみで、伝達時に紛らわしい記号
+ * （"+"/"/"/"="）を含まない。呼ぶたびに乱数から異なる値になる。
+ * 生成した値は常に `validatePassword` を満たす（20 >= MIN_PASSWORD_LENGTH）。
+ */
+export function generatePassword(): string {
+  return crypto.randomBytes(15).toString("base64url");
+}
+
+/**
  * KeyValueStore に保存する値 "<salt>:<hash>" を作る。
  * `hash` は `sha256(salt + ":" + password)` の16進数文字列
  * （`infra/functions/api-auth.js` の照合ロジックと同じ規則）。
@@ -113,6 +139,7 @@ export interface ParsedArgs {
   id?: string;
   stage: string;
   kvsArn?: string;
+  generate: boolean;
 }
 
 const VALID_COMMANDS: readonly Command[] = ["add", "remove", "list"];
@@ -122,13 +149,15 @@ const VALID_COMMANDS: readonly Command[] = ["add", "remove", "list"];
  * 不正な引数（未知のコマンド・未知のオプション・値の欠落・add/remove での ID 欠落）は例外を投げる。
  */
 export function parseArgs(argv: string[]): ParsedArgs {
-  const result: ParsedArgs = { help: false, stage: "stg" };
+  const result: ParsedArgs = { help: false, stage: "stg", generate: false };
   const positionals: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
       result.help = true;
+    } else if (arg === "--generate") {
+      result.generate = true;
     } else if (arg === "--stage") {
       const value = argv[i + 1];
       if (value === undefined) {
@@ -167,6 +196,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if ((result.command === "add" || result.command === "remove") && result.id === undefined) {
     throw new Error(`${result.command} には ID を指定してください。`);
+  }
+
+  if (result.generate && result.command !== "add") {
+    throw new Error("--generate は add コマンドでのみ指定できます。");
   }
 
   return result;
@@ -389,13 +422,13 @@ async function listKeys(kvsArn: string): Promise<string[]> {
 // コマンド
 // -------------------------------------------------------
 
-async function cmdAdd(kvsArn: string, id: string): Promise<void> {
+async function cmdAdd(kvsArn: string, id: string, generate: boolean): Promise<void> {
   const idError = validateTesterId(id);
   if (idError) {
     throw new Error(idError);
   }
 
-  const password = await promptPasswordForAdd();
+  const password = generate ? generatePassword() : await promptPasswordForAdd();
   const passwordError = validatePassword(password);
   if (passwordError) {
     throw new Error(passwordError);
@@ -408,6 +441,12 @@ async function cmdAdd(kvsArn: string, id: string): Promise<void> {
   await putKey(kvsArn, id, value, etag);
 
   console.log(`登録しました: ${id}`);
+  if (generate) {
+    // 登録に成功したときだけ、ここで1回だけ表示する（ファイル・ログには書かない）。
+    console.log(
+      `パスワード（この画面にだけ表示します。テスターに安全な方法で伝えてください）: ${password}`
+    );
+  }
   console.log("反映まで1分ほどかかることがあります（2026-09-19 の確認では約45秒）。");
 }
 
@@ -437,16 +476,19 @@ async function cmdList(kvsArn: string): Promise<void> {
 }
 
 function printHelp(): void {
-  console.log(`使い方: npx tsx scripts/manage-testers.ts <command> [options]
+  console.log(`使い方: npm run testers:<add|remove|list> -- <command向け引数> [options]
+      （直接呼ぶ場合: npx tsx scripts/manage-testers.ts <command> [options]）
 
 API 専用 CloudFront が照合するテスターの資格情報を KeyValueStore に登録・削除・一覧する。
 
 コマンド:
   add <id>      テスターを登録する（既存の ID があれば上書き）。パスワードは画面に表示せず入力させる
+                （--generate を付けると自動生成し、登録成功時のみ1回だけ表示する）
   remove <id>   テスターを削除する
   list          登録済みのテスター ID を一覧する（値は表示しない）
 
 オプション:
+  --generate         （add のみ）パスワードを対話入力せず自動生成する（base64url 20文字）
   --stage <name>     ステージ名（既定: stg）
   --kvs-arn <arn>    KeyValueStore の ARN。省略時は
                      aws cloudformation describe-stacks --stack-name VtuberSimulatorStack
@@ -454,10 +496,11 @@ API 専用 CloudFront が照合するテスターの資格情報を KeyValueStor
   -h, --help         このヘルプを表示する
 
 例:
-  npx tsx scripts/manage-testers.ts add tester1
-  npx tsx scripts/manage-testers.ts remove tester1
-  npx tsx scripts/manage-testers.ts list
-  npx tsx scripts/manage-testers.ts list --kvs-arn arn:aws:cloudfront::123456789012:key-value-store/xxxxxxxx
+  npm run testers:add -- tester1
+  npm run testers:add -- tester1 --generate
+  npm run testers:remove -- tester1
+  npm run testers:list
+  npm run testers:list -- --kvs-arn arn:aws:cloudfront::123456789012:key-value-store/xxxxxxxx
 
 前提: AWS CLI v2、有効な AWS 資格情報（一時的な資格情報の場合はリージョンの STS エンドポイントが必要）。
 `);
@@ -475,7 +518,7 @@ async function main(): Promise<void> {
 
   switch (parsed.command) {
     case "add":
-      await cmdAdd(kvsArn, parsed.id!);
+      await cmdAdd(kvsArn, parsed.id!, parsed.generate);
       break;
     case "remove":
       await cmdRemove(kvsArn, parsed.id!);
