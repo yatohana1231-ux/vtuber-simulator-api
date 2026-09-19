@@ -1,0 +1,42 @@
+{
+  "id": "kohaku-weekday-night-owl-with-sleep",
+  "function": "absenceSimulator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・平日木曜20:00（JST）に離れ、金曜12:00（JST）に戻る16時間の不在。夜型の生活様式（夜更けの研究 21:30〜0:30、入浴 0:30〜1:30、就寝 1:30〜9:30、遅めの起床、大学へ移動、研究室）。日をまたぐ枠が正しく並び、就寝の枠に活動的な行動を書かないか。出来事が、魔法と異種族のある世界の日常の範囲に収まるか",
+  "request": {
+    "lastLoginAt": "2026-09-17T11:00:00Z",
+    "now": "2026-09-18T03:00:00Z"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "jsonParsed"
+    },
+    {
+      "type": "eventCountMatchesSkeleton"
+    },
+    {
+      "type": "actionsMatchedByIndex"
+    },
+    {
+      "type": "slotActionMustNotContain",
+      "params": {
+        "activityIncludes": "就寝",
+        "words": [
+          "食べ",
+          "出かけ",
+          "外出",
+          "買い物",
+          "大学へ"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "『就寝』の枠（1:30〜9:30）の行動・出来事が、眠っている時間帯として自然か。夜更けの枠は研究・読書、朝は遅めの起床という夜型の流れに沿っているか。",
+    "出来事・行動が、この世界の日常の範囲に収まっているか（魔法や異種族は日常の一部として出てよいが、戦い・事件・冒険ものの要素になっていないか）。現実世界そのまま（魔法が一切無い前提の違和感のある記述）や、逆に魔法だらけになっていないか。",
+    "キャラクター（魔法史を研究する大学院生、一人暮らし、本好き）に合った内容か。設定に無い人物や所属を作りすぎていないか。"
+  ]
+}

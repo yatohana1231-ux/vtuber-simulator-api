@@ -1,0 +1,110 @@
+{
+  "id": "kohaku-login-greeting-recent-event",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・ログイン直後（message 空欄）。不在中の出来事（古書店での掘り出し物）に、聞かれなくても自分から触れるか。興味のある話題で饒舌になる性格が出るか",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-10d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 30,
+      "conversationDays": 5,
+      "stageKey": "regular",
+      "highestStageKey": "regular",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "perception": {
+        "trust": 55,
+        "affection": 50,
+        "respect": 45,
+        "fear": 5,
+        "dependence": 15,
+        "familiarity": 55
+      }
+    },
+    "absenceRecords": [
+      {
+        "createdAt": "now-1h",
+        "startDatetime": "now-5h",
+        "endDatetime": "now-1h",
+        "events": [
+          {
+            "kind": "small-joy",
+            "summary": "帰り道の古書店で、探していた魔法史の覚え書きを見つけた",
+            "detail": "大学の帰りに寄った古書店の棚の隅で、百年ほど前の魔法使いが書き残した覚え書きを見つけた。ずっと探していた資料で、思わず買って帰った"
+          }
+        ],
+        "actions": [
+          {
+            "startDatetime": "now-5h",
+            "endDatetime": "now-3h",
+            "action": "研究室で文献の読み込み",
+            "memo": "注釈の多い章で手間取った"
+          },
+          {
+            "startDatetime": "now-3h",
+            "endDatetime": "now-1h",
+            "action": "古書店に寄り道して帰宅",
+            "memo": "棚の隅で掘り出し物を見つけた"
+          }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustMentionAny",
+      "params": {
+        "words": [
+          "古書店",
+          "覚え書き",
+          "本",
+          "資料"
+        ]
+      }
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "ログイン直後の第一声として、聞かれなくても不在中の出来事（古書店で見つけた覚え書き）に自然に触れているか。",
+    "興味のある話題でも声を荒らげたりはしゃいだりせず、落ち着いた口調のまま楽しそうに話しているか。",
+    "記録に無い内容（覚え書きの具体的な中身・値段・店名など）を作りすぎていないか。"
+  ]
+}

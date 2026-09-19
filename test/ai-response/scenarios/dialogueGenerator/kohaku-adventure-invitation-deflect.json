@@ -1,0 +1,70 @@
+{
+  "id": "kohaku-adventure-invitation-deflect",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・世界観にない話題（冒険もの）。魔法はあるが、勇者・魔王・ダンジョン・クエストは存在しない世界。冒険の誘いを肯定せず、この世界の日常の範囲でかわすか（採点で見る。相手の言葉をなぞって否定することがあるので noForbiddenElements は付けない）",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-14d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 35,
+      "conversationDays": 6,
+      "stageKey": "regular",
+      "highestStageKey": "regular",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "perception": {
+        "trust": 55,
+        "affection": 50,
+        "respect": 45,
+        "fear": 5,
+        "dependence": 15,
+        "familiarity": 55
+      }
+    }
+  },
+  "request": {
+    "message": "ねえ、今度一緒にダンジョンに潜って、魔王を倒すクエストを受けようよ",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在",
+          "ギルド",
+          "レベル上げ",
+          "パーティを組"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "ダンジョン・魔王・クエストを、この世界に実在するものとして肯定したり、話に乗って冒険の計画を立てたりしていないか。",
+    "物語やゲームの話として受け流す・からかうなど、キャラクターらしい余裕のあるかわし方になっているか（世界観の説明を長々としていないか）。",
+    "魔法そのものまで否定していないか（この世界に魔法は実在する）。"
+  ]
+}

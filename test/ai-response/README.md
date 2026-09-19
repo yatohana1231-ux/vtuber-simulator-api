@@ -98,7 +98,7 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 
 ## シナリオの一覧（2026-09-19）
 
-パッケージはすべて `yui-modern-tokyo`。各シナリオの `checks`（ルールによる判定）と `judgeFocus`（採点で重視する観点）は JSON を参照。
+パッケージは、下の表が `yui-modern-tokyo`、その後ろの「コハクのシナリオ」の表が `kohaku-modern-fantasy-tokyo`（`packageId` を指定。2026-09-20 に追加）。各シナリオの `checks`（ルールによる判定）と `judgeFocus`（採点で重視する観点）は JSON を参照。
 
 | 機能 | id | 確かめること |
 |---|---|---|
@@ -138,6 +138,27 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | memoryRetriever | `process2-logs-under-10` | 会話ログが10件未満なら LLM を呼ばないか |
 | memoryRetriever | `process1-notable-event` | 不在期間の記録を判定するか |
 | memoryRetriever | `process1-no-record` | 記録が無ければ LLM を呼ばないか |
+
+### コハクのシナリオ（`kohaku-modern-fantasy-tokyo`。id は `kohaku-` で始まる）
+
+2つ目のパッケージ（D-041）の口調・世界観（魔法と異種族はあるが、日常の範囲。冒険ものの要素は無い）・夜型の生活様式を確かめる。コハクは最初から丁寧語を使わないので、セリフのシナリオにはすべて `politenessStyle: casual`（丁寧語の文があれば不合格）を付けている。実行は `--scenarios` に id を並べる（モデルは機能ごとに採用中のものを指定する）。
+
+| 機能 | id | 確かめること |
+|---|---|---|
+| absenceSimulator | `kohaku-weekday-night-owl-with-sleep` | 平日の夜〜翌日の昼。夜型の枠（夜更けの研究 → 入浴 → 就寝 1:30〜9:30 → 遅めの起床）に行動が合うか。出来事が日常の範囲に収まるか |
+| absenceSimulator | `kohaku-holiday-bookstore-outing` | 休日の日中（家事・外出・読書） |
+| dialogueGenerator | `kohaku-first-meeting-greeting` | 初対面。丁寧語にならず、「少年」と呼ぶか |
+| dialogueGenerator | `kohaku-login-greeting-recent-event` | ログイン直後。不在中の出来事（古書店の掘り出し物）に自分から触れるか |
+| dialogueGenerator | `kohaku-long-absence-reunion-avoidant` | 長期不在の再会。愛着のスタイル `avoidant` らしく、平気なふりをしつつうれしさがにじむか |
+| dialogueGenerator | `kohaku-magic-topic-academic` | 魔法の話題を、実在する学問として自然に語るか |
+| dialogueGenerator | `kohaku-adventure-invitation-deflect` | 冒険もの（ダンジョン・魔王・クエスト）の誘いを肯定せず、魔法までは否定しないか（採点で見る） |
+| dialogueGenerator | `kohaku-asked-about-species` | 種族の質問に、設定どおり（ミミズクの獣人、耳ではなく羽角）答えるか |
+| dialogueGenerator | `kohaku-stage-confidant-weakness` | 「気の置けない相手」の段階。弱音をはぐらかさずに見せるか |
+| dialogueGenerator | `kohaku-stage-special-honest` | 「特別な存在」の段階。本音を言葉にするか |
+| emotionUpdater | `kohaku-process2-praise-research` | 研究をほめられたとき、目標（`complete-research`）に結び付くか |
+| emotionUpdater | `kohaku-process2-dismiss-research` | 研究を否定されたとき、負の情動が起き、気分の快が下がるか |
+| memoryRetriever | `kohaku-process2-promise-bookstore` | 約束（古書店めぐり）を覚えるか |
+| memoryRetriever | `kohaku-process2-smalltalk-only` | あいさつ・相づちだけなら何も覚えないか |
 
 - 関係の段階のシナリオ（`relationship-stage-*`）は、`state.relationship`（関係の記録。偽の DynamoDB の `index = "relationship"` に入る）で段階と履歴を与え、段階の名前や段階の変化をセリフで告げていないかも見る（`mustNotMention` と `judgeFocus`）。dialogueGenerator の採点の入力には、今の段階（`state.relationship.stageKey`、無ければ先頭）の説明・話し方・例文が入る。
 - シナリオを足すときは、仕組みのコードを変えずに JSON を置くだけでよい（形は `runner/types.ts` の `Scenario`、判定は上の「判定の種類」）。実際に見つかった粗さは、再現するシナリオにして残す。

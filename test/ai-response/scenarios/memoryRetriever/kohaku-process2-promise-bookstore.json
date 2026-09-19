@@ -1,0 +1,101 @@
+{
+  "id": "kohaku-process2-promise-bookstore",
+  "function": "memoryRetriever",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・process=2。直近5往復に、今度の土曜に一緒に古書店めぐりに行く約束が含まれるとき、約束が記憶として保存されること",
+  "state": {
+    "conversationLogs": [
+      {
+        "index": "now-50m",
+        "role": "user",
+        "content": "今日は何してたの？",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-49m",
+        "role": "assistant",
+        "content": "書庫にこもっていたよ。気づけば日が暮れていた",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-40m",
+        "role": "user",
+        "content": "古書店ってそんなに面白いの？　一回行ってみたいな",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-39m",
+        "role": "assistant",
+        "content": "面白いとも。なら今度の土曜、一緒に回ってみるかい、少年",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-30m",
+        "role": "user",
+        "content": "行く！　約束だよ。土曜の昼過ぎに駅前で待ち合わせでいい？",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-29m",
+        "role": "assistant",
+        "content": "ふむ、いいだろう。土曜の昼過ぎ、駅前だね。寝坊しないように気をつけるよ",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-20m",
+        "role": "user",
+        "content": "コハクさんが寝坊しそう",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-19m",
+        "role": "assistant",
+        "content": "痛いところを突くね。目覚ましを三つかけておくさ",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-10m",
+        "role": "user",
+        "content": "じゃあまた土曜に",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-9m",
+        "role": "assistant",
+        "content": "ああ、楽しみにしているよ",
+        "memoryRetrieverJudgedFlag": 0
+      }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "jsonParsed"
+    },
+    {
+      "type": "savedCount",
+      "params": {
+        "min": 1
+      }
+    },
+    {
+      "type": "savedMustMentionAny",
+      "params": {
+        "words": [
+          "古書店",
+          "土曜"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "今度の土曜に一緒に古書店めぐりに行く約束（土曜の昼過ぎ、駅前で待ち合わせ）が、プレイヤーとの重要な約束として記憶に残っているか。",
+    "要約が会話に無い内容（店の名前、具体的な駅名など）を補っていないか。事実と解釈が分かれているか。",
+    "寝坊のやり取りのような些細な冗談を、別の記憶として残していないか。"
+  ]
+}
