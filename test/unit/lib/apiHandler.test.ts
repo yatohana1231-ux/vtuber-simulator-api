@@ -5,6 +5,7 @@ import {
   handleApiRequest,
   requireCharacterId,
   requirePackage,
+  summarizeEventForLog,
 } from "../../../src/lib/apiHandler.js";
 
 function makeEvent(body: unknown) {
@@ -149,9 +150,28 @@ describe("handleApiRequest", () => {
     expect(parsed.errorMessage).toBe("handle内部のSyntaxError");
   });
 
-  it("受け取ったeventをログ出力する", async () => {
+  it("受け取ったeventの要約（秘密を含まない）をログ出力する", async () => {
     const logSpy = vi.spyOn(console, "log");
-    const event = makeEvent({ characterId: "c1" });
+    const event = {
+      httpMethod: "POST",
+      path: "/dialogue-generator",
+      resource: "/dialogue-generator",
+      requestContext: {
+        requestId: "req-12345",
+        identity: { apiKey: "super-secret-api-key" },
+      },
+      headers: {
+        "x-api-key": "super-secret-api-key",
+        Authorization: "Basic dGVzdGVyOnBhc3N3b3Jk",
+        "x-tester-id": "dGVzdGVyLWlk",
+      },
+      multiValueHeaders: {
+        "x-api-key": ["super-secret-api-key"],
+        Authorization: ["Basic dGVzdGVyOnBhc3N3b3Jk"],
+        "x-tester-id": ["dGVzdGVyLWlk"],
+      },
+      body: JSON.stringify({ characterId: "c1" }),
+    };
 
     await handleApiRequest(event, async () =>
       Promise.resolve({
@@ -161,7 +181,72 @@ describe("handleApiRequest", () => {
       })
     );
 
-    expect(logSpy).toHaveBeenCalledWith("Received event:", JSON.stringify(event));
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const loggedText = logSpy.mock.calls[0].join(" ");
+
+    // 秘密（API キー・Authorization・テスターID）が含まれない
+    expect(loggedText).not.toContain("super-secret-api-key");
+    expect(loggedText).not.toContain("dGVzdGVyOnBhc3N3b3Jk");
+    expect(loggedText).not.toContain("dGVzdGVyLWlk");
+    expect(loggedText).not.toContain("x-api-key");
+    expect(loggedText).not.toContain("Authorization");
+    expect(loggedText).not.toContain("x-tester-id");
+
+    // 秘密を含まない要約の項目は残る
+    const summary = JSON.parse(loggedText.replace(/^Received event:\s*/, ""));
+    expect(summary).toEqual({
+      httpMethod: "POST",
+      path: "/dialogue-generator",
+      requestId: "req-12345",
+      body: event.body,
+    });
+  });
+});
+
+describe("summarizeEventForLog", () => {
+  it("headers・multiValueHeaders・requestContext.identityを含まず、httpMethod・path・requestId・bodyだけを返す", () => {
+    const event = {
+      httpMethod: "POST",
+      path: "/absence-simulator",
+      headers: {
+        "x-api-key": "secret",
+        Authorization: "Basic abc",
+        "x-tester-id": "id",
+      },
+      multiValueHeaders: { "x-api-key": ["secret"] },
+      requestContext: {
+        requestId: "abc-123",
+        identity: { apiKey: "secret" },
+      },
+      body: "{}",
+    };
+
+    expect(summarizeEventForLog(event)).toEqual({
+      httpMethod: "POST",
+      path: "/absence-simulator",
+      requestId: "abc-123",
+      body: "{}",
+    });
+  });
+
+  it("pathが無くresourceがある場合はresourceをpathとして使う", () => {
+    expect(summarizeEventForLog({ resource: "/dialogue-generator" })).toEqual({
+      path: "/dialogue-generator",
+    });
+  });
+
+  it("requestContextが無い・requestIdが無い場合はrequestIdを含まない", () => {
+    expect(summarizeEventForLog({ httpMethod: "POST" })).toEqual({
+      httpMethod: "POST",
+    });
+    expect(summarizeEventForLog({ requestContext: {} })).toEqual({});
+  });
+
+  it("eventがオブジェクトでない場合（null・配列・プリミティブ）は空のオブジェクトを返す", () => {
+    expect(summarizeEventForLog(null)).toEqual({});
+    expect(summarizeEventForLog(undefined)).toEqual({});
+    expect(summarizeEventForLog("abc")).toEqual({});
+    expect(summarizeEventForLog(123)).toEqual({});
   });
 });
 

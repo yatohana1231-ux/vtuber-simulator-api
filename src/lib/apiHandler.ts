@@ -15,6 +15,46 @@ export type LambdaResponse = ReturnType<typeof createResponse>;
 /** 400 を返すための例外。メッセージがそのまま { "error": message } になる */
 export class BadRequestError extends Error {}
 
+/** ログ出力用の、イベントの要約（秘密を含まない） */
+export interface EventLogSummary {
+  httpMethod?: unknown;
+  path?: unknown;
+  requestId?: unknown;
+  body?: unknown;
+}
+
+/**
+ * イベントから、ログに出しても安全な項目だけを取り出す。
+ *
+ * API Gateway のイベントの `headers`・`multiValueHeaders`・
+ * `requestContext.identity` には、CloudFront が付けた `x-api-key`（Secrets
+ * Manager の API キーの値）や `Authorization`・`x-tester-id` が入るため、
+ * イベント全体をログに出してはならない（CLAUDE.md「ログ等への出力が必要な
+ * 場合はマスクする」）。ここでは `httpMethod`・`path`（無ければ
+ * `resource`）・`requestContext.requestId`・`body` のみを残す。
+ */
+export function summarizeEventForLog(event: unknown): EventLogSummary {
+  if (!event || typeof event !== "object") return {};
+  const ev = event as Record<string, unknown>;
+
+  const summary: EventLogSummary = {};
+
+  if ("httpMethod" in ev) summary.httpMethod = ev.httpMethod;
+
+  if ("path" in ev) summary.path = ev.path;
+  else if ("resource" in ev) summary.path = ev.resource;
+
+  const requestContext = ev.requestContext;
+  if (requestContext && typeof requestContext === "object") {
+    const requestId = (requestContext as Record<string, unknown>).requestId;
+    if (requestId !== undefined) summary.requestId = requestId;
+  }
+
+  if ("body" in ev) summary.body = ev.body;
+
+  return summary;
+}
+
 /**
  * 4本のハンドラーに共通する処理。ログ出力 → parseRequestBody → handle(body) の
  * 呼び出しを行う。handle が BadRequestError を投げたら 400、それ以外の例外は
@@ -29,7 +69,7 @@ export async function handleApiRequest(
   event: unknown,
   handle: (body: Record<string, unknown>) => Promise<LambdaResponse>
 ): Promise<LambdaResponse> {
-  console.log("Received event:", JSON.stringify(event));
+  console.log("Received event:", JSON.stringify(summarizeEventForLog(event)));
 
   try {
     let parsed: unknown;

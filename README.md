@@ -670,7 +670,9 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ```
 
 - **資格情報:** テスターごとに ID とパスワードを発行し、KeyValueStore（`vtuber-simu-testers-{stage}`）に `ID → salt:sha256(salt + ":" + パスワード)` を登録する。登録・削除・一覧は `scripts/manage-testers.ts`（`npx tsx scripts/manage-testers.ts add <ID>` など。`scripts/README.md`）。反映に1分ほどかかることがある（2026-09-19 の確認では約45秒。反映前は正しい資格情報でも 401 になる）。ID に `:` は使えない。
-- **API キー:** 4つの POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。値を変えたときは、参照しているリソースを更新するデプロイをしないと反映されない。CORS のプリフライト（`OPTIONS`）は API キー不要。
+- **API キー:** 4つの POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
+- **API キーの作り直し:** CloudFormation の動的参照はテンプレートの文字列が変わらないと再解決されないため、Secrets Manager の値を変えるだけでは API キー・CloudFront のヘッダーに反映されない。作り直すときは `infra/cdk.json` の `context.apiKeyVersion.<stage>` を1つ上げて `develop` に push する（`ApiEntrance` がシークレット・API キーの Construct ID・リソース名に版番号を含めるため、新しいシークレット・API キーが作られる）。デプロイ後、古いシークレット・古い API キーは CloudFormation が削除する（古いキーはその時点で使えなくなる）。版1は導入前と同じ ID・名前（`ApiKeySecret`・`ApiKey`、名前は版番号なし）のまま。
+- **ログの保持期間:** 4つの Lambda のロググループの保持期間は30日（`infra/lib/vtuber-simulator-stack.ts` の `logRetention`）。それ以前はログが無期限に残る設定だった（2026-09-19 に修正、`.notes/tester-character-ownership-roadmap.md` 検討事項7）。あわせて、共通処理（`handleApiRequest`）のログ出力を、イベント全体ではなく `httpMethod`・`path`・`requestId`・`body` のみの要約に変更した（`headers`・`multiValueHeaders` には CloudFront が付けた `x-api-key`・`x-tester-id` などの秘密が含まれるため）。
 - **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
 - **料金の監視:** AWS Budgets の予算アラートは CDK では作らない（通知先のメールアドレスをリポジトリに置かないため）。AWS コンソールの「Billing and Cost Management → Budgets」で、月額の予算とメールの通知を手動で設定する。
 - 構成は `infra/lib/api-entrance.ts`、関数の仕様は `infra/functions/README.md`。

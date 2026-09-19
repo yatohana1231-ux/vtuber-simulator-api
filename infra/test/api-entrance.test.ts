@@ -17,10 +17,11 @@ const STG_ALLOWED_ORIGINS = [
   "http://localhost:5173",
 ];
 
-function synthStgTemplate(): Template {
+function synthStgTemplate(apiKeyVersion?: number): Template {
   const app = new cdk.App({
     context: {
       corsAllowedOrigins: { stg: STG_ALLOWED_ORIGINS },
+      ...(apiKeyVersion !== undefined ? { apiKeyVersion: { stg: apiKeyVersion } } : {}),
     },
   });
   const stack = new VtuberSimulatorStack(app, "TestStack", {
@@ -178,6 +179,97 @@ describe("ApiEntrance / VtuberSimulatorStack のアクセス制限", () => {
       expect(headerValue).toBe(`'${STG_ALLOWED_ORIGINS[0]}'`);
       expect(headerValue).not.toBe("'*'");
     }
+  });
+});
+
+describe("apiKeyVersion（tester-character-ownership-roadmap.md 検討事項7）", () => {
+  it("context未設定（版1扱い） → 導入前と同じID・名前のシークレット・APIキーになる", () => {
+    const template = synthStgTemplate();
+
+    template.hasResourceProperties("AWS::SecretsManager::Secret", {
+      Name: "vtuber-simu-api-key-stg",
+    });
+    template.hasResourceProperties("AWS::ApiGateway::ApiKey", {
+      Name: "vtuber-simu-api-key-stg",
+    });
+
+    const secretIds = Object.keys(
+      template.findResources("AWS::SecretsManager::Secret")
+    );
+    // 版1は ID に "V<版>" が付かない（ApiEntranceApiKeySecret<hash> の形）
+    expect(secretIds.some((id) => /^ApiEntranceApiKeySecret[0-9A-F]+$/.test(id))).toBe(
+      true
+    );
+    expect(secretIds.some((id) => /ApiKeySecretV\d/.test(id))).toBe(false);
+  });
+
+  it("版2 → IDに V2、名前に -v2 が付いたシークレット・APIキーになる", () => {
+    const template = synthStgTemplate(2);
+
+    template.hasResourceProperties("AWS::SecretsManager::Secret", {
+      Name: "vtuber-simu-api-key-stg-v2",
+    });
+    template.hasResourceProperties("AWS::ApiGateway::ApiKey", {
+      Name: "vtuber-simu-api-key-stg-v2",
+    });
+
+    const secretIds = Object.keys(
+      template.findResources("AWS::SecretsManager::Secret")
+    );
+    expect(secretIds.some((id) => /^ApiEntranceApiKeySecretV2[0-9A-F]+$/.test(id))).toBe(
+      true
+    );
+  });
+
+  it("版2でも、APIキーの値とディストリビューションのカスタムヘッダーが同じ版のシークレットの動的参照になる", () => {
+    const template = synthStgTemplate(2);
+
+    const secrets = template.findResources("AWS::SecretsManager::Secret");
+    const secretLogicalId = Object.keys(secrets).find((id) =>
+      id.startsWith("ApiEntranceApiKeySecretV2")
+    );
+    expect(secretLogicalId).toBeDefined();
+
+    const apiKeys = template.findResources("AWS::ApiGateway::ApiKey");
+    const apiKeyProps = Object.values(apiKeys)[0] as any;
+    expect(apiKeyProps.Properties.Value).toEqual({
+      "Fn::Join": [
+        "",
+        [
+          "{{resolve:secretsmanager:",
+          { Ref: secretLogicalId },
+          ":SecretString:::}}",
+        ],
+      ],
+    });
+
+    const distributions = template.findResources("AWS::CloudFront::Distribution");
+    const distProps = Object.values(distributions)[0] as any;
+    const headerValue =
+      distProps.Properties.DistributionConfig.Origins[0].OriginCustomHeaders[0]
+        .HeaderValue;
+    expect(headerValue).toEqual({
+      "Fn::Join": [
+        "",
+        [
+          "{{resolve:secretsmanager:",
+          { Ref: secretLogicalId },
+          ":SecretString:::}}",
+        ],
+      ],
+    });
+  });
+});
+
+describe("Lambda ロググループの保持期間（tester-character-ownership-roadmap.md 検討事項7）", () => {
+  it("4つの Lambda に RetentionInDays: 30 の Custom::LogRetention が設定されている", () => {
+    const template = synthStgTemplate();
+
+    const retentions = template.findResources("Custom::LogRetention", {
+      Properties: { RetentionInDays: 30 },
+    });
+
+    expect(Object.keys(retentions)).toHaveLength(4);
   });
 });
 

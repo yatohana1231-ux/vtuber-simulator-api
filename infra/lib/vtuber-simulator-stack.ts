@@ -3,6 +3,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as logs from "aws-cdk-lib/aws-logs";
 import { Construct } from "constructs";
 import * as path from "path";
 import { ApiEntrance } from "./api-entrance";
@@ -124,6 +125,13 @@ export class VtuberSimulatorStack extends cdk.Stack {
       );
     }
 
+    // API キー（とシークレット）の版。未定義のステージは 1（導入前と同じ ID・名前）
+    // とみなす（tester-character-ownership-roadmap.md 検討事項7）。
+    const apiKeyVersionByStage = this.node.tryGetContext("apiKeyVersion") as
+      | Record<string, number>
+      | undefined;
+    const apiKeyVersion = apiKeyVersionByStage?.[stageName] ?? 1;
+
     // -------------------------------------------------------
     // 既存リソースをインポート
     // -------------------------------------------------------
@@ -209,6 +217,11 @@ export class VtuberSimulatorStack extends cdk.Stack {
         code: lambdaCode,
         timeout: cdk.Duration.seconds(120),
         memorySize: 512,
+        // ロググループの保持期間を30日に設定する（デフォルトは無期限。
+        // tester-character-ownership-roadmap.md 検討事項7）。ロググループは
+        // 既存のものがあるため、新規作成する logGroup プロパティではなく、
+        // 既存のロググループに保持期間を設定する logRetention を使う。
+        logRetention: logs.RetentionDays.ONE_MONTH,
         environment: {
           BEDROCK_MODEL_ID: endpoint.bedrockModelId,
           CHARACTER_MEMORY_TABLE: characterMemoryTable.tableArn,
@@ -253,6 +266,7 @@ export class VtuberSimulatorStack extends cdk.Stack {
       api,
       stageName,
       allowedOrigins,
+      apiKeyVersion,
     });
 
     // -------------------------------------------------------

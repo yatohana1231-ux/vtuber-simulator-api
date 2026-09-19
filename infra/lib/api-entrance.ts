@@ -27,6 +27,20 @@ export interface ApiEntranceProps {
   readonly stageName: string;
   /** CORS で許可するオリジン（フロントのドメイン・ローカル開発用など） */
   readonly allowedOrigins: string[];
+  /**
+   * API キー（と、その値を持つシークレット）の版。1 以上の整数。
+   *
+   * CloudFormation の動的参照（`{{resolve:secretsmanager:...}}`）は、
+   * テンプレートの文字列が変わらないと再解決されない。そのため、
+   * シークレットの値を変えるだけ（ローテーション）では API キーと
+   * CloudFront のカスタムヘッダーに反映されない。この版を上げることで
+   * Construct の ID・リソース名を変え、新しいシークレット・API キーを
+   * 作り直す（tester-character-ownership-roadmap.md 検討事項7）。
+   *
+   * 版 1 は、この仕組みを導入する前と同じ ID・名前（`ApiKeySecret`・
+   * `vtuber-simu-api-key-${stageName}`、`ApiKey`・同名）を保つ。
+   */
+  readonly apiKeyVersion: number;
 }
 
 export class ApiEntrance extends Construct {
@@ -38,14 +52,19 @@ export class ApiEntrance extends Construct {
   constructor(scope: Construct, id: string, props: ApiEntranceProps) {
     super(scope, id);
 
-    const { api, stageName, allowedOrigins } = props;
+    const { api, stageName, allowedOrigins, apiKeyVersion } = props;
+
+    // 版 1 は導入前と同じ ID・名前を保つ。版 2 以降は ID に `V<版>`、
+    // 名前に `-v<版>` を付けて、別のシークレット・API キーとして作り直す。
+    const versionIdSuffix = apiKeyVersion === 1 ? "" : `V${apiKeyVersion}`;
+    const versionNameSuffix = apiKeyVersion === 1 ? "" : `-v${apiKeyVersion}`;
 
     // -------------------------------------------------------
     // Secrets Manager: API キーの値（英数字のみ・20〜128文字の制約を満たす）
     // -------------------------------------------------------
 
-    const apiKeySecret = new secretsmanager.Secret(this, "ApiKeySecret", {
-      secretName: `vtuber-simu-api-key-${stageName}`,
+    const apiKeySecret = new secretsmanager.Secret(this, `ApiKeySecret${versionIdSuffix}`, {
+      secretName: `vtuber-simu-api-key-${stageName}${versionNameSuffix}`,
       generateSecretString: {
         passwordLength: 32,
         excludePunctuation: true,
@@ -57,8 +76,8 @@ export class ApiEntrance extends Construct {
     // API Gateway: API キー + 使用量プラン
     // -------------------------------------------------------
 
-    const apiKey = api.addApiKey("ApiKey", {
-      apiKeyName: `vtuber-simu-api-key-${stageName}`,
+    const apiKey = api.addApiKey(`ApiKey${versionIdSuffix}`, {
+      apiKeyName: `vtuber-simu-api-key-${stageName}${versionNameSuffix}`,
       value: apiKeySecret.secretValue.unsafeUnwrap(),
     });
 

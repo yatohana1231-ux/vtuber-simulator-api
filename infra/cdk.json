@@ -20,6 +20,9 @@
     "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],
     "corsAllowedOrigins": {
       "stg": ["https://d35a8wyhb727oo.cloudfront.net", "http://localhost:5173"]
+    },
+    "apiKeyVersion": {
+      "stg": 2
     }
   }
 }
