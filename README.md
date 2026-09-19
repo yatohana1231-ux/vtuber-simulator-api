@@ -160,7 +160,8 @@ graph TB
         end
     end
 
-    UNITY -->|HTTPS POST 順次呼び出し| APIGW
+    UNITY -->|HTTPS POST 順次呼び出し<br/>Authorization: Basic| CFAPI[CloudFront（API 用）<br/>資格情報の検証・x-api-key の付与]
+    CFAPI --> APIGW
     APIGW --> L1 & L3 & L4 & L5
     L1 --> CHAR_MEM
     L1 --> EVENTS
@@ -171,6 +172,8 @@ graph TB
     L5 --> CONV_LOG
     L1 & L3 & L4 & L5 -->|InvokeModel| BEDROCK
 ```
+
+API 用の CloudFront・API キー・使用量プランは「API 仕様」の「アクセス制限」を参照。ブラウザのデモ（`front-web`）も、Unity と同じくこの入口から呼ぶ。
 
 DynamoDB の権限は、`/absence-simulator` だけ実際に使う操作（キャラクター記憶テーブルの GetItem・Query・PutItem、イベントテーブルの PutItem・GSI の Query）に絞っている（D-021）。ほかの3つは CDK の `grantReadData`/`grantReadWriteData` で広めに付けたまま（`.notes/_followup.md` の F-022）。
 
@@ -533,9 +536,11 @@ erDiagram
 
 | 項目 | 値 |
 |------|------|
-| ベース URL | `https://{api-id}.execute-api.ap-northeast-1.amazonaws.com/{stage}` |
-| 認証 | なし（CORS で制御、`Access-Control-Allow-Origin: *`） |
-| タイムアウト | API Gateway: 29秒 / Lambda: 120秒 |
+| ベース URL | `https://{API 用の CloudFront のドメイン}`（スタックの出力 `ApiEntranceUrl`。パスにステージは付けない。例: `https://xxxx.cloudfront.net/dialogue-generator`）。API Gateway（`https://{api-id}.execute-api.ap-northeast-1.amazonaws.com/{stage}`）を直接呼ぶと、API キーが無いので 403 |
+| 認証 | テスターごとの ID とパスワード（`Authorization: Basic base64(ID:パスワード)`）。API 用の CloudFront で検証する（下記「アクセス制限」）。資格情報が無い・誤っているときは 401 `{"error":"unauthorized"}` |
+| CORS | ステージごとの許可先だけ（`infra/cdk.json` の `corsAllowedOrigins`。stg はブラウザのデモのドメインと `http://localhost:5173`） |
+| 利用の上限 | 全体で毎秒5リクエスト（バースト10）、1日5,000リクエスト（API Gateway の使用量プラン）。超えると 429 |
+| タイムアウト | API Gateway: 29秒 / Lambda: 120秒 / CloudFront のオリジンの応答: 30秒 |
 
 4つの独立したエンドポイントを提供する。すべて `POST`、リクエスト/レスポンスは JSON。呼び出し順序は「リクエスト処理フロー」を参照。
 
@@ -653,6 +658,23 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 **レスポンス**: `{ "reply": "え、本当ですか！？ありがとうございます！実は結構緊張してたんですけど..." }`
 
+### アクセス制限
+
+2026-09-19 に追加（`.notes/api-access-control-roadmap.md`、D-025・D-027）。ブラウザのデモ（`front-web`）を第三者に公開するため、API の入口を API 専用の CloudFront に絞っている。
+
+```
+クライアント ──(Authorization: Basic)──▶ CloudFront（API 用）──(x-api-key)──▶ API Gateway ──▶ Lambda
+                                          ├ CloudFront Function（infra/functions/api-auth.js）が資格情報を KeyValueStore と照合
+                                          ├ Authorization は API Gateway に送らない
+                                          └ CORS は許可先のオリジンだけ（レスポンスヘッダーポリシー）
+```
+
+- **資格情報:** テスターごとに ID とパスワードを発行し、KeyValueStore（`vtuber-simu-testers-{stage}`）に `ID → salt:sha256(salt + ":" + パスワード)` を登録する。登録・削除・一覧は `scripts/manage-testers.ts`（`npx tsx scripts/manage-testers.ts add <ID>` など。`scripts/README.md`）。反映に数秒かかることがある。ID に `:` は使えない。
+- **API キー:** 4つの POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。値を変えたときは、参照しているリソースを更新するデプロイをしないと反映されない。CORS のプリフライト（`OPTIONS`）は API キー不要。
+- **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
+- **料金の監視:** AWS Budgets の予算アラートは CDK では作らない（通知先のメールアドレスをリポジトリに置かないため）。AWS コンソールの「Billing and Cost Management → Budgets」で、月額の予算とメールの通知を手動で設定する。
+- 構成は `infra/lib/api-entrance.ts`、関数の仕様は `infra/functions/README.md`。
+
 ### エラーレスポンス（全エンドポイント共通）
 
 - **400** — 入力が不正な場合: `{ "error": "..." }`。チェックは次の順に行い、最初に当てはまったものを返す。
@@ -660,6 +682,9 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
   - `characterId` が未指定・文字列以外・空文字（`characterId must be a non-empty string`）
   - 各エンドポイント固有のチェック: `process` が 1,2 以外（`/emotion-updater`・`/memory-retriever`）／日時フォーマット不正／`now` が `lastLoginAt` より前（`/absence-simulator`）
   - 不明な `packageId`（`unknown packageId`）
+- **401** — 資格情報が無い・誤っている（API 用の CloudFront が返す）: `{ "error": "unauthorized" }`
+- **403** — API Gateway を直接呼んだ（API キーが無い）
+- **429** — 使用量プランの上限（スロットル・1日の上限）を超えた
 - **500** — サーバー内部エラー（Bedrock呼び出し失敗、DynamoDBエラー等）: `{ "error": "Failed to generate a response", "errorName": "...", "errorMessage": "..." }`
 
 ### フロント実装ガイド
@@ -671,6 +696,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 3. アプリ終了時の時刻を `lastLoginAt` としてローカル保存し、次回起動時に送信する
 4. ログイン時（不在3時間以上）はセリフの表示までに3回のAPI呼び出しが直列に発生する（`/memory-retriever` はセリフの表示の後）ため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
 5. 不在3時間未満の場合はどのエンドポイントも呼ばず、直前に表示していた mood/perception をそのまま維持する（固定デフォルト値を返す挙動は廃止）
+6. API は API 用の CloudFront の URL（スタックの出力 `ApiEntranceUrl`）で呼び、すべてのリクエストに `Authorization: Basic base64(ID:パスワード)` を付ける（ID・パスワードは UTF-8 で符号化）。401 が返ったら資格情報の入力に戻す。ブラウザから呼ぶ場合、オリジンが `infra/cdk.json` の `corsAllowedOrigins` に入っている必要がある
 
 ## ビルド・デプロイ
 
@@ -693,6 +719,8 @@ npm run build:content  # content/ を dist/content/ にコピー（scripts/copy-
 - `.mustache` テンプレートはテキストとしてバンドルに含まれる
 - `@aws-sdk/*` は Lambda ランタイムに含まれるため外部化
 - `content/` は `dist/content/` にコピーされ、Lambda アセット（`dist/` 全体）に同梱される。実行時は `LAMBDA_TASK_ROOT/content` から読み込む（ソースから直接実行する場合は環境変数 `CONTENT_DIR` で指定）。パッケージを追加・変更したら再デプロイが必要
+
+CDK のテスト（`infra/` で `npm test`。API 用の入口の構成を `aws-cdk-lib/assertions` で確かめる）は、CI ではまだ実行していない。
 
 `develop` ブランチへの push で stg へ自動デプロイ: `npm ci` → `npx tsc --noEmit` → `npm test` → `npm run build` → `npx cdk deploy`（詳細は [CLAUDE.md](../CLAUDE.md) のコマンド節を参照）。単体テストが失敗すると、以降のビルド・デプロイは実行されない。
 

@@ -5,6 +5,7 @@ import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import * as path from "path";
+import { ApiEntrance } from "./api-entrance";
 
 // -------------------------------------------------------
 // スタックプロパティ
@@ -111,6 +112,18 @@ export class VtuberSimulatorStack extends cdk.Stack {
 
     const { stageName } = props;
 
+    // api-access-control-roadmap.md フェーズ3: CORS はフロントのオリジンだけを許可する。
+    // ステージがコンテキストに無ければ、黙って全許可に戻さずデプロイを止める。
+    const corsAllowedOriginsByStage = this.node.tryGetContext("corsAllowedOrigins") as
+      | Record<string, string[]>
+      | undefined;
+    const allowedOrigins = corsAllowedOriginsByStage?.[stageName];
+    if (!allowedOrigins || allowedOrigins.length === 0) {
+      throw new Error(
+        `cdk.json の context.corsAllowedOrigins にステージ "${stageName}" の許可オリジンが設定されていません。`
+      );
+    }
+
     // -------------------------------------------------------
     // 既存リソースをインポート
     // -------------------------------------------------------
@@ -175,7 +188,7 @@ export class VtuberSimulatorStack extends cdk.Stack {
       restApiName: `vtuber-simu-api-${stageName}`,
       description: "VTuber Simulator API（機能別エンドポイント）",
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: allowedOrigins,
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ["Content-Type", "Authorization"],
       },
@@ -223,7 +236,7 @@ export class VtuberSimulatorStack extends cdk.Stack {
         timeout: cdk.Duration.seconds(29),
       });
       const resource = api.root.addResource(endpoint.resourcePath);
-      resource.addMethod("POST", integration);
+      resource.addMethod("POST", integration, { apiKeyRequired: true });
 
       new cdk.CfnOutput(this, `${endpoint.id}Endpoint`, {
         value: `${api.url}${endpoint.resourcePath}`,
@@ -232,12 +245,33 @@ export class VtuberSimulatorStack extends cdk.Stack {
     }
 
     // -------------------------------------------------------
+    // API 専用の CloudFront（Basic 認証・API キー付与・CORS の絞り込み）
+    // api-access-control-roadmap.md フェーズ3
+    // -------------------------------------------------------
+
+    const apiEntrance = new ApiEntrance(this, "ApiEntrance", {
+      api,
+      stageName,
+      allowedOrigins,
+    });
+
+    // -------------------------------------------------------
     // Outputs
     // -------------------------------------------------------
 
     new cdk.CfnOutput(this, "EventsTableName", {
       value: eventsTable.tableName,
       description: "Events DynamoDB Table Name",
+    });
+
+    new cdk.CfnOutput(this, "ApiEntranceUrl", {
+      value: `https://${apiEntrance.distribution.distributionDomainName}`,
+      description: "API 専用 CloudFront の URL（フロントが呼び出す唯一の入口）",
+    });
+
+    new cdk.CfnOutput(this, "TesterKeyValueStoreArn", {
+      value: apiEntrance.keyValueStore.keyValueStoreArn,
+      description: "テスターの資格情報を保持する KeyValueStore の ARN",
     });
   }
 }
