@@ -4,7 +4,7 @@
 
 ## 対象と方針
 
-4本のハンドラーはいずれも「`parseRequestBody` → 入力チェック → `loadRequestedPackage` → `run*` 用の引数へ詰め替え → `run*` 呼び出し → `createResponse`」という同じ形をしているため、確認する観点も共通にしている。
+4本のハンドラーはいずれも「`parseRequestBody` → 入力チェック → `loadRequestedPackage` → `run*` 用の引数へ詰め替え → `run*` 呼び出し → `createResponse`」という同じ形をしているため、確認する観点も共通にしている。2026-09-19 にこの共通の処理を `src/lib/apiHandler.ts` にまとめた（A-9）。このフォルダのテストは書き換えずに通しており、振る舞いが変わっていないことの確認を兼ねる。`apiHandler.ts` 自体のテストは [`../lib/README.md`](../lib/README.md) を参照。
 
 - `run*`（`../../../src/absenceSimulator/index.js` の `runAbsenceSimulator` など）は `vi.mock()` でモジュールごと差し替え、テストごとに `vi.mocked(runX).mockResolvedValue(...)` で戻り値を設定する。`vitest.config.ts` の `restoreMocks: true` により `mockResolvedValue` 等の設定はテストごとにクリアされるため、各テストファイルの `beforeEach` で既定の成功値を設定し、異常系のテストだけ個別に上書きしている。
 - `lib/packages.js` はスタブにせず、`CONTENT_DIR`（`vitest.config.ts` の `test.env`）経由で本物の `api/content/`（既定パッケージ `yui-modern-tokyo`）を読む。

@@ -19,6 +19,7 @@ import VARIABLE_TEMPLATE from "./prompts/conversation.variable.mustache";
 import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
 import { formatAbsenceRecordForPrompt } from "../lib/absenceRecordText.js";
 import { formatLocalDateTime } from "../lib/timezone.js";
+import { formatMoodForPrompt, formatPerceptionForPrompt } from "../lib/characterStateText.js";
 import type {
   AbsenceRecord,
   CharacterDefinition,
@@ -44,48 +45,6 @@ export interface DialogueGeneratorPromptInput {
   latestAbsenceRecord: AbsenceRecord | null; // 無ければセッション部は空文字にする
   now: Date;
   longTimeFlag: 0 | 1;
-}
-
-// -------------------------------------------------------
-// mood/perception のラベルマップ（プロンプト用の整形）
-//
-// emotionUpdater/index.ts にもほぼ同じ MOOD_LABELS/PERCEPTION_LABELS/toLabel/formatState が
-// 別々に存在する。片方を直すときはもう片方も確認すること。
-// -------------------------------------------------------
-
-export const MOOD_LABELS: Record<keyof Mood, string> = {
-  joy: "喜び",
-  anxiety: "不安",
-  angry: "怒り",
-  fatigue: "疲労",
-  confidence: "自信",
-  loneliness: "孤独感",
-};
-
-export const PERCEPTION_LABELS: Record<keyof Perception, string> = {
-  trust: "信頼",
-  affection: "好感",
-  respect: "尊敬",
-  fear: "恐れ",
-  dependence: "依存",
-  familiarity: "親しみ",
-};
-
-export function toLabel(value: number): string {
-  if (value <= 20) return "ほとんど感じない";
-  if (value <= 40) return "低い";
-  if (value <= 60) return "標準";
-  if (value <= 80) return "自覚している";
-  return "強く感じる";
-}
-
-export function formatState(
-  obj: Record<string, number>,
-  labels: Record<string, string>
-): string {
-  return Object.entries(obj)
-    .map(([k, v]) => `・${labels[k] ?? k}：${v}（${toLabel(v)}）`)
-    .join("\n");
 }
 
 // -------------------------------------------------------
@@ -115,14 +74,8 @@ export function buildDialogueGeneratorPromptLayers(input: DialogueGeneratorPromp
 
   const variable = Mustache.render(VARIABLE_TEMPLATE, {
     currentDatetime: formatLocalDateTime(now, timeZone),
-    moodText: formatState(
-      mood as unknown as Record<string, number>,
-      MOOD_LABELS as unknown as Record<string, string>
-    ),
-    perceptionText: formatState(
-      perception as unknown as Record<string, number>,
-      PERCEPTION_LABELS as unknown as Record<string, string>
-    ),
+    moodText: formatMoodForPrompt(mood),
+    perceptionText: formatPerceptionForPrompt(perception),
     memoriesText: formatMemoriesText(memories),
     historyText: formatHistoryText(historyLogs, character.name, timeZone),
     hasLongTimeFlag: longTimeFlag === 1,

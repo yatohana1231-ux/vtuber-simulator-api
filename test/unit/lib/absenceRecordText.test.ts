@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { formatAbsenceRecordForPrompt } from "../../../src/lib/absenceRecordText.js";
+import {
+  formatAbsenceRecordForPrompt,
+  formatAbsenceRecordAsInputText,
+} from "../../../src/lib/absenceRecordText.js";
 import type { AbsenceRecord } from "../../../src/types.js";
 
 function baseRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
@@ -250,5 +253,40 @@ describe("formatAbsenceRecordForPrompt", () => {
     expect(actionsText).toContain("1/2の時間だけ休憩した");
     expect(actionsText).toContain("on/offの切り替え");
     expect(openThreadsText).toContain("配信/雑談の話題");
+  });
+});
+
+describe("formatAbsenceRecordAsInputText", () => {
+  it("出来事・行動がある → 【不在中の出来事】（期間: …）・【不在中の行動】の形にまとめられる", () => {
+    const record = baseRecord({
+      events: [{ kind: "daily", summary: "配信の準備をした", detail: "新しい衣装のチェックをしていた" }],
+      actions: [
+        {
+          startDatetime: "2026-09-18T13:00:00.000Z",
+          endDatetime: "2026-09-18T14:00:00.000Z",
+          action: "夕食を食べた",
+          memo: "カレーライスだった",
+        },
+      ],
+    });
+
+    const inputText = formatAbsenceRecordAsInputText(record, "Asia/Tokyo");
+
+    expect(inputText).toBe(
+      "【不在中の出来事】（期間: 2026/09/18(金) 22:00 〜 2026/09/19(土) 10:00）\n" +
+        "1. 配信の準備をした\n   新しい衣装のチェックをしていた\n\n" +
+        "【不在中の行動】\n" +
+        "・2026/09/18(金) 22:00〜2026/09/18(金) 23:00 夕食を食べた（カレーライスだった）"
+    );
+  });
+
+  it("出来事・行動が0件 → それぞれ「（なし）」になる", () => {
+    const record = baseRecord({ events: [], actions: [] });
+
+    const inputText = formatAbsenceRecordAsInputText(record, "Asia/Tokyo");
+
+    expect(inputText).toBe(
+      "【不在中の出来事】（期間: 2026/09/18(金) 22:00 〜 2026/09/19(土) 10:00）\n（なし）\n\n【不在中の行動】\n（なし）"
+    );
   });
 });

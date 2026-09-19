@@ -5,7 +5,9 @@
 | テストファイル | 対象 | 内容 |
 |---|---|---|
 | `utils.test.ts` | `src/lib/utils.ts` | `parseRequestBody` / `clamp` / `createResponse` |
-| `absenceRecordText.test.ts` | `src/lib/absenceRecordText.ts` | `formatAbsenceRecordForPrompt`: 期間の表記（タイムゾーンの変換・日付またぎ）、出来事の2行形式と番号（`kind`・`threadId` は出さない）、行動の `memo` あり/なし、open の話題だけを出すこと、各項目が0件のときの「（なし）」、`/` がエスケープされないこと |
+| `apiHandler.test.ts` | `src/lib/apiHandler.ts` | `handleApiRequest`（`BadRequestError` で 400、その他の例外で 500 と `errorName`/`errorMessage`、`handle` の戻り値をそのまま返す、壊れた JSON の body は現状 500〔F-018〕、イベントのログ出力）、`requireCharacterId`（あり／未指定／空文字）、`requirePackage`（本物の `api/content/` を読む。省略時の既定パッケージ、存在しない ID で `BadRequestError`） |
+| `characterStateText.test.ts` | `src/lib/characterStateText.ts` | mood・perception それぞれで、6項目の並び順、書式（`・喜び：35（低い）`）、段階のラベルの境界値（20/21・40/41・60/61・80/81） |
+| `absenceRecordText.test.ts` | `src/lib/absenceRecordText.ts` | `formatAbsenceRecordForPrompt`: 期間の表記（タイムゾーンの変換・日付またぎ）、出来事の2行形式と番号（`kind`・`threadId` は出さない）、行動の `memo` あり/なし、open の話題だけを出すこと、各項目が0件のときの「（なし）」、`/` がエスケープされないこと。`formatAbsenceRecordAsInputText`: 出来事・行動があるときの組み立て、両方0件のときの「（なし）」 |
 | `timezone.test.ts` | `src/lib/timezone.ts` | `getLocalParts`（Asia/Tokyo での日付の繰り上がりと曜日）、`localTimeToInstant`（JST→UTC、`day` の範囲外〔月末・前月末・年末〕の繰り上がり/繰り下がり、往復変換、America/New_York の冬時間・夏時間）、`formatLocalDateTime`（曜日・ゼロ埋め・日付の繰り上がり） |
 | `random.test.ts` | `src/lib/random.ts` | `weightedPick`: 乱数の境界（0 → 先頭、1未満の最大付近 → 末尾）、重みの比に応じた区間、重み0・負の要素を選ばないこと、浮動小数の誤差時のフォールバック、空配列・重みの合計が0以下で例外 |
 | `bedrock.test.ts` | `src/lib/bedrock.ts` | `invokeModel`（`BedrockRuntimeClient.prototype.send` を `vi.spyOn` で差し替え。content の連結・trim、output なしの空文字、`ConverseCommand` の input）と `invokeModelJson`（フェンス付き／裸／説明文付き裸の JSON のパース、JSON なし・壊れた JSON での fallback）。システムプロンプトを層の配列で渡したときの `cachePoint` の位置（2層・3層、空の層、最大4つ）、`PROMPT_CACHE_ENABLED=false` で区切りなし、`invokeModelJson` でも同じ、usage のログ（無い応答でも落ちない。モデル ID を含む）、モデル ID の決まり方（`options.modelId` → 呼び出し時点の環境変数 → 既定値）、Nova では `topP` が入り Claude では入らないこと、`invokeModelJson` への `options.modelId` の受け渡し |

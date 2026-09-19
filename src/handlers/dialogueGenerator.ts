@@ -4,30 +4,25 @@
 // -------------------------------------------------------
 
 import { runDialogueGenerator } from "../dialogueGenerator/index.js";
-import { loadRequestedPackage } from "../lib/packages.js";
-import { createResponse, parseRequestBody } from "../lib/utils.js";
+import {
+  BadRequestError,
+  handleApiRequest,
+  requireCharacterId,
+  requirePackage,
+} from "../lib/apiHandler.js";
+import { createResponse } from "../lib/utils.js";
 import type { DialogueGeneratorRequest, Mood, Perception } from "../types.js";
 
-export const handler = async (event: unknown): Promise<unknown> => {
-  console.log("Received event:", JSON.stringify(event));
-
-  try {
-    const body = parseRequestBody(event);
-
-    const characterId = body.characterId as string | undefined;
-    if (!characterId) {
-      return createResponse(400, { error: "characterId is required" });
-    }
+export const handler = async (event: unknown) =>
+  handleApiRequest(event, async (body) => {
+    const characterId = requireCharacterId(body);
 
     const nowDate = body.now ? new Date(body.now as string) : new Date();
     if (isNaN(nowDate.getTime())) {
-      return createResponse(400, { error: "invalid now format" });
+      throw new BadRequestError("invalid now format");
     }
 
-    const pkg = await loadRequestedPackage(body.packageId);
-    if (!pkg) {
-      return createResponse(400, { error: "unknown packageId" });
-    }
+    const pkg = await requirePackage(body.packageId);
 
     const req: DialogueGeneratorRequest = {
       characterId,
@@ -43,12 +38,4 @@ export const handler = async (event: unknown): Promise<unknown> => {
     const reply = await runDialogueGenerator(req);
 
     return createResponse(200, { reply });
-  } catch (error) {
-    console.error(error);
-    return createResponse(500, {
-      error: "Failed to generate a response",
-      errorName: (error as Error).name,
-      errorMessage: (error as Error).message,
-    });
-  }
-};
+  });

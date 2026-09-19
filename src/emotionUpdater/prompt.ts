@@ -16,6 +16,7 @@ import Mustache from "mustache";
 import FIXED_TEMPLATE from "./prompts/emotionUpdater.fixed.mustache";
 import VARIABLE_TEMPLATE from "./prompts/emotionUpdater.variable.mustache";
 import { buildPromptContext, PROMPT_PARTIALS } from "../promptPartials/index.js";
+import { formatMoodForPrompt, formatPerceptionForPrompt } from "../lib/characterStateText.js";
 import type { CharacterDefinition, Mood, Perception, World } from "../types.js";
 
 export interface EmotionUpdaterPromptInput {
@@ -39,50 +40,11 @@ export function buildEmotionUpdaterPromptLayers(input: EmotionUpdaterPromptInput
       : "- 関係値（perception）もプレイヤーの発言に応じて適切に更新する（目安: ±1〜5）";
 
   const variable = Mustache.render(VARIABLE_TEMPLATE, {
-    moodText: formatState(currentMood as unknown as Record<string, number>, MOOD_LABELS as Record<string, string>),
-    perceptionText: formatState(
-      currentPerception as unknown as Record<string, number>,
-      PERCEPTION_LABELS as Record<string, string>
-    ),
+    moodText: formatMoodForPrompt(currentMood),
+    perceptionText: formatPerceptionForPrompt(currentPerception),
     inputText,
     perceptionRule,
   });
 
   return [fixed, variable];
-}
-
-// -------------------------------------------------------
-// ラベルマップ・整形ヘルパー
-// -------------------------------------------------------
-
-const MOOD_LABELS: Record<keyof Mood, string> = {
-  joy: "喜び",
-  anxiety: "不安",
-  angry: "怒り",
-  fatigue: "疲労",
-  confidence: "自信",
-  loneliness: "孤独感",
-};
-
-const PERCEPTION_LABELS: Record<keyof Perception, string> = {
-  trust: "信頼",
-  affection: "好感",
-  respect: "尊敬",
-  fear: "恐れ",
-  dependence: "依存",
-  familiarity: "親しみ",
-};
-
-function toLabel(value: number): string {
-  if (value <= 20) return "ほとんど感じない";
-  if (value <= 40) return "低い";
-  if (value <= 60) return "標準";
-  if (value <= 80) return "自覚している";
-  return "強く感じる";
-}
-
-function formatState(obj: Record<string, number>, labels: Record<string, string>): string {
-  return Object.entries(obj)
-    .map(([k, v]) => `・${labels[k] ?? k}：${v}（${toLabel(v)}）`)
-    .join("\n");
 }

@@ -6,6 +6,10 @@
 // 共通処理（D-022）。期間・出来事・行動・続いている話題を、世界観の
 // タイムゾーンでの表記に整形する。特定の世界観やキャラクターに
 // 依存する語は含めない。
+//
+// formatAbsenceRecordAsInputText は、emotionUpdater（process=1）・
+// memoryRetriever（process=1）が更新・判定のインプット文として使う
+// 「【不在中の出来事】…【不在中の行動】…」の組み立て（A-9）。
 // -------------------------------------------------------
 
 import type { AbsenceRecord } from "../types.js";
@@ -56,4 +60,10 @@ export function formatAbsenceRecordForPrompt(
       : openThreads.map((thread) => `・${thread.topic}`).join("\n");
 
   return { periodText, eventsText, actionsText, openThreadsText };
+}
+
+/** 不在期間の記録を、emotionUpdater（process=1）・memoryRetriever（process=1）の更新・判定用インプット文にする */
+export function formatAbsenceRecordAsInputText(record: AbsenceRecord, timeZone: string): string {
+  const { periodText, eventsText, actionsText } = formatAbsenceRecordForPrompt(record, timeZone);
+  return `【不在中の出来事】（期間: ${periodText}）\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
 }

@@ -4,20 +4,18 @@
 // -------------------------------------------------------
 
 import { runAbsenceSimulator } from "../absenceSimulator/index.js";
-import { loadRequestedPackage } from "../lib/packages.js";
-import { createResponse, parseRequestBody } from "../lib/utils.js";
+import {
+  BadRequestError,
+  handleApiRequest,
+  requireCharacterId,
+  requirePackage,
+} from "../lib/apiHandler.js";
+import { createResponse } from "../lib/utils.js";
 import type { AbsenceSimulatorRequest } from "../types.js";
 
-export const handler = async (event: unknown): Promise<unknown> => {
-  console.log("Received event:", JSON.stringify(event));
-
-  try {
-    const body = parseRequestBody(event);
-
-    const characterId = body.characterId as string | undefined;
-    if (!characterId) {
-      return createResponse(400, { error: "characterId is required" });
-    }
+export const handler = async (event: unknown) =>
+  handleApiRequest(event, async (body) => {
+    const characterId = requireCharacterId(body);
 
     const nowDate = body.now ? new Date(body.now as string) : new Date();
     const lastLoginAtDate = body.lastLoginAt
@@ -25,19 +23,14 @@ export const handler = async (event: unknown): Promise<unknown> => {
       : nowDate;
 
     if (isNaN(nowDate.getTime()) || isNaN(lastLoginAtDate.getTime())) {
-      return createResponse(400, { error: "invalid lastLoginAt or now format" });
+      throw new BadRequestError("invalid lastLoginAt or now format");
     }
 
     if (nowDate.getTime() < lastLoginAtDate.getTime()) {
-      return createResponse(400, {
-        error: "lastLoginAt must not be later than now",
-      });
+      throw new BadRequestError("lastLoginAt must not be later than now");
     }
 
-    const pkg = await loadRequestedPackage(body.packageId);
-    if (!pkg) {
-      return createResponse(400, { error: "unknown packageId" });
-    }
+    const pkg = await requirePackage(body.packageId);
 
     const req: AbsenceSimulatorRequest = {
       characterId,
@@ -51,12 +44,4 @@ export const handler = async (event: unknown): Promise<unknown> => {
     const result = await runAbsenceSimulator(req);
 
     return createResponse(200, result);
-  } catch (error) {
-    console.error(error);
-    return createResponse(500, {
-      error: "Failed to generate a response",
-      errorName: (error as Error).name,
-      errorMessage: (error as Error).message,
-    });
-  }
-};
+  });

@@ -12,7 +12,7 @@ import { randomUUID } from "crypto";
 
 import { buildMemoryRetrieverPromptLayers } from "./prompt.js";
 import { invokeModelJson } from "../lib/bedrock.js";
-import { formatAbsenceRecordForPrompt } from "../lib/absenceRecordText.js";
+import { formatAbsenceRecordAsInputText } from "../lib/absenceRecordText.js";
 import {
   getRelevantMemories,
   getLatestAbsenceRecord,
@@ -63,8 +63,7 @@ async function judgeProcess1(
     return;
   }
 
-  const { periodText, eventsText, actionsText } = formatAbsenceRecordForPrompt(record, world.timezone);
-  const inputText = `【不在中の出来事】（期間: ${periodText}）\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
+  const inputText = formatAbsenceRecordAsInputText(record, world.timezone);
 
   await runJudgement(characterId, world, character, inputText);
 }

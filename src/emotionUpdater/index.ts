@@ -6,7 +6,7 @@
 
 import { buildEmotionUpdaterPromptLayers } from "./prompt.js";
 import { invokeModelJson } from "../lib/bedrock.js";
-import { formatAbsenceRecordForPrompt } from "../lib/absenceRecordText.js";
+import { formatAbsenceRecordAsInputText } from "../lib/absenceRecordText.js";
 import {
   getCharacterState,
   getLatestAbsenceRecord,
@@ -45,8 +45,7 @@ export async function runEmotionUpdater(
       return { mood: currentMood, perception: currentPerception };
     }
 
-    const { periodText, eventsText, actionsText } = formatAbsenceRecordForPrompt(record, world.timezone);
-    inputText = `【不在中の出来事】（期間: ${periodText}）\n${eventsText}\n\n【不在中の行動】\n${actionsText}`;
+    inputText = formatAbsenceRecordAsInputText(record, world.timezone);
   } else {
     // process=2: プレイヤー発言がインプット
     inputText = `【プレイヤーの発言】\n${req.playerMessage}`;
