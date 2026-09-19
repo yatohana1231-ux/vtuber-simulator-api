@@ -95,34 +95,94 @@ describe("decayEmotions", () => {
 });
 
 describe("applyEmotionImpulses", () => {
-  it("加算 → 値が増える", () => {
+  /** 100 × (1 − (1 − e/100) × (1 − i/100))。仕様と同じ式をテスト側でも計算する */
+  function noisyOr(e: number, i: number): number {
+    return 100 * (1 - (1 - e / 100) * (1 - i / 100));
+  }
+
+  it("1件だけの加算 → e=0 のときはそのまま強さになる", () => {
+    const input = emotions({ joy: 0 });
+    const impulses: EmotionImpulse[] = [{ emotion: "joy", intensity: 20, cause: "player", summary: "" }];
+
+    const result = applyEmotionImpulses(input, impulses);
+
+    expect(result.joy).toBeCloseTo(20);
+  });
+
+  it("すでに強さがある情動への1件の加算 → 確率的な和になる（足し算にはならない）", () => {
     const input = emotions({ joy: 10 });
     const impulses: EmotionImpulse[] = [{ emotion: "joy", intensity: 20, cause: "player", summary: "" }];
 
     const result = applyEmotionImpulses(input, impulses);
 
-    expect(result.joy).toBe(30);
+    expect(result.joy).toBeCloseTo(noisyOr(10, 20));
+    expect(result.joy).toBeLessThan(30); // 足し算（30）にはならない
   });
 
-  it("100を超える加算 → 100に収める", () => {
-    const input = emotions({ joy: 90 });
-    const impulses: EmotionImpulse[] = [{ emotion: "joy", intensity: 30, cause: "player", summary: "" }];
+  it("同じ情動への複数の加算 → 確率的な和で合わさる（例: e=0 に55が2回 → 79.75）", () => {
+    const input = emotions({ joy: 0 });
+    const impulses: EmotionImpulse[] = [
+      { emotion: "joy", intensity: 55, cause: "player", summary: "a" },
+      { emotion: "joy", intensity: 55, cause: "self", summary: "b" },
+    ];
+
+    const result = applyEmotionImpulses(input, impulses);
+
+    expect(result.joy).toBeCloseTo(79.75);
+  });
+
+  it("例: e=50 に強さ50の加算 → 75", () => {
+    const input = emotions({ joy: 50 });
+    const impulses: EmotionImpulse[] = [{ emotion: "joy", intensity: 50, cause: "player", summary: "" }];
+
+    const result = applyEmotionImpulses(input, impulses);
+
+    expect(result.joy).toBeCloseTo(75);
+  });
+
+  it("複数の加算は順番によらず同じ結果になる", () => {
+    const input = emotions({ joy: 10 });
+    const impulsesA: EmotionImpulse[] = [
+      { emotion: "joy", intensity: 30, cause: "player", summary: "a" },
+      { emotion: "joy", intensity: 45, cause: "self", summary: "b" },
+      { emotion: "joy", intensity: 15, cause: "other", summary: "c" },
+    ];
+    const impulsesB = [...impulsesA].reverse();
+
+    const resultA = applyEmotionImpulses(input, impulsesA);
+    const resultB = applyEmotionImpulses(input, impulsesB);
+
+    expect(resultA.joy).toBeCloseTo(resultB.joy);
+  });
+
+  it("強さ100を超える加算が複数あっても100を超えない", () => {
+    const input = emotions({ joy: 0 });
+    const impulses: EmotionImpulse[] = [
+      { emotion: "joy", intensity: 200, cause: "player", summary: "a" },
+      { emotion: "joy", intensity: 150, cause: "self", summary: "b" },
+    ];
 
     const result = applyEmotionImpulses(input, impulses);
 
     expect(result.joy).toBe(100);
   });
 
-  it("同じ情動への複数の加算 → すべて反映される", () => {
-    const input = emotions({ joy: 0 });
-    const impulses: EmotionImpulse[] = [
-      { emotion: "joy", intensity: 10, cause: "player", summary: "a" },
-      { emotion: "joy", intensity: 15, cause: "self", summary: "b" },
-    ];
+  it("100を超える加算 → iを100扱いにした結果に収める", () => {
+    const input = emotions({ joy: 50 });
+    const impulses: EmotionImpulse[] = [{ emotion: "joy", intensity: 150, cause: "player", summary: "" }];
 
     const result = applyEmotionImpulses(input, impulses);
 
-    expect(result.joy).toBe(25);
+    expect(result.joy).toBe(100); // i=100扱いなので e に関わらず100になる
+  });
+
+  it("0の加算 → 値が変わらない", () => {
+    const input = emotions({ joy: 42 });
+    const impulses: EmotionImpulse[] = [{ emotion: "joy", intensity: 0, cause: "player", summary: "" }];
+
+    const result = applyEmotionImpulses(input, impulses);
+
+    expect(result.joy).toBeCloseTo(42);
   });
 
   it("引数のemotions/impulsesを書き換えない", () => {

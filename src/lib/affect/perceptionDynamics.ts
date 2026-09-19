@@ -19,11 +19,25 @@ import type {
   RelationshipStage,
 } from "../../types.js";
 
-/** emotionKeys に含まれる情動の強さの合計 */
-function sumIntensity(impulses: EmotionImpulse[], emotionKeys: ReadonlyArray<EmotionKey>): number {
-  return impulses
-    .filter((impulse) => emotionKeys.includes(impulse.emotion))
-    .reduce((sum, impulse) => sum + impulse.intensity, 0);
+/** 強さを 0〜100 に収める（加算の強さが 100 を超えることがあるため） */
+function clampIntensity(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+/**
+ * emotionKeys に含まれる情動のうち、いちばん強い1件の強さ（0〜100 に収めてから比べる）。
+ * 該当が無ければ 0。合計ではなく最大値にする理由: LLM が1つの発言から複数の出来事を
+ * 取り出しても、同じ情動・同じ相手への気持ちを何重にも数えないため（2026-09-19 に stg の
+ * 確認で、ほめ言葉1回で好感の寄与が +13.8 になったのを直した）。
+ */
+function maxIntensity(impulses: EmotionImpulse[], emotionKeys: ReadonlyArray<EmotionKey>): number {
+  let max = 0;
+  for (const impulse of impulses) {
+    if (!emotionKeys.includes(impulse.emotion)) continue;
+    const intensity = clampIntensity(impulse.intensity);
+    if (intensity > max) max = intensity;
+  }
+  return max;
 }
 
 /** value が 0 でなければ result[key] に入れる（0 の軸は書かない） */
@@ -71,39 +85,34 @@ export function computeMessageContribution(
 
   const playerImpulses = impulses.filter((impulse) => impulse.cause === "player");
 
-  // affection: プレイヤーが原因の正の情動の合計 − 負の情動の合計
-  // （sympathy は POSITIVE/NEGATIVE のどちらにも含まれないので数えない。
+  // affection: プレイヤーが原因の正の情動のうちいちばん強い1件 − 負の情動のうちいちばん強い1件
+  // （合計ではなく最大値にする。sympathy は POSITIVE/NEGATIVE のどちらにも含まれないので数えない。
   //  happyFor は POSITIVE_EMOTION_KEYS に含まれるので数える）
-  const positiveSum = sumIntensity(playerImpulses, POSITIVE_EMOTION_KEYS);
-  const negativeSum = sumIntensity(playerImpulses, NEGATIVE_EMOTION_KEYS);
-  setIfNonZero(result, "affection", ((positiveSum - negativeSum) / 100) * c.affectionPerPlayerCausedEmotion);
+  const positiveMax = maxIntensity(playerImpulses, POSITIVE_EMOTION_KEYS);
+  const negativeMax = maxIntensity(playerImpulses, NEGATIVE_EMOTION_KEYS);
+  setIfNonZero(result, "affection", ((positiveMax - negativeMax) / 100) * c.affectionPerPlayerCausedEmotion);
 
-  // trust: 4つの原因（応じ方2種・話題を覚えていたか・感謝）
+  // trust: 4つの原因（応じ方2種・話題を覚えていたか・感謝はいちばん強い1件）
   let trust = 0;
   if (interaction) {
     if (interaction.responseToCharacterDisclosure === "responsive") trust += c.trustResponsive;
     if (interaction.responseToCharacterDisclosure === "dismissive") trust += c.trustDismissive;
     if (interaction.rememberedPastTopic) trust += c.trustRememberedPastTopic;
   }
-  const gratitudeSum = sumIntensity(playerImpulses, ["gratitude"]);
-  trust += (gratitudeSum / 100) * c.trustPerGratitude;
+  const gratitudeMax = maxIntensity(playerImpulses, ["gratitude"]);
+  trust += (gratitudeMax / 100) * c.trustPerGratitude;
   setIfNonZero(result, "trust", trust);
 
-  // respect: プレイヤーが原因の感心
-  const admirationSum = sumIntensity(playerImpulses, ["admiration"]);
-  setIfNonZero(result, "respect", (admirationSum / 100) * c.respectPerAdmiration);
+  // respect: プレイヤーが原因の感心のうちいちばん強い1件
+  const admirationMax = maxIntensity(playerImpulses, ["admiration"]);
+  setIfNonZero(result, "respect", (admirationMax / 100) * c.respectPerAdmiration);
 
-  // fear: プレイヤーが原因の強い負の情動があれば上がる。無く、正の情動があれば少し下がる
-  const strongNegativeSum = playerImpulses
-    .filter(
-      (impulse) =>
-        (impulse.emotion === "anger" || impulse.emotion === "sadness") &&
-        impulse.intensity >= c.fearNegativeEmotionThreshold
-    )
-    .reduce((sum, impulse) => sum + impulse.intensity, 0);
+  // fear: プレイヤーが原因の怒り・悲しみのうちいちばん強い1件がしきい値以上なら上がる。
+  // 無く、正の情動があれば少し下がる
+  const negativeEmotionMax = maxIntensity(playerImpulses, ["anger", "sadness"]);
   let fear = 0;
-  if (strongNegativeSum > 0) {
-    fear = (strongNegativeSum / 100) * c.fearPerPlayerCausedNegativeEmotion;
+  if (negativeEmotionMax >= c.fearNegativeEmotionThreshold) {
+    fear = (negativeEmotionMax / 100) * c.fearPerPlayerCausedNegativeEmotion;
   } else if (playerImpulses.some((impulse) => POSITIVE_EMOTION_KEYS.includes(impulse.emotion))) {
     fear = c.fearReliefPerPositiveMessage;
   }

@@ -43,11 +43,18 @@ export function decayEmotions(
   return result;
 }
 
-/** 情動への加算を足し合わせ、0〜100 に収める。同じ情動の複数の加算はすべて反映する */
+/**
+ * 情動への加算を確率的な和（noisy-OR）で合わせる: 今の強さ e（0〜100）に強さ i の加算が来たら、
+ * 100 × (1 − (1 − e/100) × (1 − i/100))。複数の加算は順に当てる（積なので順番によらない）。
+ * i は 0〜100 に収めてから使う。LLM が1つの発言から複数の出来事を取り出しても、同じ情動を
+ * 何重にも数えないため（2026-09-19 に stg の確認で、ほめ言葉1回で情動が 100 に張り付いたのを直した）。
+ */
 export function applyEmotionImpulses(emotions: Emotions, impulses: EmotionImpulse[]): Emotions {
   const result = { ...emotions };
   for (const impulse of impulses) {
-    result[impulse.emotion] = clampIntensity(result[impulse.emotion] + impulse.intensity);
+    const current = clampIntensity(result[impulse.emotion]) / 100;
+    const intensity = clampIntensity(impulse.intensity) / 100;
+    result[impulse.emotion] = clampIntensity(100 * (1 - (1 - current) * (1 - intensity)));
   }
   return result;
 }

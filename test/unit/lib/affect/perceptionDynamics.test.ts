@@ -139,6 +139,62 @@ describe("computeMessageContribution", () => {
 
       expect(axis(result, "affection")).toBe(0);
     });
+
+    it("同じ種類の正の情動が複数件 → 合計ではなく最大の1件で決まる", () => {
+      const result = computeMessageContribution({
+        impulses: [
+          impulse({ emotion: "joy", intensity: 55, cause: "player" }),
+          impulse({ emotion: "joy", intensity: 40, cause: "player" }),
+        ],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "affection")).toBeCloseTo((55 / 100) * CONTRIBUTION.affectionPerPlayerCausedEmotion);
+    });
+
+    it("種類をまたいだ正の情動が複数件 → 合計ではなく最大の1件で決まる", () => {
+      const result = computeMessageContribution({
+        impulses: [
+          impulse({ emotion: "joy", intensity: 55, cause: "player" }),
+          impulse({ emotion: "gratitude", intensity: 60, cause: "player" }),
+          impulse({ emotion: "admiration", intensity: 45, cause: "player" }),
+        ],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "affection")).toBeCloseTo((60 / 100) * CONTRIBUTION.affectionPerPlayerCausedEmotion);
+    });
+
+    it("正と負が両方あるときは、それぞれの最大どうしの差になる", () => {
+      const result = computeMessageContribution({
+        impulses: [
+          impulse({ emotion: "joy", intensity: 55, cause: "player" }),
+          impulse({ emotion: "admiration", intensity: 40, cause: "player" }),
+          impulse({ emotion: "sadness", intensity: 30, cause: "player" }),
+          impulse({ emotion: "anger", intensity: 20, cause: "player" }),
+        ],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "affection")).toBeCloseTo(((55 - 30) / 100) * CONTRIBUTION.affectionPerPlayerCausedEmotion);
+    });
+
+    it("強さが100を超える加算があっても、100を上限にして使う", () => {
+      const result = computeMessageContribution({
+        impulses: [impulse({ emotion: "joy", intensity: 150, cause: "player" })],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "affection")).toBeCloseTo((100 / 100) * CONTRIBUTION.affectionPerPlayerCausedEmotion);
+    });
   });
 
   describe("trust", () => {
@@ -185,6 +241,31 @@ describe("computeMessageContribution", () => {
 
       expect(axis(result, "trust")).toBeCloseTo((50 / 100) * CONTRIBUTION.trustPerGratitude);
     });
+
+    it("cause: player の gratitude が複数件 → 合計ではなく最大の1件で決まる", () => {
+      const result = computeMessageContribution({
+        impulses: [
+          impulse({ emotion: "gratitude", intensity: 30, cause: "player" }),
+          impulse({ emotion: "gratitude", intensity: 55, cause: "player" }),
+        ],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "trust")).toBeCloseTo((55 / 100) * CONTRIBUTION.trustPerGratitude);
+    });
+
+    it("gratitude の強さが100を超えても、100を上限にして使う", () => {
+      const result = computeMessageContribution({
+        impulses: [impulse({ emotion: "gratitude", intensity: 140, cause: "player" })],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "trust")).toBeCloseTo((100 / 100) * CONTRIBUTION.trustPerGratitude);
+    });
   });
 
   describe("respect", () => {
@@ -208,6 +289,31 @@ describe("computeMessageContribution", () => {
       });
 
       expect(axis(result, "respect")).toBe(0);
+    });
+
+    it("cause: player の admiration が複数件 → 合計ではなく最大の1件で決まる", () => {
+      const result = computeMessageContribution({
+        impulses: [
+          impulse({ emotion: "admiration", intensity: 60, cause: "player" }),
+          impulse({ emotion: "admiration", intensity: 45, cause: "player" }),
+        ],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "respect")).toBeCloseTo((60 / 100) * CONTRIBUTION.respectPerAdmiration);
+    });
+
+    it("admiration の強さが100を超えても、100を上限にして使う", () => {
+      const result = computeMessageContribution({
+        impulses: [impulse({ emotion: "admiration", intensity: 130, cause: "player" })],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "respect")).toBeCloseTo((100 / 100) * CONTRIBUTION.respectPerAdmiration);
     });
   });
 
@@ -265,6 +371,31 @@ describe("computeMessageContribution", () => {
       });
 
       expect(axis(result, "fear")).toBeCloseTo((70 / 100) * CONTRIBUTION.fearPerPlayerCausedNegativeEmotion);
+    });
+
+    it("しきい値以上の cause: player の anger・sadness が複数件 → 合計ではなく最大の1件で決まる", () => {
+      const result = computeMessageContribution({
+        impulses: [
+          impulse({ emotion: "anger", intensity: 60, cause: "player" }),
+          impulse({ emotion: "sadness", intensity: 80, cause: "player" }),
+        ],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "fear")).toBeCloseTo((80 / 100) * CONTRIBUTION.fearPerPlayerCausedNegativeEmotion);
+    });
+
+    it("負の情動の強さが100を超えても、100を上限にして使う", () => {
+      const result = computeMessageContribution({
+        impulses: [impulse({ emotion: "anger", intensity: 130, cause: "player" })],
+        interaction: null,
+        stageIndex: 0,
+        stageCount: 1,
+      });
+
+      expect(axis(result, "fear")).toBeCloseTo((100 / 100) * CONTRIBUTION.fearPerPlayerCausedNegativeEmotion);
     });
   });
 

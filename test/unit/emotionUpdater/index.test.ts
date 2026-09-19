@@ -14,6 +14,7 @@ vi.mock("../../../src/lib/dynamo.js", () => ({
 
 import { runEmotionUpdater } from "../../../src/emotionUpdater/index.js";
 import { invokeModelJson } from "../../../src/lib/bedrock.js";
+import { DEFAULT_AFFECT_CONFIG } from "../../../src/lib/affect/affectConfig.js";
 import {
   getLatestAbsenceRecord,
   getRecentLogs,
@@ -373,6 +374,32 @@ describe("process2: 孤独感とセッションの途中経過", () => {
     const result = await runEmotionUpdater(process2Req());
 
     expect(result.perception).toEqual(stored.perception);
+  });
+});
+
+describe("回帰: 同じ発言から出来事を複数件取り出しても、情動・好感が張り付かない", () => {
+  it("cause: player・desirabilityForSelf: 2・praiseworthiness: 2 の評価が2件返っても、joyは100未満、affectionの寄与はaffectionPerPlayerCausedEmotion以下になる", async () => {
+    const stored = storedState({ pendingSession: null });
+    mockedGetStoredAffectState.mockResolvedValue({ state: stored, legacyPerception: null });
+    const praiseAppraisal = {
+      summary: "配信を見たと言われ、声もほめられた",
+      desirabilityForSelf: 2,
+      desirabilityForPlayer: 0,
+      prospect: "happened",
+      cause: "player",
+      praiseworthiness: 2,
+      relatedGoalKey: null,
+    };
+    mockedInvokeModelJson.mockResolvedValueOnce({ appraisals: [praiseAppraisal, praiseAppraisal] });
+
+    const result = await runEmotionUpdater(process2Req());
+
+    expect(result.emotions.joy).toBeLessThan(100);
+
+    const saved = mockedSaveCharacterAffectState.mock.calls[0][1] as CharacterAffectState;
+    expect(saved.pendingSession?.last.affection).toBeLessThanOrEqual(
+      DEFAULT_AFFECT_CONFIG.perception.contribution.affectionPerPlayerCausedEmotion
+    );
   });
 });
 

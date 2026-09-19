@@ -60,7 +60,7 @@
 
 - `createNeutralEmotions(): Emotions` — すべて 0。
 - `decayEmotions(emotions, elapsedHours, profile, config?): Emotions` — `値 × 0.5^(経過時間 / (半減期 × emotionHalfLifeScale))`。0.01 未満は 0。`elapsedHours` が 0 以下なら変えない。
-- `applyEmotionImpulses(emotions, impulses): Emotions` — 足して 0〜100 に収める。
+- `applyEmotionImpulses(emotions, impulses): Emotions` — 確率的な和（noisy-OR）で合わせる: 今の強さ `e`（0〜100）に強さ `i`（0〜100 に収めてから使う）の加算が来たら `100 × (1 − (1 − e/100) × (1 − i/100))`。複数の加算は順に当てる（積なので順番によらない）。足し算にしない理由: LLM が1つの発言から複数の出来事を取り出しても、同じ情動を何重にも数えないため（2026-09-19 に stg の確認で、ほめ言葉1回で情動が 100 に張り付き、好感の寄与が +13.8 になったのを直した）。
 - `getActiveEmotions(emotions, config?): Array<{ emotion: EmotionKey; intensity: number }>` — `activeThreshold` 以上を、強い順に。
 
 ### `moodDynamics.ts`
@@ -78,11 +78,11 @@
 
 ### `perceptionDynamics.ts`
 
-- `computeMessageContribution(args: { impulses: EmotionImpulse[]; interaction: InteractionLabels | null; stageIndex: number; stageCount: number }, config?): PerceptionContribution` — 発言1回ぶんの寄与（負の重みはここではかけない）。
-  - affection: `cause: player` の情動のうち、正の情動の強さの合計 − 負の情動の強さの合計、を 100 で割って `affectionPerPlayerCausedEmotion` をかける。
-  - trust: `responsive` → `trustResponsive`、`dismissive` → `trustDismissive`、`rememberedPastTopic` → `trustRememberedPastTopic`、`cause: player` の gratitude の強さ/100 × `trustPerGratitude`。
-  - respect: `cause: player` の admiration の強さ/100 × `respectPerAdmiration`。
-  - fear: `cause: player` の anger・sadness のうち強さが `fearNegativeEmotionThreshold` 以上のものの強さ/100 × `fearPerPlayerCausedNegativeEmotion`。それが無く、`cause: player` の正の情動があれば `fearReliefPerPositiveMessage`。
+- `computeMessageContribution(args: { impulses: EmotionImpulse[]; interaction: InteractionLabels | null; stageIndex: number; stageCount: number }, config?): PerceptionContribution` — 発言1回ぶんの寄与（負の重みはここではかけない）。`cause: player` の情動は、合計ではなく**情動の種類ごとに「いちばん強い1件」**（強さは 100 を上限にして使う）にまとめてから使う。理由: LLM が1つの発言から複数の出来事を取り出しても、同じ情動・同じ相手への気持ちを何重にも数えないため（2026-09-19 に stg の確認で、ほめ言葉1回で好感の寄与が +13.8 になったのを直した）。
+  - affection: `cause: player` の正の情動の中でいちばん強い1件の強さ − 負の情動の中でいちばん強い1件の強さ（種類をまたいでも最大の1つ）を 100 で割って `affectionPerPlayerCausedEmotion` をかける。どちらも無ければ 0。
+  - trust: `responsive` → `trustResponsive`、`dismissive` → `trustDismissive`、`rememberedPastTopic` → `trustRememberedPastTopic`、`cause: player` の gratitude の中でいちばん強い1件の強さ/100 × `trustPerGratitude`。
+  - respect: `cause: player` の admiration の中でいちばん強い1件の強さ/100 × `respectPerAdmiration`。
+  - fear: `cause: player` の anger・sadness の中でいちばん強い1件の強さが `fearNegativeEmotionThreshold` 以上なら、その強さ/100 × `fearPerPlayerCausedNegativeEmotion`。それが無く、`cause: player` の正の情動があれば `fearReliefPerPositiveMessage`。
   - dependence: `helpedCharacter` なら `dependenceHelped` × 段階の係数（最初の段階が `dependenceFirstStageFactor`、最後が 1）。
   - familiarity: `interaction` があれば `familiarityPerMessage` ＋ 開示のぶん（`fact`・`emotion`）。`interaction` が `null` なら 0。
 - `resolveStageBase(base: PerceptionStageBase | null, stageKey: string, perception: Perception): PerceptionStageBase` — `base` が無いか段階が違えば、今の関係値で作り直す。同じなら `base` のまま。
