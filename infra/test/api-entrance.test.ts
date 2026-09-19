@@ -265,14 +265,16 @@ describe("apiKeyVersion（tester-character-ownership-roadmap.md 検討事項7）
 });
 
 describe("Lambda ロググループの保持期間（tester-character-ownership-roadmap.md 検討事項7）", () => {
-  it("5つの Lambda（既存4つ + テスターのキャラクター）に RetentionInDays: 30 の Custom::LogRetention が設定されている", () => {
+  it("6つの Lambda（既存4つ + テスターのキャラクター + パッケージ一覧）に RetentionInDays: 30 の Custom::LogRetention が設定されている", () => {
     const template = synthStgTemplate();
 
     const retentions = template.findResources("Custom::LogRetention", {
       Properties: { RetentionInDays: 30 },
     });
 
-    expect(Object.keys(retentions)).toHaveLength(5);
+    // パッケージ一覧 Lambda は package-selection-roadmap.md フェーズ1c で追加
+    // （ステージによらず常に作られる）
+    expect(Object.keys(retentions)).toHaveLength(6);
   });
 });
 

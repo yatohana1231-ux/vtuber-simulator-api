@@ -352,6 +352,43 @@ export class VtuberSimulatorStack extends cdk.Stack {
     });
 
     // -------------------------------------------------------
+    // 新規: パッケージ（キャラクター×世界観）一覧 Lambda（GET /packages）
+    //
+    // package-selection-roadmap.md フェーズ1c。フロントがサインイン後に一覧を
+    // 取得し、キャラクターの新規作成時のプロファイル選択・表示用の文言に使う。
+    // TesterCharactersLambda と同じく ENDPOINTS のループには含めない（Bedrock を
+    // 呼ばない、DynamoDB も一切使わない点が異なるため）。同梱の content/packages/
+    // を読むだけの処理のため、テーブル・Bedrock の権限はどちらも付けない（最小権限）。
+    // デバッグ専用の Lambda と異なり、ステージによらず常に作る（デバッグ用途では
+    // なく、本番でもフロントが使う機能のため enableDebugEndpoints の条件は付けない）。
+    // -------------------------------------------------------
+
+    const packageCatalogFn = new lambda.Function(this, "PackageCatalogLambda", {
+      functionName: `vtuber-simu-package-catalog-${stageName}`,
+      runtime: lambda.Runtime.NODEJS_24_X,
+      handler: "packageCatalog.handler",
+      code: lambdaCode,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 256,
+      // 他の Lambda と同じ理由で logRetention を使う（TesterCharactersLambda のコメント参照）
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      environment: {
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
+      },
+    });
+
+    const packageCatalogIntegration = new apigateway.LambdaIntegration(packageCatalogFn, {
+      timeout: cdk.Duration.seconds(29),
+    });
+    const packagesResource = api.root.addResource("packages");
+    packagesResource.addMethod("GET", packageCatalogIntegration, { apiKeyRequired: true });
+
+    new cdk.CfnOutput(this, "PackageCatalogEndpoint", {
+      value: `${api.url}packages`,
+      description: "パッケージ（キャラクター×世界観）の一覧 API Endpoint",
+    });
+
+    // -------------------------------------------------------
     // 新規: デバッグ専用 Lambda（POST /debug-character-state）
     //
     // mood/perception の値を直接指定して状態レコードを書き換える、デバッグ用の

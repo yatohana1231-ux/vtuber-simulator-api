@@ -1,6 +1,8 @@
 {
   "id": "yui-modern-tokyo",
   "displayName": "ゆい（現代東京）",
+  "description": "都内の高校に通う2年生で、デビューしたての VTuber。明るく前向きだけど、初対面では少し緊張しがち。",
+  "fixedGreeting": "暇だったらお話ししない？",
   "world": "modern-tokyo",
   "character": "yui",
   "lifestyle": "tokyo-highschool-vtuber"

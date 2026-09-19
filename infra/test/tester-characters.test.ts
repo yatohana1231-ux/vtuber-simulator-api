@@ -156,8 +156,9 @@ describe("新しい Lambda（testerCharacters）", () => {
     const retentions = template.findResources("Custom::LogRetention", {
       Properties: { RetentionInDays: 30 },
     });
-    // 既存4つ + 新しい Lambda で5つ
-    expect(Object.keys(retentions)).toHaveLength(5);
+    // 既存4つ + テスターのキャラクター + パッケージ一覧（package-selection-
+    // roadmap.md フェーズ1c、常に作られる）で6つ
+    expect(Object.keys(retentions)).toHaveLength(6);
   });
 
   it("Bedrock の権限が無い（bedrock:InvokeModel を含むポリシーが存在しない）", () => {

@@ -10,6 +10,7 @@
 | `lib/github-oidc-stack.ts` | GitHub Actions の stg デプロイ用のロール（`vtuber-simulator-api` 用と `vtuber-simulator-front-web` 用の2つ。D-036・D-039。手動デプロイ専用） |
 | `functions/` | CloudFront Function（[`functions/README.md`](functions/README.md)） |
 | `test/` | CDK のテスト（`npm test`。`aws-cdk-lib/assertions`。CI ではまだ実行していない。F-033） |
+| `test/package-catalog.test.ts` | パッケージ（キャラクター×世界観）一覧 Lambda（`GET /packages`）のテスト（`test/tester-characters.test.ts`と同じ書き方。関数名・ハンドラー・環境変数・DynamoDB/Bedrock の権限が無いこと・`GET` のみ・出力を確認） |
 | `cdk.json` | CDK の設定と、ステージごとのコンテキスト（下記） |
 
 ## `cdk.json` のコンテキスト（ステージごと）
