@@ -511,6 +511,17 @@ erDiagram
 - 旧形式（2026-09-19 に削除した `/event-resolver` が書き込んでいた `elapsed`・`events: string[]` のフラットな形）の既存データは stg に残っているが、読むときに読み飛ばす
 - 容量: PAY_PER_REQUEST、削除ポリシーは stg=DESTROY / prod=RETAIN
 
+### テスターのキャラクターのテーブル
+
+2026-09-19 に追加（`.notes/tester-character-ownership-roadmap.md`）。どのテスターがどのキャラクターを持っているかを記録する。
+
+- テーブル名: `v-simu-tester-characters-{stage}`（CDK が作る。環境変数 `TESTER_CHARACTERS_TABLE`）
+- キー: PK `tester_id`（テスターの ID）/ SK `character_id`（サーバーが発番した UUID）
+- 属性: `packageId`, `label`（キャラクターの名前、1〜30文字）, `createdAt`
+- アクセスパターン: `getTesterCharacter(testerId, characterId)`（持ち主の確認。4つのエンドポイントが確認を有効にしているとき毎回1回）/ `listTesterCharacters(testerId)`（`GET /characters`）/ `createTesterCharacter(record)`（`POST /characters`、`attribute_not_exists(character_id)` の条件付き）
+- 管理用のコマンド: 既存の `characterId` の割り当て `npm run testers:assign -- <テスターID> <characterId>`、一覧 `testers:characters`、割り当ての解除 `testers:unassign`（`scripts/README.md`）。割り当てを外しても、キャラクターの会話ログ・記憶などのデータは消えない
+- 容量: PAY_PER_REQUEST、削除ポリシーは stg=DESTROY / prod=RETAIN
+
 ### Mood（内面感情・6次元、1〜100）
 
 | パラメータ | 日本語名 | デフォルト値 |
@@ -665,6 +676,13 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 **レスポンス**: `{ "reply": "え、本当ですか！？ありがとうございます！実は結構緊張してたんですけど..." }`
 
+### `GET /characters`・`POST /characters`
+
+2026-09-19 に追加。サインインしたテスターが持つキャラクターの一覧と作成。**テスターの ID は API 用の CloudFront が `x-tester-id` ヘッダーで渡すので、リクエストには含めない**（入口を通らない呼び出し・`x-tester-id` が無い呼び出しは `403 { "error": "forbidden" }`）。
+
+- `GET /characters` → `200 { "characters": [ { "characterId", "packageId", "label", "createdAt" } ] }`（作成日時の古い順）
+- `POST /characters`（本文 `{ "packageId"?: string, "label"?: string }`。`packageId` の省略時は `yui-modern-tokyo`、`label` は前後の空白を除いて1〜30文字、省略時は「キャラクター{n}」）→ `201 { "characterId", "packageId", "label", "createdAt" }`。`characterId` はサーバーが UUID で発番する。不正な `packageId`・`label` は 400、1人あたりの上限（5つ）に達していたら `409 { "error": "character limit reached" }`
+
 ### アクセス制限
 
 2026-09-19 に追加（`.notes/done/api-access-control-roadmap.md`、D-025・D-027）。ブラウザのデモ（`front-web`）を第三者に公開するため、API の入口を API 専用の CloudFront に絞っている。
@@ -677,11 +695,13 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ```
 
 - **資格情報:** テスターごとに ID とパスワードを発行し、KeyValueStore（`vtuber-simu-testers-{stage}`）に `ID → salt:sha256(salt + ":" + パスワード)` を登録する。登録・削除・一覧は `scripts/manage-testers.ts`（`npx tsx scripts/manage-testers.ts add <ID>` など。`scripts/README.md`）。反映に1分ほどかかることがある（2026-09-19 の確認では約45秒。反映前は正しい資格情報でも 401 になる）。ID に `:` は使えない。
-- **API キー:** 4つの POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
+- **API キー:** 4つの POST と `/characters` の GET・POST は API キー必須。キーの値は Secrets Manager（`vtuber-simu-api-key-{stage}`）が自動生成し、API キーと CloudFront のカスタムヘッダーの両方が CloudFormation の動的参照で使う（値はリポジトリ・テンプレート・CI のログに出ない）。CORS のプリフライト（`OPTIONS`）は API キー不要。
 - **API キーの作り直し:** CloudFormation の動的参照はテンプレートの文字列が変わらないと再解決されないため、Secrets Manager の値を変えるだけでは API キー・CloudFront のヘッダーに反映されない。作り直すときは `infra/cdk.json` の `context.apiKeyVersion.<stage>` を1つ上げて `develop` に push する（`ApiEntrance` がシークレット・API キーの Construct ID・リソース名に版番号を含めるため、新しいシークレット・API キーが作られる）。デプロイ後、古いシークレット・古い API キーは CloudFormation が削除する（古いキーはその時点で使えなくなる）。版1は導入前と同じ ID・名前（`ApiKeySecret`・`ApiKey`、名前は版番号なし）のまま。
 - **ログの保持期間:** 4つの Lambda のロググループの保持期間は30日（`infra/lib/vtuber-simulator-stack.ts` の `logRetention`）。それ以前はログが無期限に残る設定だった（2026-09-19 に修正、`.notes/tester-character-ownership-roadmap.md` 検討事項7）。あわせて、共通処理（`handleApiRequest`）のログ出力を、イベント全体ではなく `httpMethod`・`path`・`requestId`・`body` のみの要約に変更した（`headers`・`multiValueHeaders` には CloudFront が付けた `x-api-key`・`x-tester-id` などの秘密が含まれるため）。
 - **401 の CORS:** CloudFront Function が返す 401 にはレスポンスヘッダーポリシーが効かないので、関数の中で、許可先のオリジンからのリクエストにだけ `Access-Control-Allow-Origin` を付けている（付けないとブラウザが 401 を読めない）。
 - **料金の監視:** AWS Budgets の予算アラートは CDK では作らない（通知先のメールアドレスをリポジトリに置かないため）。AWS コンソールの「Billing and Cost Management → Budgets」で、月額の予算とメールの通知を手動で設定する。
+- **テスターの ID の受け渡し:** CloudFront Function は、資格情報を確かめたあと、その ID を UTF-8 の base64url にして `x-tester-id` ヘッダーで API Gateway に渡す。クライアントが送った `x-tester-id` は先に消す。Lambda は `src/lib/testerId.ts` の `getTesterIdFromEvent` で取り出す。
+- **キャラクターの持ち主の確認:** 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が `"true"` のとき（`infra/cdk.json` の `context.enforceCharacterOwnership.<stage>`。stg は段階的に有効にするため当面 `false`）、4つのエンドポイントは、テスターがその `characterId` の持ち主であることを確かめる（`src/lib/apiHandler.ts`）。`x-tester-id` が無い・持ち主でない・存在しない `characterId` は `403 { "error": "forbidden" }`。登録されている `packageId` とリクエストの `packageId` が違えば 400、省略されていれば登録されている `packageId` を使う（`characterId` とパッケージの対応の検証。F-010）。
 - 構成は `infra/lib/api-entrance.ts`、関数の仕様は `infra/functions/README.md`。
 
 ### エラーレスポンス（全エンドポイント共通）
@@ -692,7 +712,8 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
   - 各エンドポイント固有のチェック: `process` が 1,2 以外（`/emotion-updater`・`/memory-retriever`）／日時フォーマット不正／`now` が `lastLoginAt` より前（`/absence-simulator`）
   - 不明な `packageId`（`unknown packageId`）
 - **401** — 資格情報が無い・誤っている（API 用の CloudFront が返す）: `{ "error": "unauthorized" }`
-- **403** — API Gateway を直接呼んだ（API キーが無い）
+- **403** — API Gateway を直接呼んだ（API キーが無い）／持ち主の確認が有効なとき、`x-tester-id` が無い・キャラクターの持ち主でない（`{ "error": "forbidden" }`）
+- **409** — `POST /characters` で1人あたりの上限（5つ）に達した（`{ "error": "character limit reached" }`）
 - **429** — 使用量プランの上限（スロットル・1日の上限）を超えた
 - **500** — サーバー内部エラー（Bedrock呼び出し失敗、DynamoDBエラー等）: `{ "error": "Failed to generate a response", "errorName": "...", "errorMessage": "..." }`
 
@@ -701,11 +722,11 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 呼び出し順序の詳細は「リクエスト処理フロー」を参照。実装上の注意点:
 
 1. 前段のレスポンスを後段に渡す必要はない。不在期間の記録は `/absence-simulator` が保存し、後段が DynamoDB から読む（`mood`/`perception` も同じで、`/dialogue-generator` は常に DynamoDB から読む。D-032）
-2. `characterId` はフロントが「ユーザー×パッケージ」ごとに発番し、そのパッケージで遊ぶ間はすべてのリクエストで使い回す。パッケージを切り替えるときは新しい `characterId` を発番する。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない
+2. `characterId` は `POST /characters` でサーバーに発番してもらい（2026-09-19 から。以前はフロントが発番していた）、サインインしたテスターの `GET /characters` の一覧から選んで使う。フロントが選べるのはパッケージ（`packageId`）のみで、キャラクターや世界観を個別に指定することはできない。持ち主の確認が有効なとき、403 が返ったらキャラクターの選択に戻す
 3. アプリ終了時の時刻を `lastLoginAt` としてローカル保存し、次回起動時に送信する
 4. ログイン時（不在3時間以上）はセリフの表示までに3回のAPI呼び出しが直列に発生する（`/memory-retriever` はセリフの表示の後）ため、体感の待ち時間は旧単一エンドポイント構成より伸びる可能性がある（トレードオフとして受け入れる前提。詳細は `.notes/api-endpoint-split-roadmap.md` の設計経緯を参照）
 5. 不在3時間未満の場合はどのエンドポイントも呼ばず、直前に表示していた mood/perception をそのまま維持する（固定デフォルト値を返す挙動は廃止）
-6. API は API 用の CloudFront の URL（スタックの出力 `ApiEntranceUrl`）で呼び、すべてのリクエストに `Authorization: Basic base64(ID:パスワード)` を付ける（ID・パスワードは UTF-8 で符号化）。401 が返ったら資格情報の入力に戻す。ブラウザから呼ぶ場合、オリジンが `infra/cdk.json` の `corsAllowedOrigins` に入っている必要がある
+6. API は API 用の CloudFront の URL（スタックの出力 `ApiEntranceUrl`）で呼び、すべてのリクエストに `Authorization: Basic base64(ID:パスワード)` を付ける（ID・パスワードは UTF-8 で符号化）。401 が返ったら資格情報の入力に戻す（403 は資格情報の誤りではなく、キャラクターの持ち主でないことを表す）。ブラウザから呼ぶ場合、オリジンが `infra/cdk.json` の `corsAllowedOrigins` に入っている必要がある
 
 ## ビルド・デプロイ
 

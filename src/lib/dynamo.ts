@@ -19,6 +19,7 @@ import type {
   Mood,
   Perception,
   RelationshipRecord,
+  TesterCharacter,
 } from "../types.js";
 
 // -------------------------------------------------------
@@ -45,6 +46,9 @@ export const CHARACTER_MEMORY_TABLE = extractTableName(
   process.env.CHARACTER_MEMORY_TABLE
 );
 export const EVENTS_TABLE = extractTableName(process.env.EVENTS_TABLE ?? "events");
+export const TESTER_CHARACTERS_TABLE = extractTableName(
+  process.env.TESTER_CHARACTERS_TABLE ?? "tester-characters"
+);
 
 // STATE レコードの固定ソートキー
 export const STATE_INDEX_KEY = "state";
@@ -541,4 +545,96 @@ export async function saveRelationshipRecord(
   };
   await dynamo.send(new PutCommand({ TableName: CHARACTER_MEMORY_TABLE, Item: item }));
   console.log(`[saveRelationshipRecord] saved characterId=${characterId}`);
+}
+
+// -------------------------------------------------------
+// テスターのキャラクター（tester-character-ownership-roadmap フェーズ3）
+//
+// TESTER_CHARACTERS_TABLE に、パーティションキー tester_id・ソートキー
+// character_id で保存する。DynamoDB 上のキー名（tester_id・character_id）と
+// TesterCharacter 型のフィールド名（testerId・characterId）が異なるため、
+// item ⇔ TesterCharacter の変換をここで行う。
+// -------------------------------------------------------
+
+/** TESTER_CHARACTERS_TABLE に置く項目の形（DynamoDB のキー名はスネークケース） */
+interface TesterCharacterItem {
+  tester_id: string;
+  character_id: string;
+  packageId: string;
+  label: string;
+  createdAt: string;
+}
+
+function toTesterCharacter(item: TesterCharacterItem): TesterCharacter {
+  return {
+    testerId: item.tester_id,
+    characterId: item.character_id,
+    packageId: item.packageId,
+    label: item.label,
+    createdAt: item.createdAt,
+  };
+}
+
+function toTesterCharacterItem(record: TesterCharacter): TesterCharacterItem {
+  return {
+    tester_id: record.testerId,
+    character_id: record.characterId,
+    packageId: record.packageId,
+    label: record.label,
+    createdAt: record.createdAt,
+  };
+}
+
+/** テスターの1つのキャラクターを取得する。無ければ null */
+export async function getTesterCharacter(
+  testerId: string,
+  characterId: string
+): Promise<TesterCharacter | null> {
+  const result = await dynamo.send(
+    new GetCommand({
+      TableName: TESTER_CHARACTERS_TABLE,
+      Key: { tester_id: testerId, character_id: characterId },
+    })
+  );
+  if (!result.Item) {
+    console.log(
+      `[getTesterCharacter] not found testerId=${testerId} characterId=${characterId}`
+    );
+    return null;
+  }
+  return toTesterCharacter(result.Item as TesterCharacterItem);
+}
+
+/** テスターのキャラクターの一覧を、作成日時（createdAt）の古い順に返す */
+export async function listTesterCharacters(testerId: string): Promise<TesterCharacter[]> {
+  const result = await dynamo.send(
+    new QueryCommand({
+      TableName: TESTER_CHARACTERS_TABLE,
+      KeyConditionExpression: "tester_id = :tid",
+      ExpressionAttributeValues: { ":tid": testerId },
+    })
+  );
+  const items = (result.Items ?? []) as TesterCharacterItem[];
+  const characters = items
+    .map(toTesterCharacter)
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  console.log(`[listTesterCharacters] ${characters.length} characters for testerId=${testerId}`);
+  return characters;
+}
+
+/**
+ * テスターのキャラクターを新規作成する。同じ character_id が既にある場合は
+ * 条件付き書き込み（attribute_not_exists(character_id)）が失敗し、例外を投げる。
+ */
+export async function createTesterCharacter(record: TesterCharacter): Promise<void> {
+  await dynamo.send(
+    new PutCommand({
+      TableName: TESTER_CHARACTERS_TABLE,
+      Item: toTesterCharacterItem(record),
+      ConditionExpression: "attribute_not_exists(character_id)",
+    })
+  );
+  console.log(
+    `[createTesterCharacter] created testerId=${record.testerId} characterId=${record.characterId}`
+  );
 }

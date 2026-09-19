@@ -139,6 +139,16 @@ export class VtuberSimulatorStack extends cdk.Stack {
       | undefined;
     const apiKeyVersion = apiKeyVersionByStage?.[stageName] ?? 1;
 
+    // キャラクターの持ち主の確認（tester-character-ownership-roadmap.md フェーズ3・4）。
+    // cdk.json の context.enforceCharacterOwnership[stageName] が true のときだけ
+    // 有効にする。未定義のステージ・false は文字列 "false"（段階的に有効にするため、
+    // 黙って無効のままデプロイできる。フェーズ5の方針）。
+    const enforceCharacterOwnershipByStage = this.node.tryGetContext(
+      "enforceCharacterOwnership"
+    ) as Record<string, boolean> | undefined;
+    const enforceCharacterOwnership =
+      enforceCharacterOwnershipByStage?.[stageName] === true ? "true" : "false";
+
     // -------------------------------------------------------
     // 既存リソースをインポート
     // -------------------------------------------------------
@@ -188,6 +198,30 @@ export class VtuberSimulatorStack extends cdk.Stack {
     });
 
     // -------------------------------------------------------
+    // 新規: テスターのキャラクターテーブル
+    // （tester-character-ownership-roadmap.md フェーズ4。パーティションキー
+    // tester_id・ソートキー character_id で1テスターの1キャラクターを表す。
+    // GSI は持たない）
+    // -------------------------------------------------------
+
+    const testerCharactersTable = new dynamodb.Table(this, "TesterCharactersTable", {
+      tableName: `v-simu-tester-characters-${stageName}`,
+      partitionKey: {
+        name: "tester_id",
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: "character_id",
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy:
+        stageName === "prod"
+          ? cdk.RemovalPolicy.RETAIN
+          : cdk.RemovalPolicy.DESTROY,
+    });
+
+    // -------------------------------------------------------
     // 共有アセット（esbuild が dist/ に機能ごとの .mjs を出力する）
     // -------------------------------------------------------
 
@@ -234,6 +268,9 @@ export class VtuberSimulatorStack extends cdk.Stack {
           CHARACTER_MEMORY_TABLE: characterMemoryTable.tableArn,
           CONVERSATION_LOGS_TABLE: conversationLogsTable.tableArn,
           EVENTS_TABLE: eventsTable.tableName,
+          // キャラクターの持ち主の確認（tester-character-ownership-roadmap.md フェーズ3・4）
+          TESTER_CHARACTERS_TABLE: testerCharactersTable.tableName,
+          ENFORCE_CHARACTER_OWNERSHIP: enforceCharacterOwnership,
           AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
         },
       });
@@ -242,6 +279,8 @@ export class VtuberSimulatorStack extends cdk.Stack {
       grantTableAccess(characterMemoryTable, endpoint.tables.characterMemory, fn);
       grantTableAccess(conversationLogsTable, endpoint.tables.conversationLogs, fn);
       grantTableAccess(eventsTable, endpoint.tables.events, fn);
+      // テスターのキャラクターテーブル: 持ち主の確認（getTesterCharacter、GetItem）のみ
+      testerCharactersTable.grant(fn, "dynamodb:GetItem");
 
       // Bedrock 呼び出し権限（全関数共通）
       fn.addToRolePolicy(
@@ -265,6 +304,47 @@ export class VtuberSimulatorStack extends cdk.Stack {
     }
 
     // -------------------------------------------------------
+    // 新規: テスターのキャラクター一覧・作成 Lambda（GET/POST /characters）
+    //
+    // 既存の4つの Lambda（ENDPOINTS のループ）とは形が異なる（Bedrock を呼ばない、
+    // GET/POST の2メソッドを1つの Lambda で扱う、アクセスするテーブルも
+    // テスターのキャラクターテーブルだけ）ため、ループには含めず個別に定義する
+    // （ループに条件分岐を足すより差分が小さいため。tester-character-ownership-
+    // roadmap.md フェーズ4）。
+    // -------------------------------------------------------
+
+    const testerCharactersFn = new lambda.Function(this, "TesterCharactersLambda", {
+      functionName: `vtuber-simu-tester-characters-${stageName}`,
+      runtime: lambda.Runtime.NODEJS_24_X,
+      handler: "testerCharacters.handler",
+      code: lambdaCode,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 256,
+      // 他の4つの Lambda と同じ理由で logRetention を使う（上記コメント参照）
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      environment: {
+        TESTER_CHARACTERS_TABLE: testerCharactersTable.tableName,
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
+      },
+    });
+
+    // 一覧（listTesterCharacters、Query）と作成（createTesterCharacter、PutItem）
+    // のみ使う。GetItem は使っていないので付けない（最小権限）。
+    testerCharactersTable.grant(testerCharactersFn, "dynamodb:Query", "dynamodb:PutItem");
+
+    const testerCharactersIntegration = new apigateway.LambdaIntegration(testerCharactersFn, {
+      timeout: cdk.Duration.seconds(29),
+    });
+    const charactersResource = api.root.addResource("characters");
+    charactersResource.addMethod("GET", testerCharactersIntegration, { apiKeyRequired: true });
+    charactersResource.addMethod("POST", testerCharactersIntegration, { apiKeyRequired: true });
+
+    new cdk.CfnOutput(this, "TesterCharactersEndpoint", {
+      value: `${api.url}characters`,
+      description: "テスターのキャラクター一覧・作成 API Endpoint",
+    });
+
+    // -------------------------------------------------------
     // API 専用の CloudFront（Basic 認証・API キー付与・CORS の絞り込み）
     // api-access-control-roadmap.md フェーズ3
     // -------------------------------------------------------
@@ -283,6 +363,11 @@ export class VtuberSimulatorStack extends cdk.Stack {
     new cdk.CfnOutput(this, "EventsTableName", {
       value: eventsTable.tableName,
       description: "Events DynamoDB Table Name",
+    });
+
+    new cdk.CfnOutput(this, "TesterCharactersTableName", {
+      value: testerCharactersTable.tableName,
+      description: "Tester Characters DynamoDB Table Name",
     });
 
     new cdk.CfnOutput(this, "ApiEntranceUrl", {

@@ -3,6 +3,9 @@ import { Readable } from "node:stream";
 import {
   validateTesterId,
   validatePassword,
+  validateCharacterId,
+  validatePackageId,
+  validateLabel,
   createStoredValue,
   generateSalt,
   generatePassword,
@@ -10,6 +13,10 @@ import {
   readLineFromStdin,
   MAX_TESTER_ID_BYTES,
   MIN_PASSWORD_LENGTH,
+  MIN_LABEL_LENGTH,
+  MAX_LABEL_LENGTH,
+  DEFAULT_ASSIGN_PACKAGE_ID,
+  DEFAULT_ASSIGN_LABEL,
 } from "../../../scripts/manage-testers.js";
 import { loadHandler, is401 } from "../infra/loadApiAuthHandler.js";
 
@@ -59,6 +66,72 @@ describe("validatePassword", () => {
   it(`${MIN_PASSWORD_LENGTH}文字 → エラーにならない`, () => {
     const password = "a".repeat(MIN_PASSWORD_LENGTH);
     expect(validatePassword(password)).toBeNull();
+  });
+});
+
+describe("validateCharacterId", () => {
+  it("空文字 → エラーになる", () => {
+    expect(validateCharacterId("")).not.toBeNull();
+  });
+
+  it("UUID の形（小文字） → エラーにならない", () => {
+    expect(validateCharacterId("123e4567-e89b-12d3-a456-426614174000")).toBeNull();
+  });
+
+  it("UUID の形（大文字を含む） → エラーにならない", () => {
+    expect(validateCharacterId("123E4567-E89B-12D3-A456-426614174000")).toBeNull();
+  });
+
+  it("UUID の形でない文字列 → エラーになる", () => {
+    expect(validateCharacterId("not-a-uuid")).not.toBeNull();
+  });
+
+  it("ハイフンの位置が違う → エラーになる", () => {
+    expect(validateCharacterId("123e4567e89b-12d3-a456-426614174000")).not.toBeNull();
+  });
+});
+
+describe("validatePackageId", () => {
+  it("空文字 → エラーになる", () => {
+    expect(validatePackageId("")).not.toBeNull();
+  });
+
+  it("空でない文字列 → エラーにならない", () => {
+    expect(validatePackageId("yui-modern-tokyo")).toBeNull();
+  });
+});
+
+describe("validateLabel", () => {
+  it(`${MIN_LABEL_LENGTH - 1}文字（空文字） → エラーになる`, () => {
+    expect(validateLabel("")).not.toBeNull();
+  });
+
+  it(`${MIN_LABEL_LENGTH}文字 → エラーにならない`, () => {
+    expect(validateLabel("a".repeat(MIN_LABEL_LENGTH))).toBeNull();
+  });
+
+  it(`${MAX_LABEL_LENGTH}文字 → エラーにならない`, () => {
+    expect(validateLabel("a".repeat(MAX_LABEL_LENGTH))).toBeNull();
+  });
+
+  it(`${MAX_LABEL_LENGTH + 1}文字 → エラーになる`, () => {
+    expect(validateLabel("a".repeat(MAX_LABEL_LENGTH + 1))).not.toBeNull();
+  });
+
+  it("日本語のラベルは文字数（サロゲートペア考慮）で判定される", () => {
+    const label = "旧".repeat(MAX_LABEL_LENGTH);
+    expect(validateLabel(label)).toBeNull();
+    expect(validateLabel(label + "旧")).not.toBeNull();
+  });
+});
+
+describe("既定値", () => {
+  it("DEFAULT_ASSIGN_PACKAGE_ID は yui-modern-tokyo", () => {
+    expect(DEFAULT_ASSIGN_PACKAGE_ID).toBe("yui-modern-tokyo");
+  });
+
+  it("DEFAULT_ASSIGN_LABEL は「引き継いだキャラクター」", () => {
+    expect(DEFAULT_ASSIGN_LABEL).toBe("引き継いだキャラクター");
   });
 });
 
@@ -171,6 +244,93 @@ describe("parseArgs", () => {
 
   it("list --generate → 例外（add でのみ有効）", () => {
     expect(() => parseArgs(["list", "--generate"])).toThrow();
+  });
+
+  it("assign <testerId> <characterId> → command/id/characterIdが読み取れる", () => {
+    const characterId = "123e4567-e89b-12d3-a456-426614174000";
+    const parsed = parseArgs(["assign", "tester1", characterId]);
+    expect(parsed.command).toBe("assign");
+    expect(parsed.id).toBe("tester1");
+    expect(parsed.characterId).toBe(characterId);
+  });
+
+  it("assign --package --label 指定 → packageId/labelに反映される", () => {
+    const characterId = "123e4567-e89b-12d3-a456-426614174000";
+    const parsed = parseArgs([
+      "assign",
+      "tester1",
+      characterId,
+      "--package",
+      "other-package",
+      "--label",
+      "旧アカウント",
+    ]);
+    expect(parsed.packageId).toBe("other-package");
+    expect(parsed.label).toBe("旧アカウント");
+  });
+
+  it("assign で characterId を省略 → 例外", () => {
+    expect(() => parseArgs(["assign", "tester1"])).toThrow();
+  });
+
+  it("assign で testerId・characterId を両方省略 → 例外", () => {
+    expect(() => parseArgs(["assign"])).toThrow();
+  });
+
+  it("characters <testerId> → command/idが読み取れ、characterIdはundefined", () => {
+    const parsed = parseArgs(["characters", "tester1"]);
+    expect(parsed.command).toBe("characters");
+    expect(parsed.id).toBe("tester1");
+    expect(parsed.characterId).toBeUndefined();
+  });
+
+  it("characters で testerId を省略 → 例外", () => {
+    expect(() => parseArgs(["characters"])).toThrow();
+  });
+
+  it("unassign <testerId> <characterId> → command/id/characterIdが読み取れる", () => {
+    const characterId = "123e4567-e89b-12d3-a456-426614174000";
+    const parsed = parseArgs(["unassign", "tester1", characterId]);
+    expect(parsed.command).toBe("unassign");
+    expect(parsed.id).toBe("tester1");
+    expect(parsed.characterId).toBe(characterId);
+  });
+
+  it("unassign で characterId を省略 → 例外", () => {
+    expect(() => parseArgs(["unassign", "tester1"])).toThrow();
+  });
+
+  it("--package を assign 以外で指定 → 例外", () => {
+    expect(() => parseArgs(["list", "--package", "x"])).toThrow();
+  });
+
+  it("--label を assign 以外で指定 → 例外", () => {
+    expect(() => parseArgs(["characters", "tester1", "--label", "x"])).toThrow();
+  });
+
+  it("--table を assign/characters/unassign 以外で指定 → 例外", () => {
+    expect(() => parseArgs(["list", "--table", "my-table"])).toThrow();
+  });
+
+  it("--table を characters で指定 → tableに反映される", () => {
+    const parsed = parseArgs(["characters", "tester1", "--table", "my-table"]);
+    expect(parsed.table).toBe("my-table");
+  });
+
+  it("--table に値が無い → 例外", () => {
+    expect(() => parseArgs(["characters", "tester1", "--table"])).toThrow();
+  });
+
+  it("--package に値が無い → 例外", () => {
+    expect(() =>
+      parseArgs(["assign", "tester1", "123e4567-e89b-12d3-a456-426614174000", "--package"])
+    ).toThrow();
+  });
+
+  it("--label に値が無い → 例外", () => {
+    expect(() =>
+      parseArgs(["assign", "tester1", "123e4567-e89b-12d3-a456-426614174000", "--label"])
+    ).toThrow();
   });
 });
 

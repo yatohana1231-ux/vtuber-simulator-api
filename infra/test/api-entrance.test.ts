@@ -34,7 +34,7 @@ function synthStgTemplate(apiKeyVersion?: number): Template {
 describe("ApiEntrance / VtuberSimulatorStack のアクセス制限", () => {
   const template = synthStgTemplate();
 
-  it("4つの POST が ApiKeyRequired: true、OPTIONS は API キー不要", () => {
+  it("5つの POST（既存4つ + /characters）が ApiKeyRequired: true、OPTIONS は API キー不要", () => {
     const methods = template.findResources("AWS::ApiGateway::Method");
     const postMethods = Object.values(methods).filter(
       (m: any) => m.Properties.HttpMethod === "POST"
@@ -43,7 +43,9 @@ describe("ApiEntrance / VtuberSimulatorStack のアクセス制限", () => {
       (m: any) => m.Properties.HttpMethod === "OPTIONS"
     );
 
-    expect(postMethods).toHaveLength(4);
+    // 既存4つ（absence-simulator・emotion-updater・memory-retriever・
+    // dialogue-generator）+ /characters（tester-character-ownership-roadmap.md フェーズ4）
+    expect(postMethods).toHaveLength(5);
     for (const m of postMethods as any[]) {
       expect(m.Properties.ApiKeyRequired).toBe(true);
     }
@@ -137,7 +139,8 @@ describe("ApiEntrance / VtuberSimulatorStack のアクセス制限", () => {
             Items: ["Authorization", "Content-Type"],
           },
           AccessControlAllowMethods: {
-            Items: ["POST", "OPTIONS"],
+            // GET: /characters（一覧）。tester-character-ownership-roadmap.md フェーズ4
+            Items: ["GET", "POST", "OPTIONS"],
           },
           AccessControlAllowCredentials: false,
           OriginOverride: true,
@@ -262,14 +265,14 @@ describe("apiKeyVersion（tester-character-ownership-roadmap.md 検討事項7）
 });
 
 describe("Lambda ロググループの保持期間（tester-character-ownership-roadmap.md 検討事項7）", () => {
-  it("4つの Lambda に RetentionInDays: 30 の Custom::LogRetention が設定されている", () => {
+  it("5つの Lambda（既存4つ + テスターのキャラクター）に RetentionInDays: 30 の Custom::LogRetention が設定されている", () => {
     const template = synthStgTemplate();
 
     const retentions = template.findResources("Custom::LogRetention", {
       Properties: { RetentionInDays: 30 },
     });
 
-    expect(Object.keys(retentions)).toHaveLength(4);
+    expect(Object.keys(retentions)).toHaveLength(5);
   });
 });
 

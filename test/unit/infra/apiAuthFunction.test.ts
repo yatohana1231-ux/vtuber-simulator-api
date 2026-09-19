@@ -32,6 +32,7 @@ function makeEvent(options: {
   method?: string;
   authorization?: string;
   origin?: string;
+  xTesterId?: string;
 }): CfEvent {
   const headers: CfHeaders = {};
   if (options.authorization !== undefined) {
@@ -39,6 +40,9 @@ function makeEvent(options: {
   }
   if (options.origin !== undefined) {
     headers.origin = { value: options.origin };
+  }
+  if (options.xTesterId !== undefined) {
+    headers["x-tester-id"] = { value: options.xTesterId };
   }
   return {
     request: {
@@ -281,6 +285,101 @@ describe("api-auth.js の handler", () => {
     expect(result.statusDescription).toBe("Unauthorized");
     expect(result.body.encoding).toBe("text");
     expect(JSON.parse(result.body.data)).toEqual({ error: "unauthorized" });
+  });
+});
+
+describe("api-auth.js の x-tester-id ヘッダー", () => {
+  it("照合成功(ASCIIのID) → x-tester-idが付き、base64urlをデコードするとIDに戻る", async () => {
+    const id = "tester1";
+    const handler = loadHandler(ALLOWED_ORIGINS, {
+      [id]: makeStoredValue("correct-password"),
+    });
+    const event = makeEvent({
+      authorization: basicAuthHeader(id, "correct-password"),
+    });
+
+    const result = (await handler(event)) as CfRequest;
+
+    expect(is401(result)).toBe(false);
+    const headerValue = result.headers["x-tester-id"]?.value;
+    expect(headerValue).toBeDefined();
+    expect(Buffer.from(headerValue as string, "base64url").toString("utf8")).toBe(
+      id
+    );
+  });
+
+  it("照合成功(日本語のID) → x-tester-idをbase64urlデコードするとIDに戻る", async () => {
+    const id = "テスター1";
+    const handler = loadHandler(ALLOWED_ORIGINS, {
+      [id]: makeStoredValue("correct-password"),
+    });
+    const event = makeEvent({
+      authorization: basicAuthHeader(id, "correct-password"),
+    });
+
+    const result = (await handler(event)) as CfRequest;
+
+    expect(is401(result)).toBe(false);
+    const headerValue = result.headers["x-tester-id"]?.value as string;
+    expect(Buffer.from(headerValue, "base64url").toString("utf8")).toBe(id);
+  });
+
+  it("照合成功 → クライアントが送った偽のx-tester-idは、照合したIDのbase64urlに置き換わる", async () => {
+    const id = "tester1";
+    const handler = loadHandler(ALLOWED_ORIGINS, {
+      [id]: makeStoredValue("correct-password"),
+    });
+    const event = makeEvent({
+      authorization: basicAuthHeader(id, "correct-password"),
+      xTesterId: "forged-tester-id",
+    });
+
+    const result = (await handler(event)) as CfRequest;
+
+    const headerValue = result.headers["x-tester-id"]?.value as string;
+    expect(Buffer.from(headerValue, "base64url").toString("utf8")).toBe(id);
+  });
+
+  it("401 → クライアントが送ったx-tester-idは消えている", async () => {
+    const handler = loadHandler(ALLOWED_ORIGINS, {
+      tester1: makeStoredValue("correct-password"),
+    });
+    const event = makeEvent({
+      authorization: basicAuthHeader("tester1", "wrong-password"),
+      xTesterId: "forged-tester-id",
+    });
+
+    const result = (await handler(event)) as Cf401Response;
+
+    expect(result.statusCode).toBe(401);
+    expect(result.headers["x-tester-id"]).toBeUndefined();
+  });
+
+  it("OPTIONS → クライアントが送ったx-tester-idは消えている", async () => {
+    const handler = loadHandler(ALLOWED_ORIGINS, {});
+    const event = makeEvent({ method: "OPTIONS", xTesterId: "forged-tester-id" });
+
+    const result = (await handler(event)) as CfRequest;
+
+    expect(result.headers["x-tester-id"]).toBeUndefined();
+  });
+
+  it("x-tester-idの値に=・+・/が含まれない", async () => {
+    // base64にした際に + / = を含みやすいIDを選ぶ。
+    const id = "\u0000\u0001\u0002\u0003￿??>>";
+    const handler = loadHandler(ALLOWED_ORIGINS, {
+      [id]: makeStoredValue("correct-password"),
+    });
+    const event = makeEvent({
+      authorization: basicAuthHeader(id, "correct-password"),
+    });
+
+    const result = (await handler(event)) as CfRequest;
+
+    const headerValue = result.headers["x-tester-id"]?.value as string;
+    expect(headerValue).toBeDefined();
+    expect(headerValue).not.toMatch(/[=+/]/);
+    expect(Buffer.from(headerValue, "base64url").toString("utf8")).toBe(id);
   });
 });
 

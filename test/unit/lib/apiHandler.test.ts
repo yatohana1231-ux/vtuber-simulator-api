@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+import * as dynamo from "../../../src/lib/dynamo.js";
 import {
   BadRequestError,
   handleApiRequest,
@@ -8,8 +9,21 @@ import {
   summarizeEventForLog,
 } from "../../../src/lib/apiHandler.js";
 
-function makeEvent(body: unknown) {
-  return { body: JSON.stringify(body) };
+function makeEvent(body: unknown, headers?: Record<string, string>) {
+  return { body: JSON.stringify(body), headers: headers ?? {} };
+}
+
+/** UTF-8 文字列を base64url（パディングなし）にエンコードする（testerId.ts のエンコード方式に合わせる） */
+function encodeTesterId(testerId: string): string {
+  return Buffer.from(testerId, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function eventWithTester(body: unknown, testerId: string) {
+  return makeEvent(body, { "x-tester-id": encodeTesterId(testerId) });
 }
 
 beforeEach(() => {
@@ -200,6 +214,168 @@ describe("handleApiRequest", () => {
       requestId: "req-12345",
       body: event.body,
     });
+  });
+});
+
+describe("handleApiRequest のキャラクターの持ち主の確認（ENFORCE_CHARACTER_OWNERSHIP、フェーズ3c）", () => {
+  it("ENFORCE_CHARACTER_OWNERSHIP が未設定 → x-tester-id が無くても通る（getTesterCharacter も呼ばれない）", async () => {
+    const getTesterCharacterSpy = vi.spyOn(dynamo, "getTesterCharacter");
+    const handle = vi.fn(async () =>
+      Promise.resolve({ statusCode: 200, headers: {}, body: "{}" })
+    );
+
+    const res = await handleApiRequest(makeEvent({ characterId: "c1" }), handle);
+
+    expect(res.statusCode).toBe(200);
+    expect(handle).toHaveBeenCalledWith({ characterId: "c1" });
+    expect(getTesterCharacterSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(["TRUE", "1", "yes", " true"])(
+    "ENFORCE_CHARACTER_OWNERSHIP=%s（\"true\" の完全一致ではない） → 確認しない",
+    async (value) => {
+      vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", value);
+      const getTesterCharacterSpy = vi.spyOn(dynamo, "getTesterCharacter");
+      const handle = vi.fn(async () =>
+        Promise.resolve({ statusCode: 200, headers: {}, body: "{}" })
+      );
+
+      const res = await handleApiRequest(makeEvent({ characterId: "c1" }), handle);
+
+      expect(res.statusCode).toBe(200);
+      expect(handle).toHaveBeenCalled();
+      expect(getTesterCharacterSpy).not.toHaveBeenCalled();
+    }
+  );
+
+  it("有効・x-tester-id なし → 403 forbidden（handle は呼ばれない）", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    const handle = vi.fn();
+
+    const res = await handleApiRequest(makeEvent({ characterId: "c1" }), handle);
+
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body)).toEqual({ error: "forbidden" });
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("有効・持ち主でない（getTesterCharacter が null） → 403 forbidden", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    vi.spyOn(dynamo, "getTesterCharacter").mockResolvedValue(null);
+    const handle = vi.fn();
+
+    const res = await handleApiRequest(
+      eventWithTester({ characterId: "c1" }, "tester-a"),
+      handle
+    );
+
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body)).toEqual({ error: "forbidden" });
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("有効・持ち主 → handle が呼ばれ、その戻り値がそのまま返る", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    const getTesterCharacterSpy = vi.spyOn(dynamo, "getTesterCharacter").mockResolvedValue({
+      testerId: "tester-a",
+      characterId: "c1",
+      packageId: "yui-modern-tokyo",
+      label: "キャラクター1",
+      createdAt: "2026-09-19T00:00:00.000Z",
+    });
+    const handle = vi.fn(async () =>
+      Promise.resolve({ statusCode: 200, headers: {}, body: "{}" })
+    );
+
+    const res = await handleApiRequest(
+      eventWithTester({ characterId: "c1", packageId: "yui-modern-tokyo" }, "tester-a"),
+      handle
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(getTesterCharacterSpy).toHaveBeenCalledWith("tester-a", "c1");
+    expect(handle).toHaveBeenCalledWith({
+      characterId: "c1",
+      packageId: "yui-modern-tokyo",
+    });
+  });
+
+  it("有効・packageId がリクエストにあり登録された値と違う → 400 packageId does not match the character（handle は呼ばれない）", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    vi.spyOn(dynamo, "getTesterCharacter").mockResolvedValue({
+      testerId: "tester-a",
+      characterId: "c1",
+      packageId: "yui-modern-tokyo",
+      label: "キャラクター1",
+      createdAt: "2026-09-19T00:00:00.000Z",
+    });
+    const handle = vi.fn();
+
+    const res = await handleApiRequest(
+      eventWithTester({ characterId: "c1", packageId: "other-package" }, "tester-a"),
+      handle
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({
+      error: "packageId does not match the character",
+    });
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("有効・packageId をリクエストで省略 → 登録された packageId が body に入って handle に渡る", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    vi.spyOn(dynamo, "getTesterCharacter").mockResolvedValue({
+      testerId: "tester-a",
+      characterId: "c1",
+      packageId: "yui-modern-tokyo",
+      label: "キャラクター1",
+      createdAt: "2026-09-19T00:00:00.000Z",
+    });
+    const handle = vi.fn(async () =>
+      Promise.resolve({ statusCode: 200, headers: {}, body: "{}" })
+    );
+
+    await handleApiRequest(eventWithTester({ characterId: "c1" }, "tester-a"), handle);
+
+    expect(handle).toHaveBeenCalledWith({
+      characterId: "c1",
+      packageId: "yui-modern-tokyo",
+    });
+  });
+
+  it("有効・characterId が無効（空でない文字列でない） → 確認を飛ばして handle に渡る（ハンドラー側の入力チェックで400になる想定）", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    const getTesterCharacterSpy = vi.spyOn(dynamo, "getTesterCharacter");
+    const handle = vi.fn(async () => {
+      throw new BadRequestError("characterId must be a non-empty string");
+    });
+
+    const res = await handleApiRequest(eventWithTester({}, "tester-a"), handle);
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({
+      error: "characterId must be a non-empty string",
+    });
+    expect(handle).toHaveBeenCalled();
+    expect(getTesterCharacterSpy).not.toHaveBeenCalled();
+  });
+
+  it("有効・getTesterCharacter が例外を投げる → 500（今までどおり）", async () => {
+    vi.stubEnv("ENFORCE_CHARACTER_OWNERSHIP", "true");
+    vi.spyOn(dynamo, "getTesterCharacter").mockRejectedValue(new Error("dynamo down"));
+    const handle = vi.fn();
+
+    const res = await handleApiRequest(
+      eventWithTester({ characterId: "c1" }, "tester-a"),
+      handle
+    );
+
+    expect(res.statusCode).toBe(500);
+    const parsed = JSON.parse(res.body);
+    expect(parsed.errorName).toBe("Error");
+    expect(parsed.errorMessage).toBe("dynamo down");
+    expect(handle).not.toHaveBeenCalled();
   });
 });
 

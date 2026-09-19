@@ -138,7 +138,8 @@ export class ApiEntrance extends Construct {
         corsBehavior: {
           accessControlAllowOrigins: allowedOrigins,
           accessControlAllowHeaders: ["Authorization", "Content-Type"],
-          accessControlAllowMethods: ["POST", "OPTIONS"],
+          // GET: /characters（一覧）。tester-character-ownership-roadmap.md フェーズ4
+          accessControlAllowMethods: ["GET", "POST", "OPTIONS"],
           accessControlAllowCredentials: false,
           originOverride: true,
           accessControlMaxAge: cdk.Duration.minutes(10),

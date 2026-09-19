@@ -20,11 +20,15 @@ import {
   getRecentAbsenceRecords,
   getRelationshipRecord,
   saveRelationshipRecord,
+  getTesterCharacter,
+  listTesterCharacters,
+  createTesterCharacter,
   LATEST_ABSENCE_RECORD_INDEX_KEY,
   RELATIONSHIP_INDEX_KEY,
   RELATIONSHIP_MILESTONE_MEMORY_TYPE,
   CHARACTER_MEMORY_TABLE,
   EVENTS_TABLE,
+  TESTER_CHARACTERS_TABLE,
 } from "../../../src/lib/dynamo.js";
 import type {
   AbsenceRecord,
@@ -34,6 +38,7 @@ import type {
   LatestAbsenceRecordItem,
   Perception,
   RelationshipRecord,
+  TesterCharacter,
 } from "../../../src/types.js";
 
 function memory(overrides: Partial<CharacterMemoryItem>): CharacterMemoryItem {
@@ -64,6 +69,17 @@ function absenceRecord(overrides: Partial<AbsenceRecord> = {}): AbsenceRecord {
       },
     ],
     threads: [{ id: "thread-1", topic: "来週テストがある", status: "open", openedAt: "2026-01-14T21:00:00.000Z" }],
+    ...overrides,
+  };
+}
+
+function testerCharacter(overrides: Partial<TesterCharacter> = {}): TesterCharacter {
+  return {
+    testerId: "tester-1",
+    characterId: "char-1",
+    packageId: "yui-modern-tokyo",
+    label: "キャラクター1",
+    createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -533,6 +549,27 @@ describe("extractTableName", () => {
 
     expect(mod.EVENTS_TABLE).toBe("events");
   });
+
+  it("TESTER_CHARACTERS_TABLE未設定 → 既定値 'tester-characters'", async () => {
+    vi.stubEnv("TESTER_CHARACTERS_TABLE", undefined);
+    vi.resetModules();
+
+    const mod = await import("../../../src/lib/dynamo.js");
+
+    expect(mod.TESTER_CHARACTERS_TABLE).toBe("tester-characters");
+  });
+
+  it("TESTER_CHARACTERS_TABLEがARN形式 → テーブル名部分だけになる", async () => {
+    vi.stubEnv(
+      "TESTER_CHARACTERS_TABLE",
+      "arn:aws:dynamodb:ap-northeast-1:123456789012:table/tester-characters-stg"
+    );
+    vi.resetModules();
+
+    const mod = await import("../../../src/lib/dynamo.js");
+
+    expect(mod.TESTER_CHARACTERS_TABLE).toBe("tester-characters-stg");
+  });
 });
 
 describe("saveConversationLog", () => {
@@ -780,5 +817,137 @@ describe("getRecentAbsenceRecords", () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(result).toEqual([]);
+  });
+});
+
+describe("getTesterCharacter", () => {
+  it("呼び出す → tester_id・character_idのKeyでGetCommandを送信する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    await getTesterCharacter("tester-1", "char-1");
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as GetCommand;
+    expect(command.input.TableName).toBe(TESTER_CHARACTERS_TABLE);
+    expect(command.input.Key).toEqual({ tester_id: "tester-1", character_id: "char-1" });
+  });
+
+  it("項目なし → null", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: undefined } as never);
+
+    const result = await getTesterCharacter("tester-1", "char-1");
+
+    expect(result).toBeNull();
+  });
+
+  it("項目あり → tester_id/character_idをtesterId/characterIdに変換して返す", async () => {
+    const item = {
+      tester_id: "tester-1",
+      character_id: "char-1",
+      packageId: "yui-modern-tokyo",
+      label: "キャラクター1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Item: item } as never);
+
+    const result = await getTesterCharacter("tester-1", "char-1");
+
+    expect(result).toEqual(testerCharacter());
+  });
+});
+
+describe("listTesterCharacters", () => {
+  it("呼び出す → tester_idでQueryCommandを送信する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [] } as never);
+
+    await listTesterCharacters("tester-1");
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as QueryCommand;
+    expect(command.input.TableName).toBe(TESTER_CHARACTERS_TABLE);
+    expect(command.input.KeyConditionExpression).toBe("tester_id = :tid");
+    expect(command.input.ExpressionAttributeValues).toEqual({ ":tid": "tester-1" });
+  });
+
+  it("createdAtの古い順に並べ替えて返す", async () => {
+    const items = [
+      {
+        tester_id: "tester-1",
+        character_id: "char-new",
+        packageId: "yui-modern-tokyo",
+        label: "新しい方",
+        createdAt: "2026-01-15T00:00:00.000Z",
+      },
+      {
+        tester_id: "tester-1",
+        character_id: "char-old",
+        packageId: "yui-modern-tokyo",
+        label: "古い方",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Items: items } as never);
+
+    const result = await listTesterCharacters("tester-1");
+
+    expect(result.map((c) => c.characterId)).toEqual(["char-old", "char-new"]);
+  });
+
+  it("項目なし → 空配列", async () => {
+    vi.spyOn(dynamo, "send").mockResolvedValue({ Items: [] } as never);
+
+    const result = await listTesterCharacters("tester-1");
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe("createTesterCharacter", () => {
+  it("呼び出す → 条件式付きPutCommandでtester_id/character_idを含む項目を保存する", async () => {
+    const sendSpy = vi.spyOn(dynamo, "send").mockResolvedValue({} as never);
+    const record = testerCharacter();
+
+    await createTesterCharacter(record);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0][0] as PutCommand;
+    expect(command.input.TableName).toBe(TESTER_CHARACTERS_TABLE);
+    expect(command.input.ConditionExpression).toBe("attribute_not_exists(character_id)");
+    expect(command.input.Item).toEqual({
+      tester_id: "tester-1",
+      character_id: "char-1",
+      packageId: "yui-modern-tokyo",
+      label: "キャラクター1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("保存した内容をgetTesterCharacterで読むと同じ値になる（往復）", async () => {
+    const record = testerCharacter({ characterId: "char-2", label: "2つ目" });
+    let savedItem: Record<string, unknown> | undefined;
+    vi.spyOn(dynamo, "send").mockImplementation(async (command) => {
+      if (command instanceof PutCommand) {
+        savedItem = command.input.Item as Record<string, unknown>;
+        return {} as never;
+      }
+      if (command instanceof GetCommand) {
+        return { Item: savedItem } as never;
+      }
+      throw new Error("unexpected command");
+    });
+
+    await createTesterCharacter(record);
+    const result = await getTesterCharacter("tester-1", "char-2");
+
+    expect(result).toEqual(record);
+  });
+
+  it("条件式が満たされない場合、DynamoDBが投げる例外がそのまま伝播する", async () => {
+    const error = new Error("ConditionalCheckFailedException");
+    vi.spyOn(dynamo, "send").mockRejectedValue(error);
+
+    await expect(createTesterCharacter(testerCharacter())).rejects.toThrow(
+      "ConditionalCheckFailedException"
+    );
   });
 });

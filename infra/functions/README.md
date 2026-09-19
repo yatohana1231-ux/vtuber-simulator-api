@@ -4,15 +4,25 @@ API 専用 CloudFront（`infra/lib/api-entrance.ts`。`.notes/done/api-access-co
 
 ## `api-auth.js`
 
-viewer request イベントに紐付ける CloudFront Function（ランタイム: cloudfront-js-2.0）。API 専用 CloudFront の唯一の入口で Basic 認証の資格情報を検証し、通らなければその場で 401 を返す。通ったリクエストは `Authorization` ヘッダーを削除してからオリジン（API Gateway）に転送する（API Gateway 側には送らない）。
+viewer request イベントに紐付ける CloudFront Function（ランタイム: cloudfront-js-2.0）。API 専用 CloudFront の唯一の入口で Basic 認証の資格情報を検証し、通らなければその場で 401 を返す。通ったリクエストは `Authorization` ヘッダーを削除し、照合したテスターの ID を `x-tester-id` ヘッダーに入れてからオリジン（API Gateway）に転送する（API Gateway 側には元の `Authorization` は送らない）。
 
 ### 振る舞い
 
-1. `OPTIONS`（CORS のプリフライト）は資格情報なしでそのまま通す。
-2. `authorization` ヘッダーが `Basic <base64(id:password)>` の形でなければ 401。base64 をデコードし、最初の `:` で ID とパスワードに分ける（パスワードに `:` が含まれていてもよい）。ID・パスワードのどちらかが空でも 401。
-3. KeyValueStore（`cf.kvs()`、1関数に1つ）から ID をキーに値を読む。キーが無い（未登録の ID）と例外になるため捕まえて 401 にする。値の形式が不正（`salt:hash` の形でない、どちらかが空）でも 401。
-4. `sha256(salt + ":" + password)` を計算し、KVS の `hash` と**全長比較の定数時間比較**（長さが違えば即 false、同じなら全文字の XOR を OR で集めて 0 かどうか）で照合する。`crypto.timingSafeEqual` は cloudfront-js-2.0 に無いための自前実装（[`api-access-control-roadmap.md`](../../../.notes/done/api-access-control-roadmap.md) の「フェーズ1の確認結果」参照）。一致しなければ 401。
-5. 通れば `delete request.headers.authorization` してから `request` を返す。
+1. 判定より前に、リクエストに含まれる `x-tester-id` ヘッダーを必ず削除する（クライアントが偽の値を送ってきても、この時点で消える。後述のとおり照合成功時にだけ確かめた ID の値で入れ直す）。
+2. `OPTIONS`（CORS のプリフライト）は資格情報なしでそのまま通す（`x-tester-id` は 1. で消えたまま付かない）。
+3. `authorization` ヘッダーが `Basic <base64(id:password)>` の形でなければ 401。base64 をデコードし、最初の `:` で ID とパスワードに分ける（パスワードに `:` が含まれていてもよい）。ID・パスワードのどちらかが空でも 401。
+4. KeyValueStore（`cf.kvs()`、1関数に1つ）から ID をキーに値を読む。キーが無い（未登録の ID）と例外になるため捕まえて 401 にする。値の形式が不正（`salt:hash` の形でない、どちらかが空）でも 401。
+5. `sha256(salt + ":" + password)` を計算し、KVS の `hash` と**全長比較の定数時間比較**（長さが違えば即 false、同じなら全文字の XOR を OR で集めて 0 かどうか）で照合する。`crypto.timingSafeEqual` は cloudfront-js-2.0 に無いための自前実装（[`api-access-control-roadmap.md`](../../../.notes/done/api-access-control-roadmap.md) の「フェーズ1の確認結果」参照）。一致しなければ 401（`x-tester-id` は付かないまま）。
+6. 通れば `delete request.headers.authorization` し、照合した ID を `x-tester-id` ヘッダー（値は UTF-8 の base64url、パディングなし）に入れてから `request` を返す。
+
+### `x-tester-id` ヘッダー（テスターの ID の受け渡し）
+
+`.notes/tester-character-ownership-roadmap.md` の「API の契約」に基づく。API 専用 CloudFront は API キー（CloudFront しか持たない）を付けて API Gateway を呼ぶため、`x-tester-id` はこの関数が付けたものしか API Gateway には届かない。
+
+- **付けるタイミング:** Basic 認証の資格情報の照合に成功したリクエストにのみ、`Authorization` を削除するのと同時に付ける。`OPTIONS`・401 応答には付かない。
+- **符号化:** 照合した ID（UTF-8 文字列）を base64url（パディングなし。`+` → `-`、`/` → `_`、末尾の `=` を除く）にした文字列を値にする。標準の `Buffer.from(str, "utf8").toString("base64")` を作ったうえで、上記の置き換え・除去を自前のループで行っている（正規表現・`Buffer` の `"base64url"` エンコーディングは使わない）。理由: cloudfront-js-2.0 で `Buffer.from(str, "base64url")`/`toString("base64url")` が使えるかはフェーズ1で確認できておらず（確認できたのは `"base64"` のみ。[`api-access-control-roadmap.md`](../../../.notes/done/api-access-control-roadmap.md) の「フェーズ1の確認結果」参照）、不安があるため自前実装にした。
+- **偽物の除去:** クライアントが送ってきた `x-tester-id` ヘッダーは、`OPTIONS` かどうかの判定より前（関数の冒頭）で必ず削除する。したがって、照合に成功したときは確かめた ID の値で必ず上書きされ、それ以外（401・`OPTIONS`）では付かない。
+- Lambda 側（`x-tester-id` のデコードと、テスターとキャラクターの持ち主の確認）は別フェーズ（フェーズ3）で実装する。このフェーズではヘッダーを付けるところまで。
 
 ### KeyValueStore の値の形式
 

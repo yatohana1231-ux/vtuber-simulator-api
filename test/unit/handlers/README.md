@@ -19,6 +19,7 @@
 | `emotionUpdater.test.ts` | `src/handlers/emotionUpdater.ts` | `characterId` 未指定・`process` が 1/2 以外（未指定・3・文字列 `"1"`）で 400、process1 では `events`/`actions` が送られても `run*` に渡らないこと（記録は DB から読む。D-022）、process2 での `playerMessage`（省略時は空文字）、成功時 body は `{ mood, perception }` |
 | `memoryRetriever.test.ts` | `src/handlers/memoryRetriever.ts` | `characterId`/`process` の入力チェックは同上、process1・process2 とも `events`/`actions` が送られても `run*` に渡らないこと、成功時 body は常に `{ ok: true }`（`runMemoryRetriever` の戻り値は使わない） |
 | `dialogueGenerator.test.ts` | `src/handlers/dialogueGenerator.ts` | `characterId` 未指定・`now` の日時フォーマット不正・不明な `packageId` で 400、`message` 省略時は空文字、`mood`/`perception`（D-032 で廃止）と `events`/`actions`（D-022 で廃止）は送られても `run*` に渡らないこと、`longTimeFlag` の受け渡し、成功時 body は `{ reply }` |
+| `testerCharacters.test.ts` | `src/handlers/testerCharacters.ts` | 上記4本とは別枠（`GET`/`POST` を1つの Lambda で扱い、`handleApiRequest` を使わない。`src/testerCharacters/index.ts` の `runListTesterCharacters`/`runCreateTesterCharacter` を `vi.mock()` で差し替える）。`x-tester-id` ヘッダー無し・不正な base64url で 403、`GET` で 200、`POST` で 201（本文が無い場合は `{}` として扱う）、壊れた JSON・オブジェクトでない body で 400、`TesterCharacterInputError` で 400、`TesterCharacterLimitError` で 409、それ以外のメソッドで 405、それ以外の例外で 500、ログに `x-tester-id` の値・`headers` が出ないこと |
 
 ## 入力チェック（F-018）
 

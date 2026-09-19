@@ -265,6 +265,23 @@ export interface AbsenceRecord {
 }
 
 // -------------------------------------------------------
+// テスターのキャラクターの所有（tester-character-ownership-roadmap フェーズ3）
+//
+// キャラクター記憶テーブルとは別の新しいテーブル（環境変数
+// TESTER_CHARACTERS_TABLE）に、テスターごとに持つキャラクターの一覧を保存する。
+// DynamoDB 上のキー名（tester_id・character_id）とは異なり、こちらはコード内で
+// 扱いやすいキャメルケースの名前にしている（dynamo.ts で相互に変換する）。
+// -------------------------------------------------------
+
+export interface TesterCharacter {
+  testerId: string;
+  characterId: string; // サーバーが発番する UUID
+  packageId: string;
+  label: string;
+  createdAt: string; // ISO8601
+}
+
+// -------------------------------------------------------
 // エンドポイントリクエスト/レスポンス型
 //
 // 機能ごとに独立した API エンドポイントとして公開するため、

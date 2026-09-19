@@ -4,7 +4,7 @@
 
 | テストファイル | 対象 | 内容 |
 |---|---|---|
-| `apiAuthFunction.test.ts` | `infra/functions/api-auth.js` | `handler`: `OPTIONS` を資格情報なしで通すこと、正しい資格情報（コロンを含むパスワード・日本語の ID/パスワードを含む）で `authorization` ヘッダーを削除して通すこと、誤ったパスワード・未登録の ID・`Authorization` なし・`Basic` 以外の形式・壊れた base64・空の ID/パスワード・KVS の値の形式不正で 401 になること、401 応答の CORS ヘッダー（許可したオリジンのときだけ `access-control-allow-origin`/`vary: origin` が付き、`www-authenticate` は付かないこと）、`statusDescription`/`body` の形。ファイルサイズが CloudFront Functions の上限（10 KB）未満であること |
+| `apiAuthFunction.test.ts` | `infra/functions/api-auth.js` | `handler`: `OPTIONS` を資格情報なしで通すこと、正しい資格情報（コロンを含むパスワード・日本語の ID/パスワードを含む）で `authorization` ヘッダーを削除して通すこと、誤ったパスワード・未登録の ID・`Authorization` なし・`Basic` 以外の形式・壊れた base64・空の ID/パスワード・KVS の値の形式不正で 401 になること、401 応答の CORS ヘッダー（許可したオリジンのときだけ `access-control-allow-origin`/`vary: origin` が付き、`www-authenticate` は付かないこと）、`statusDescription`/`body` の形。`x-tester-id` ヘッダー（照合に成功したら ID を UTF-8 の base64url にして付けること〔ASCII・日本語・記号を含む ID〕、クライアントが送った偽物は照合成功時に置き換わり、401・`OPTIONS` では消えること）。ファイルサイズが CloudFront Functions の上限（10 KB）未満であること |
 
 ## CloudFront Functions のコードの読み込み方
 

@@ -23,6 +23,9 @@
     },
     "apiKeyVersion": {
       "stg": 2
+    },
+    "enforceCharacterOwnership": {
+      "stg": false
     }
   }
 }

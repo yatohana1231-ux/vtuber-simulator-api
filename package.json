@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:bundle && npm run build:content",
-    "build:bundle": "esbuild src/handlers/absenceSimulator.ts src/handlers/emotionUpdater.ts src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts --bundle --platform=node --target=node24 --format=esm --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text",
+    "build:bundle": "esbuild src/handlers/absenceSimulator.ts src/handlers/emotionUpdater.ts src/handlers/memoryRetriever.ts src/handlers/dialogueGenerator.ts src/handlers/testerCharacters.ts --bundle --platform=node --target=node24 --format=esm --outdir=dist --out-extension:.js=.mjs --external:@aws-sdk/* --loader:.mustache=text",
     "build:content": "node scripts/copy-content.mjs",
     "build:watch": "npm run build:content && npm run build:bundle -- --watch",
     "test": "vitest run",
@@ -12,7 +12,10 @@
     "test:ai": "node test/ai-response/run.mjs",
     "testers:add": "tsx scripts/manage-testers.ts add",
     "testers:remove": "tsx scripts/manage-testers.ts remove",
-    "testers:list": "tsx scripts/manage-testers.ts list"
+    "testers:list": "tsx scripts/manage-testers.ts list",
+    "testers:assign": "tsx scripts/manage-testers.ts assign",
+    "testers:characters": "tsx scripts/manage-testers.ts characters",
+    "testers:unassign": "tsx scripts/manage-testers.ts unassign"
   },
   "engines": {
     "node": ">=24"

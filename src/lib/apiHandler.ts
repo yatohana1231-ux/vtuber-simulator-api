@@ -7,13 +7,18 @@
 // -------------------------------------------------------
 
 import type { CharacterPackage } from "../types.js";
+import { getTesterCharacter } from "./dynamo.js";
 import { loadRequestedPackage } from "./packages.js";
+import { getTesterIdFromEvent } from "./testerId.js";
 import { createResponse, parseRequestBody } from "./utils.js";
 
 export type LambdaResponse = ReturnType<typeof createResponse>;
 
 /** 400 を返すための例外。メッセージがそのまま { "error": message } になる */
 export class BadRequestError extends Error {}
+
+/** 403 を返すための例外。メッセージがそのまま { "error": message } になる */
+export class ForbiddenError extends Error {}
 
 /** ログ出力用の、イベントの要約（秘密を含まない） */
 export interface EventLogSummary {
@@ -64,6 +69,11 @@ export function summarizeEventForLog(event: unknown): EventLogSummary {
  * （"invalid JSON body"）にする。パースできてもオブジェクトでない場合
  * （null・配列・数値・文字列・真偽値）も 400（"request body must be a JSON
  * object"）にする。SyntaxError 以外の例外はそのまま 500 にする（F-018）。
+ *
+ * 環境変数 `ENFORCE_CHARACTER_OWNERSHIP` が文字列 `"true"` のときだけ、
+ * handle を呼ぶ前にキャラクターの持ち主を確かめる（それ以外の値・未設定では
+ * 今までどおり確認しない。tester-character-ownership-roadmap フェーズ3c）。
+ * 確認の内容は checkCharacterOwnership を参照。
  */
 export async function handleApiRequest(
   event: unknown,
@@ -86,8 +96,17 @@ export async function handleApiRequest(
       throw new BadRequestError("request body must be a JSON object");
     }
 
-    return await handle(parsed as Record<string, unknown>);
+    const body = parsed as Record<string, unknown>;
+
+    if (process.env.ENFORCE_CHARACTER_OWNERSHIP === "true") {
+      await checkCharacterOwnership(event, body);
+    }
+
+    return await handle(body);
   } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return createResponse(403, { error: error.message });
+    }
     if (error instanceof BadRequestError) {
       return createResponse(400, { error: error.message });
     }
@@ -97,6 +116,53 @@ export async function handleApiRequest(
       errorName: (error as Error).name,
       errorMessage: (error as Error).message,
     });
+  }
+}
+
+/**
+ * キャラクターの持ち主を確かめる（`ENFORCE_CHARACTER_OWNERSHIP=true` のときだけ
+ * handleApiRequest から呼ばれる。tester-character-ownership-roadmap フェーズ3c）。
+ *
+ * - `x-tester-id` が無い（`getTesterIdFromEvent` が null）→ ForbiddenError
+ * - `body.characterId` が空でない文字列でない → 何もしない（ハンドラー側の
+ *   `requireCharacterId` が 400 を返すのでここでは確認を飛ばす）
+ * - `(testerId, characterId)` が登録されていない（存在しない characterId を
+ *   含む）→ ForbiddenError（存在するかどうかを他人に知らせないため、
+ *   x-tester-id 無しと同じ "forbidden" にする）
+ * - `body.packageId` が文字列で、登録されている packageId と違う →
+ *   BadRequestError（F-010 の解消）
+ * - `body.packageId` が省略（undefined）→ 登録されている packageId を body に
+ *   入れる（body を書き換える。null・文字列以外はここでは弾かない。
+ *   requirePackage 側の検証に委ねる）
+ *
+ * ログにはテスター ID・characterId を出さない。
+ */
+async function checkCharacterOwnership(
+  event: unknown,
+  body: Record<string, unknown>
+): Promise<void> {
+  const testerId = getTesterIdFromEvent(event);
+  if (testerId === null) {
+    throw new ForbiddenError("forbidden");
+  }
+
+  const characterId = body.characterId;
+  if (typeof characterId !== "string" || characterId === "") {
+    return;
+  }
+
+  const testerCharacter = await getTesterCharacter(testerId, characterId);
+  if (testerCharacter === null) {
+    throw new ForbiddenError("forbidden");
+  }
+
+  const requestedPackageId = body.packageId;
+  if (typeof requestedPackageId === "string") {
+    if (requestedPackageId !== testerCharacter.packageId) {
+      throw new BadRequestError("packageId does not match the character");
+    }
+  } else if (requestedPackageId === undefined) {
+    body.packageId = testerCharacter.packageId;
   }
 }
 

@@ -2,20 +2,30 @@
  * テスターの資格情報を CloudFront KeyValueStore（API 専用 CloudFront が
  * viewer request の CloudFront Function（`infra/functions/api-auth.js`）で
  * 照合する ID/パスワード）に登録・削除・一覧するローカル用スクリプト。
+ * あわせて、既存の `characterId`（ブラウザ側で作られたもの）をテスターに
+ * 割り当てる・一覧する・外すコマンドも持つ（DynamoDB の
+ * TesterCharactersTable を直接操作する。`.notes/tester-character-ownership-roadmap.md`
+ * 検討事項1・方針2）。
  *
- * `.notes/api-access-control-roadmap.md` フェーズ4。
+ * `.notes/api-access-control-roadmap.md` フェーズ4／`.notes/tester-character-ownership-roadmap.md` フェーズ5。
  *
  * 使い方（`api/` 配下で npm scripts 経由。`--` の後がこのスクリプトへの引数）:
  *   npm run testers:add -- <id> [options]
  *   npm run testers:add -- <id> --generate [options]
  *   npm run testers:remove -- <id> [options]
  *   npm run testers:list -- [options]
+ *   npm run testers:assign -- <testerId> <characterId> [--package <packageId>] [--label <名前>]
+ *   npm run testers:characters -- <testerId>
+ *   npm run testers:unassign -- <testerId> <characterId>
  *   npm run testers:list -- --help
  *
  *   直接 tsx を呼ぶ場合:
  *   npx tsx scripts/manage-testers.ts add <id> [options]
  *   npx tsx scripts/manage-testers.ts remove <id> [options]
  *   npx tsx scripts/manage-testers.ts list [options]
+ *   npx tsx scripts/manage-testers.ts assign <testerId> <characterId> [options]
+ *   npx tsx scripts/manage-testers.ts characters <testerId> [options]
+ *   npx tsx scripts/manage-testers.ts unassign <testerId> <characterId> [options]
  *   npx tsx scripts/manage-testers.ts --help
  *
  * オプション:
@@ -23,18 +33,24 @@
  *                       登録に成功した場合のみ、生成したパスワードを標準出力に
  *                       1回だけ表示する（ファイル・ログには書かない）。
  *   --stage <name>     ステージ名（既定: stg）。現時点ではスタック名は固定
- *                       （`VtuberSimulatorStack`）のため、--kvs-arn 省略時の
+ *                       （`VtuberSimulatorStack`）のため、--kvs-arn／--table 省略時の
  *                       解決には使っていない（将来ステージごとにスタックを
  *                       分けたときのための予約）
- *   --kvs-arn <arn>    KeyValueStore の ARN。省略時は
+ *   --kvs-arn <arn>    （add/remove/list のみ）KeyValueStore の ARN。省略時は
  *                       `aws cloudformation describe-stacks --stack-name VtuberSimulatorStack`
  *                       の出力 `TesterKeyValueStoreArn` から取得する（読み取りのみ）
+ *   --table <名前>     （assign/characters/unassign のみ）TesterCharactersTable の
+ *                       テーブル名。省略時は上記スタックの出力
+ *                       `TesterCharactersTableName` から取得する（読み取りのみ）
+ *   --package <id>     （assign のみ）割り当てる packageId（既定: yui-modern-tokyo）
+ *   --label <名前>     （assign のみ）キャラクターの表示名（既定: 引き継いだキャラクター）
  *
  * 前提:
  *   - AWS CLI v2 がインストール済みで、有効な資格情報（環境変数 / プロファイル）が
  *     設定されていること。
- *   - このスクリプトは AWS への変更操作（put-key / delete-key）を実行しうる。
- *     実行前に、KeyValueStore を持つスタックがデプロイ済みであることを確認すること。
+ *   - このスクリプトは AWS への変更操作（put-key / delete-key、および
+ *     dynamodb put-item / delete-item）を実行しうる。実行前に、対象のテーブル・
+ *     KeyValueStore を持つスタックがデプロイ済みであることを確認すること。
  *
  * パスワードの扱い:
  *   - コマンドライン引数では受け取らない（シェルの履歴に残るため）。
@@ -66,6 +82,12 @@ const execFileAsync = promisify(execFile);
 
 export const MAX_TESTER_ID_BYTES = 512;
 export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_LABEL_LENGTH = 1;
+export const MAX_LABEL_LENGTH = 30;
+export const DEFAULT_ASSIGN_PACKAGE_ID = "yui-modern-tokyo";
+export const DEFAULT_ASSIGN_LABEL = "引き継いだキャラクター";
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * テスターの ID が妥当かを確かめる。
@@ -96,6 +118,45 @@ export function validatePassword(password: string): string | null {
   const length = Array.from(password).length;
   if (length < MIN_PASSWORD_LENGTH) {
     return `パスワードは ${MIN_PASSWORD_LENGTH} 文字以上にしてください。`;
+  }
+  return null;
+}
+
+/**
+ * `characterId` が UUID の形かを確かめる（`assign`/`unassign` 用）。
+ * 妥当なら null。空文字、UUID の形（8-4-4-4-12桁の16進数）でなければエラー理由を返す。
+ * サーバーが `crypto.randomUUID()` で発番する形式なので、大文字小文字は問わない。
+ */
+export function validateCharacterId(id: string): string | null {
+  if (id.length === 0) {
+    return "characterId を空にすることはできません。";
+  }
+  if (!UUID_PATTERN.test(id)) {
+    return "characterId は UUID の形式（例: 123e4567-e89b-12d3-a456-426614174000）にしてください。";
+  }
+  return null;
+}
+
+/**
+ * `packageId` が妥当かを確かめる（`assign` 用）。妥当なら null。
+ * このスクリプトはパッケージの存在確認までは行わない（AWS を呼ばずに検証したいため）。
+ * 存在しない packageId を割り当てても、後続の API 呼び出しが 400 で拒否する。
+ */
+export function validatePackageId(packageId: string): string | null {
+  if (packageId.length === 0) {
+    return "packageId を空にすることはできません。";
+  }
+  return null;
+}
+
+/**
+ * `label` が妥当かを確かめる（`assign` 用、1〜30文字）。妥当なら null。
+ * サロゲートペアを含む文字列でも文字数を正しく数える。
+ */
+export function validateLabel(label: string): string | null {
+  const length = Array.from(label).length;
+  if (length < MIN_LABEL_LENGTH || length > MAX_LABEL_LENGTH) {
+    return `label は ${MIN_LABEL_LENGTH}〜${MAX_LABEL_LENGTH} 文字にしてください。`;
   }
   return null;
 }
@@ -131,18 +192,36 @@ export function createStoredValue(password: string, saltHex: string): string {
   return `${saltHex}:${hash}`;
 }
 
-export type Command = "add" | "remove" | "list";
+export type Command = "add" | "remove" | "list" | "assign" | "characters" | "unassign";
 
 export interface ParsedArgs {
   help: boolean;
   command?: Command;
+  /** add/remove: テスター ID。assign/characters/unassign: テスター ID */
   id?: string;
+  /** assign/unassign: characterId */
+  characterId?: string;
   stage: string;
   kvsArn?: string;
   generate: boolean;
+  /** assign のみ */
+  packageId?: string;
+  /** assign のみ */
+  label?: string;
+  /** assign/characters/unassign のみ: TesterCharactersTable のテーブル名 */
+  table?: string;
 }
 
-const VALID_COMMANDS: readonly Command[] = ["add", "remove", "list"];
+const VALID_COMMANDS: readonly Command[] = [
+  "add",
+  "remove",
+  "list",
+  "assign",
+  "characters",
+  "unassign",
+];
+const COMMANDS_WITH_TESTER_ID: readonly Command[] = ["add", "remove", "assign", "characters", "unassign"];
+const COMMANDS_WITH_CHARACTER_ID: readonly Command[] = ["assign", "unassign"];
 
 /**
  * `process.argv.slice(2)` 相当の引数配列をパースする。
@@ -172,6 +251,27 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       result.kvsArn = value;
       i++;
+    } else if (arg === "--table") {
+      const value = argv[i + 1];
+      if (value === undefined) {
+        throw new Error("--table には値が必要です。");
+      }
+      result.table = value;
+      i++;
+    } else if (arg === "--package") {
+      const value = argv[i + 1];
+      if (value === undefined) {
+        throw new Error("--package には値が必要です。");
+      }
+      result.packageId = value;
+      i++;
+    } else if (arg === "--label") {
+      const value = argv[i + 1];
+      if (value === undefined) {
+        throw new Error("--label には値が必要です。");
+      }
+      result.label = value;
+      i++;
     } else if (arg.startsWith("--")) {
       throw new Error(`未知のオプション: ${arg}`);
     } else {
@@ -183,23 +283,56 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return result;
   }
 
-  const [command, id] = positionals;
+  const [command, first, second] = positionals;
   if (command !== undefined) {
     if ((VALID_COMMANDS as string[]).indexOf(command) === -1) {
-      throw new Error(`未知のコマンド: ${command}（add / remove / list のいずれか）`);
+      throw new Error(
+        `未知のコマンド: ${command}（add / remove / list / assign / characters / unassign のいずれか）`
+      );
     }
     result.command = command as Command;
   }
-  if (id !== undefined) {
-    result.id = id;
+  if (first !== undefined) {
+    result.id = first;
+  }
+  if (second !== undefined) {
+    result.characterId = second;
   }
 
-  if ((result.command === "add" || result.command === "remove") && result.id === undefined) {
-    throw new Error(`${result.command} には ID を指定してください。`);
+  if (
+    result.command !== undefined &&
+    COMMANDS_WITH_TESTER_ID.indexOf(result.command) !== -1 &&
+    result.id === undefined
+  ) {
+    throw new Error(`${result.command} にはテスター ID を指定してください。`);
+  }
+
+  if (
+    result.command !== undefined &&
+    COMMANDS_WITH_CHARACTER_ID.indexOf(result.command) !== -1 &&
+    result.characterId === undefined
+  ) {
+    throw new Error(`${result.command} には characterId を指定してください。`);
   }
 
   if (result.generate && result.command !== "add") {
     throw new Error("--generate は add コマンドでのみ指定できます。");
+  }
+
+  if (result.packageId !== undefined && result.command !== "assign") {
+    throw new Error("--package は assign コマンドでのみ指定できます。");
+  }
+
+  if (result.label !== undefined && result.command !== "assign") {
+    throw new Error("--label は assign コマンドでのみ指定できます。");
+  }
+
+  if (
+    result.table !== undefined &&
+    result.command !== undefined &&
+    ["assign", "characters", "unassign"].indexOf(result.command) === -1
+  ) {
+    throw new Error("--table は assign / characters / unassign コマンドでのみ指定できます。");
   }
 
   return result;
@@ -419,6 +552,146 @@ async function listKeys(kvsArn: string): Promise<string[]> {
 }
 
 // -------------------------------------------------------
+// DynamoDB（TesterCharactersTable）操作
+// テーブルのキー・属性は src/lib/dynamo.ts の createTesterCharacter 等と揃える
+// （パーティションキー tester_id・ソートキー character_id、属性 packageId・label・createdAt）。
+// -------------------------------------------------------
+
+/** put-item が条件付き書き込みの失敗（既に同じキーがある）で失敗したことを表す例外 */
+class ConditionalCheckFailedError extends Error {
+  constructor() {
+    super("ConditionalCheckFailedException");
+    this.name = "ConditionalCheckFailedError";
+  }
+}
+
+async function resolveTesterCharactersTableNameFromStack(
+  stackName = "VtuberSimulatorStack"
+): Promise<string> {
+  const stdout = await runAwsCli([
+    "cloudformation",
+    "describe-stacks",
+    "--stack-name",
+    stackName,
+    "--output",
+    "json",
+  ]);
+  const parsed = JSON.parse(stdout) as {
+    Stacks?: Array<{ Outputs?: Array<{ OutputKey?: string; OutputValue?: string }> }>;
+  };
+  const outputs = parsed.Stacks?.[0]?.Outputs ?? [];
+  const found = outputs.find((o) => o.OutputKey === "TesterCharactersTableName");
+  if (!found || typeof found.OutputValue !== "string") {
+    throw new Error(
+      `スタック ${stackName} の出力に TesterCharactersTableName が見つかりません。--table を指定してください。`
+    );
+  }
+  return found.OutputValue;
+}
+
+interface DynamoStringAttribute {
+  S?: string;
+}
+
+/**
+ * TesterCharactersTable に項目を追加する（`attribute_not_exists(character_id)` の条件付き）。
+ * 既に同じ `(tester_id, character_id)` があれば ConditionalCheckFailedError を投げる。
+ */
+async function putTesterCharacterItem(
+  table: string,
+  testerId: string,
+  characterId: string,
+  packageId: string,
+  label: string,
+  createdAt: string
+): Promise<void> {
+  const item = {
+    tester_id: { S: testerId },
+    character_id: { S: characterId },
+    packageId: { S: packageId },
+    label: { S: label },
+    createdAt: { S: createdAt },
+  };
+  try {
+    await execFileAsync(
+      "aws",
+      [
+        "dynamodb",
+        "put-item",
+        "--table-name",
+        table,
+        "--item",
+        JSON.stringify(item),
+        "--condition-expression",
+        "attribute_not_exists(character_id)",
+      ],
+      { maxBuffer: 10 * 1024 * 1024 }
+    );
+  } catch (err) {
+    const failure = err as ExecFileFailure;
+    if (failure.stderr && failure.stderr.includes("ConditionalCheckFailedException")) {
+      throw new ConditionalCheckFailedError();
+    }
+    if (!failure.stderr) {
+      throw new Error("aws dynamodb put-item の実行に失敗しました。");
+    }
+    throw new Error(`aws dynamodb put-item の実行に失敗しました: ${failure.stderr.trim()}`);
+  }
+}
+
+interface TesterCharacterRow {
+  characterId: string;
+  packageId: string;
+  label: string;
+  createdAt: string;
+}
+
+/** テスターのキャラクターの一覧を、作成日時（createdAt）の古い順に返す */
+async function queryTesterCharacterItems(
+  table: string,
+  testerId: string
+): Promise<TesterCharacterRow[]> {
+  const stdout = await runAwsCli([
+    "dynamodb",
+    "query",
+    "--table-name",
+    table,
+    "--key-condition-expression",
+    "tester_id = :tid",
+    "--expression-attribute-values",
+    JSON.stringify({ ":tid": { S: testerId } }),
+    "--output",
+    "json",
+  ]);
+  const parsed = JSON.parse(stdout) as {
+    Items?: Array<Record<string, DynamoStringAttribute>>;
+  };
+  const rows = (parsed.Items ?? []).map((item) => ({
+    characterId: item.character_id?.S ?? "",
+    packageId: item.packageId?.S ?? "",
+    label: item.label?.S ?? "",
+    createdAt: item.createdAt?.S ?? "",
+  }));
+  rows.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  return rows;
+}
+
+async function deleteTesterCharacterItem(
+  table: string,
+  testerId: string,
+  characterId: string
+): Promise<void> {
+  await runAwsCli([
+    "dynamodb",
+    "delete-item",
+    "--table-name",
+    table,
+    "--key",
+    JSON.stringify({ tester_id: { S: testerId }, character_id: { S: characterId } }),
+  ]);
+}
+
+// -------------------------------------------------------
 // コマンド
 // -------------------------------------------------------
 
@@ -475,24 +748,122 @@ async function cmdList(kvsArn: string): Promise<void> {
   }
 }
 
+/**
+ * 既存の characterId（ブラウザで作られたもの）をテスターに割り当てる。
+ * 既に登録済み（同じ tester_id・character_id）なら上書きせず、その旨を表示する。
+ */
+async function cmdAssign(
+  table: string,
+  testerId: string,
+  characterId: string,
+  packageId: string,
+  label: string
+): Promise<void> {
+  const idError = validateTesterId(testerId);
+  if (idError) {
+    throw new Error(idError);
+  }
+  const characterIdError = validateCharacterId(characterId);
+  if (characterIdError) {
+    throw new Error(characterIdError);
+  }
+  const packageIdError = validatePackageId(packageId);
+  if (packageIdError) {
+    throw new Error(packageIdError);
+  }
+  const labelError = validateLabel(label);
+  if (labelError) {
+    throw new Error(labelError);
+  }
+
+  const createdAt = new Date().toISOString();
+  try {
+    await putTesterCharacterItem(table, testerId, characterId, packageId, label, createdAt);
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedError) {
+      console.log(`すでに登録されています: testerId=${testerId} characterId=${characterId}`);
+      return;
+    }
+    throw err;
+  }
+
+  console.log(
+    `割り当てました: testerId=${testerId} characterId=${characterId} packageId=${packageId} label=${label} createdAt=${createdAt}`
+  );
+}
+
+/** テスターのキャラクターの一覧を表示する。 */
+async function cmdCharacters(table: string, testerId: string): Promise<void> {
+  const idError = validateTesterId(testerId);
+  if (idError) {
+    throw new Error(idError);
+  }
+
+  const rows = await queryTesterCharacterItems(table, testerId);
+  if (rows.length === 0) {
+    console.log(`テスター ${testerId} のキャラクターは登録されていません。`);
+    return;
+  }
+  console.log(`テスター ${testerId} のキャラクター:`);
+  for (const row of rows) {
+    console.log(
+      `  - characterId=${row.characterId} packageId=${row.packageId} label=${row.label} createdAt=${row.createdAt}`
+    );
+  }
+}
+
+/**
+ * テスターとキャラクターの割り当てを消す。
+ * DynamoDB 上のキャラクターのデータ（会話ログ・記憶など）自体は消えない旨を表示する。
+ */
+async function cmdUnassign(table: string, testerId: string, characterId: string): Promise<void> {
+  const idError = validateTesterId(testerId);
+  if (idError) {
+    throw new Error(idError);
+  }
+  const characterIdError = validateCharacterId(characterId);
+  if (characterIdError) {
+    throw new Error(characterIdError);
+  }
+
+  await deleteTesterCharacterItem(table, testerId, characterId);
+
+  console.log(`割り当てを削除しました: testerId=${testerId} characterId=${characterId}`);
+  console.log(
+    "DynamoDB 上のキャラクターのデータ（会話ログ・記憶など）は削除していません（残っています）。"
+  );
+}
+
 function printHelp(): void {
-  console.log(`使い方: npm run testers:<add|remove|list> -- <command向け引数> [options]
+  console.log(`使い方: npm run testers:<add|remove|list|assign|characters|unassign> -- <command向け引数> [options]
       （直接呼ぶ場合: npx tsx scripts/manage-testers.ts <command> [options]）
 
 API 専用 CloudFront が照合するテスターの資格情報を KeyValueStore に登録・削除・一覧する。
+あわせて、既存の characterId をテスターに割り当てる・一覧する・外すこともできる
+（DynamoDB の TesterCharactersTable を直接操作する）。
 
 コマンド:
-  add <id>      テスターを登録する（既存の ID があれば上書き）。パスワードは画面に表示せず入力させる
-                （--generate を付けると自動生成し、登録成功時のみ1回だけ表示する）
-  remove <id>   テスターを削除する
-  list          登録済みのテスター ID を一覧する（値は表示しない）
+  add <id>                       テスターを登録する（既存の ID があれば上書き）。パスワードは画面に表示せず入力させる
+                                  （--generate を付けると自動生成し、登録成功時のみ1回だけ表示する）
+  remove <id>                    テスターを削除する
+  list                           登録済みのテスター ID を一覧する（値は表示しない）
+  assign <testerId> <characterId>
+                                  既存の characterId をテスターに割り当てる（既に登録済みなら何もしない）
+                                  --package 省略時は yui-modern-tokyo、--label 省略時は「引き継いだキャラクター」
+  characters <testerId>          そのテスターのキャラクターの一覧（characterId・packageId・label・createdAt）
+  unassign <testerId> <characterId>
+                                  割り当てを削除する（DynamoDB 上のキャラクターのデータ〔会話ログ・記憶など〕は削除しない）
 
 オプション:
   --generate         （add のみ）パスワードを対話入力せず自動生成する（base64url 20文字）
+  --package <id>     （assign のみ）割り当てる packageId（既定: yui-modern-tokyo）
+  --label <名前>     （assign のみ）キャラクターの表示名（既定: 引き継いだキャラクター、1〜30文字）
   --stage <name>     ステージ名（既定: stg）
-  --kvs-arn <arn>    KeyValueStore の ARN。省略時は
+  --kvs-arn <arn>    （add/remove/list のみ）KeyValueStore の ARN。省略時は
                      aws cloudformation describe-stacks --stack-name VtuberSimulatorStack
                      の出力 TesterKeyValueStoreArn から取得する（読み取りのみ）
+  --table <名前>     （assign/characters/unassign のみ）TesterCharactersTable のテーブル名。省略時は上記スタックの出力
+                     TesterCharactersTableName から取得する（読み取りのみ）
   -h, --help         このヘルプを表示する
 
 例:
@@ -501,6 +872,10 @@ API 専用 CloudFront が照合するテスターの資格情報を KeyValueStor
   npm run testers:remove -- tester1
   npm run testers:list
   npm run testers:list -- --kvs-arn arn:aws:cloudfront::123456789012:key-value-store/xxxxxxxx
+  npm run testers:assign -- tester1 123e4567-e89b-12d3-a456-426614174000
+  npm run testers:assign -- tester1 123e4567-e89b-12d3-a456-426614174000 --package yui-modern-tokyo --label "旧アカウント"
+  npm run testers:characters -- tester1
+  npm run testers:unassign -- tester1 123e4567-e89b-12d3-a456-426614174000
 
 前提: AWS CLI v2、有効な AWS 資格情報（一時的な資格情報の場合はリージョンの STS エンドポイントが必要）。
 `);
@@ -514,17 +889,38 @@ async function main(): Promise<void> {
     return;
   }
 
-  const kvsArn = parsed.kvsArn ?? (await resolveKvsArnFromStack());
+  if (parsed.command === "add" || parsed.command === "remove" || parsed.command === "list") {
+    const kvsArn = parsed.kvsArn ?? (await resolveKvsArnFromStack());
+    switch (parsed.command) {
+      case "add":
+        await cmdAdd(kvsArn, parsed.id!, parsed.generate);
+        break;
+      case "remove":
+        await cmdRemove(kvsArn, parsed.id!);
+        break;
+      case "list":
+        await cmdList(kvsArn);
+        break;
+    }
+    return;
+  }
 
+  const table = parsed.table ?? (await resolveTesterCharactersTableNameFromStack());
   switch (parsed.command) {
-    case "add":
-      await cmdAdd(kvsArn, parsed.id!, parsed.generate);
+    case "assign":
+      await cmdAssign(
+        table,
+        parsed.id!,
+        parsed.characterId!,
+        parsed.packageId ?? DEFAULT_ASSIGN_PACKAGE_ID,
+        parsed.label ?? DEFAULT_ASSIGN_LABEL
+      );
       break;
-    case "remove":
-      await cmdRemove(kvsArn, parsed.id!);
+    case "characters":
+      await cmdCharacters(table, parsed.id!);
       break;
-    case "list":
-      await cmdList(kvsArn);
+    case "unassign":
+      await cmdUnassign(table, parsed.id!, parsed.characterId!);
       break;
   }
 }
