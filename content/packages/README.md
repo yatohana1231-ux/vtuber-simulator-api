@@ -7,6 +7,7 @@
 | ファイル | 世界観 | キャラクター | 生活様式 |
 |---|---|---|---|
 | `yui-modern-tokyo.json` | `modern-tokyo` | `yui` | `tokyo-highschool-vtuber` |
+| `kohaku-modern-fantasy-tokyo.json` | `modern-fantasy-tokyo` | `kohaku` | `tokyo-grad-student-researcher` |
 
 ## フィールド
 

@@ -1,0 +1,35 @@
+{
+  "key": "tokyo-grad-student-researcher",
+  "schedules": {
+    "weekday": [
+      { "start": "00:30", "end": "01:30", "activity": "入浴・寝る前の自由時間", "fatigueChangePerHour": -2 },
+      { "start": "01:30", "end": "09:30", "activity": "就寝", "fatigueChangePerHour": -6 },
+      { "start": "09:30", "end": "10:30", "activity": "起床・身支度・遅めの朝食", "fatigueChangePerHour": 1 },
+      { "start": "10:30", "end": "11:30", "activity": "大学へ移動", "fatigueChangePerHour": 2 },
+      { "start": "11:30", "end": "13:00", "activity": "研究室で文献の調査・読み込み", "fatigueChangePerHour": 3 },
+      { "start": "13:00", "end": "14:00", "activity": "昼食・休憩", "fatigueChangePerHour": -1 },
+      { "start": "14:00", "end": "16:00", "activity": "ゼミや講義、指導教員との打ち合わせ", "fatigueChangePerHour": 4 },
+      { "start": "16:00", "end": "19:30", "activity": "大学図書館や研究室で研究・論文の執筆", "fatigueChangePerHour": 4 },
+      { "start": "19:30", "end": "20:30", "activity": "古書店や本屋に寄り道しながら帰宅", "fatigueChangePerHour": 1 },
+      { "start": "20:30", "end": "21:30", "activity": "夕食", "fatigueChangePerHour": -1 },
+      { "start": "21:30", "end": "00:30", "activity": "頭の冴える夜更けに、読書や調べものの続き、論文の執筆", "fatigueChangePerHour": 2 }
+    ],
+    "holiday": [
+      { "start": "00:30", "end": "01:30", "activity": "入浴・寝る前の自由時間", "fatigueChangePerHour": -2 },
+      { "start": "01:30", "end": "10:30", "activity": "就寝", "fatigueChangePerHour": -6 },
+      { "start": "10:30", "end": "12:00", "activity": "起床・遅めの朝ごはん・のんびりする", "fatigueChangePerHour": -1 },
+      { "start": "12:00", "end": "14:00", "activity": "たまった家事や部屋の片付け", "fatigueChangePerHour": 2 },
+      { "start": "14:00", "end": "15:00", "activity": "昼食", "fatigueChangePerHour": -1 },
+      { "start": "15:00", "end": "18:30", "activity": "外出（古書店めぐりや図書館、散歩）", "fatigueChangePerHour": 2 },
+      { "start": "18:30", "end": "20:00", "activity": "喫茶店や自宅での読書", "fatigueChangePerHour": -2 },
+      { "start": "20:00", "end": "21:00", "activity": "夕食", "fatigueChangePerHour": -1 },
+      { "start": "21:00", "end": "00:30", "activity": "趣味の読書や研究のメモの整理、夜の散歩", "fatigueChangePerHour": -1 }
+    ]
+  },
+  "eventKinds": [
+    { "key": "daily", "label": "日常のひとコマ", "weight": 4 },
+    { "key": "small-joy", "label": "ちょっと嬉しいこと", "weight": 2 },
+    { "key": "small-trouble", "label": "ちょっとしたトラブルや失敗", "weight": 2 },
+    { "key": "discovery", "label": "新しい発見や、はじめての体験", "weight": 2 }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "kohaku-modern-fantasy-tokyo",
+  "displayName": "コハク（異種族と魔法のある現代の東京）",
+  "description": "ミミズクの獣人で、魔法史を研究する大学院生。あなたを「少年」と呼ぶ、飄々とした年上のお姉さん。",
+  "fixedGreeting": "やあ、少年。少し話していくかい？",
+  "world": "modern-fantasy-tokyo",
+  "character": "kohaku",
+  "lifestyle": "tokyo-grad-student-researcher"
+}
