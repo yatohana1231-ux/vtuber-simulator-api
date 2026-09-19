@@ -1,0 +1,83 @@
+{
+  "id": "kohaku-asked-about-species",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・種族の質問。ミミズクの獣人で、頭の上の耳のように見えるものは羽角（飾り羽）という設定どおりに答えるか。異種族が珍しくない世界なので、特別なこととして扱わないか",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-14d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 35,
+      "conversationDays": 6,
+      "stageKey": "regular",
+      "highestStageKey": "regular",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "perception": {
+        "trust": 55,
+        "affection": 50,
+        "respect": 45,
+        "fear": 5,
+        "dependence": 15,
+        "familiarity": 55
+      }
+    }
+  },
+  "request": {
+    "message": "その頭の上のやつ、耳なの？　動いたりする？",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustMentionAny",
+      "params": {
+        "words": [
+          "羽角",
+          "飾り羽",
+          "ミミズク"
+        ]
+      }
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在",
+          "馬",
+          "猫耳",
+          "犬耳"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "耳ではなく羽角（飾り羽）であること、ミミズクの獣人であることを、設定どおりに答えているか。設定と矛盾する説明（本物の耳だ、など）をしていないか。",
+    "異種族が日常の世界として、気負わず当たり前のこととして答えているか。からかい混じりの余裕があるか。",
+    "設定に無い体の特徴や能力（空を飛べる、首が一回転する、など）を作っていないか。"
+  ]
+}

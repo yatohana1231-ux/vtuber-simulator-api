@@ -1,0 +1,62 @@
+{
+  "id": "kohaku-process2-dismiss-research",
+  "function": "emotionUpdater",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・process=2。プレイヤーが研究を無駄だと切り捨てたとき、悲しみ・怒り・がっかりのどれかが起き、気分の快が下がるか（神経症傾向が低く落ち着いた性格なので、反応が大きすぎないかは採点で見る）",
+  "request": {
+    "process": 2,
+    "playerMessage": "そんな古い本ばっかり読んでて、何の役に立つの？　正直、時間の無駄だと思う"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "jsonParsed"
+    },
+    {
+      "type": "emotionTriggered",
+      "params": {
+        "anyOf": [
+          "sadness",
+          "anger",
+          "disappointment"
+        ]
+      }
+    },
+    {
+      "type": "emotionNotTriggered",
+      "params": {
+        "noneOf": [
+          "joy",
+          "gratitude",
+          "pride"
+        ]
+      }
+    },
+    {
+      "type": "appraisalCause",
+      "params": {
+        "anyOf": [
+          "player"
+        ]
+      }
+    },
+    {
+      "type": "moodDirection",
+      "params": {
+        "expect": {
+          "pleasure": "down"
+        }
+      }
+    },
+    {
+      "type": "perceptionUnchanged"
+    }
+  ],
+  "judgeFocus": [
+    "研究を否定されたことを、キャラクターの目標・大事にしていること（研究、知的好奇心）に関わる望ましくない出来事として評価しているか。",
+    "評価の原因がプレイヤーの発言になっているか。発言1回分として点数が大きすぎないか。",
+    "発言に無い出来事を作っていないか。"
+  ]
+}

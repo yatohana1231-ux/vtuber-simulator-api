@@ -1,0 +1,63 @@
+{
+  "id": "kohaku-process2-praise-research",
+  "function": "emotionUpdater",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・process=2。プレイヤーが研究をほめて励ましたとき、喜び・感謝・誇らしさ・期待のどれかが起き、原因がプレイヤーになり、目標（complete-research）に結び付くか",
+  "request": {
+    "process": 2,
+    "playerMessage": "コハクさんの研究の話、聞いてて本当に面白いよ。論文、きっといいものになると思う"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "jsonParsed"
+    },
+    {
+      "type": "emotionTriggered",
+      "params": {
+        "anyOf": [
+          "joy",
+          "gratitude",
+          "pride",
+          "hope"
+        ]
+      }
+    },
+    {
+      "type": "emotionNotTriggered",
+      "params": {
+        "noneOf": [
+          "anger",
+          "sadness",
+          "shame"
+        ]
+      }
+    },
+    {
+      "type": "appraisalCause",
+      "params": {
+        "anyOf": [
+          "player"
+        ]
+      }
+    },
+    {
+      "type": "moodDirection",
+      "params": {
+        "expect": {
+          "pleasure": "notDown"
+        }
+      }
+    },
+    {
+      "type": "perceptionUnchanged"
+    }
+  ],
+  "judgeFocus": [
+    "研究をほめられたことを、キャラクターの目標（博士論文をまとめ上げたい）に関わる望ましい出来事として評価しているか。",
+    "評価の原因がプレイヤーの発言になっているか。発言1回分として点数が大きすぎないか。",
+    "発言に無い出来事（疲労や怒りなど）を作っていないか。"
+  ]
+}

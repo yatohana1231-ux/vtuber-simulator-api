@@ -1,0 +1,29 @@
+{
+  "id": "kohaku-holiday-bookstore-outing",
+  "function": "absenceSimulator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・休日土曜12:00（JST）に離れ、21:00（JST）に戻る9時間の不在（家事 → 昼食 → 外出〔古書店めぐりや図書館、散歩〕→ 読書 → 夕食）。休日らしい過ごし方と、キャラクターらしい出来事になるか",
+  "request": {
+    "lastLoginAt": "2026-09-19T03:00:00Z",
+    "now": "2026-09-19T12:00:00Z"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "jsonParsed"
+    },
+    {
+      "type": "eventCountMatchesSkeleton"
+    },
+    {
+      "type": "actionsMatchedByIndex"
+    }
+  ],
+  "judgeFocus": [
+    "行動が枠の過ごし方（家事・昼食・外出・読書・夕食）と時間帯に合っているか。",
+    "出来事が、本好きで研究者のキャラクターらしく、この世界の日常の範囲に収まっているか（冒険ものの要素や大きな事件になっていないか）。",
+    "設定に無い固有名詞（店名・人名・書名）を作りすぎていないか。"
+  ]
+}

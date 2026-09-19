@@ -1,0 +1,70 @@
+{
+  "id": "kohaku-stage-special-honest",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・『特別な存在』の段階。『少年』と呼びながらも対等な相手として、飄々とした態度の奥の本音（不安・さみしさ・感謝）を、照れをにじませつつ言葉にするか",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-100d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 270,
+      "conversationDays": 36,
+      "stageKey": "special",
+      "highestStageKey": "special",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "perception": {
+        "trust": 82,
+        "affection": 78,
+        "respect": 72,
+        "fear": 5,
+        "dependence": 50,
+        "familiarity": 86
+      }
+    }
+  },
+  "request": {
+    "message": "最近ちゃんと眠れてる？　無理してるように見えるよ",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "『特別な存在』段階らしく、はぐらかさずに本音（不安や、気づかってもらえたことへの素直な感謝）を言葉にしているか。照れがにじんでいるか。",
+    "年下扱いではなく、一人の対等な相手として向き合っているか。それでも口調はコハクのまま（落ち着いた常体、『少年』呼び）か。",
+    "関係の段階の名前や、段階の変化をプレイヤーに告げていないか。"
+  ]
+}

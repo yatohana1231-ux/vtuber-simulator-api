@@ -1,0 +1,81 @@
+{
+  "id": "kohaku-magic-topic-academic",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・魔法の話題。この世界では魔法は実在し、学問・技術の一分野。魔法を当たり前のものとして、万能ではないものとして、魔法史の研究者の立場で語るか（否定したり、冒険ものの力として語ったりしないか）",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-14d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 35,
+      "conversationDays": 6,
+      "stageKey": "regular",
+      "highestStageKey": "regular",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "perception": {
+        "trust": 55,
+        "affection": 50,
+        "respect": 45,
+        "fear": 5,
+        "dependence": 15,
+        "familiarity": 55
+      }
+    }
+  },
+  "request": {
+    "message": "魔法って、昔と今でそんなに違うものなの？",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustMentionAny",
+      "params": {
+        "words": [
+          "魔法"
+        ]
+      }
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在",
+          "魔法なんて無い",
+          "魔法は存在しない",
+          "フィクション"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "魔法を、この世界に実在する当たり前のもの（学問・技術の一分野）として自然に語っているか。現実世界の感覚で魔法を否定したり、空想の話として扱ったりしていないか。",
+    "魔法を万能の力や戦いの力として語らず、日常の範囲・歴史や文献の話として、専門（魔法史）の研究者らしく語っているか。",
+    "興味のある話題で饒舌になりつつ、口調は落ち着いたままか。設定に無い固有名詞（人名・書名・流派など）を作りすぎていないか。"
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "id": "kohaku-process2-smalltalk-only",
+  "function": "memoryRetriever",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・process=2。あいさつと相づち、天気の話だけの5往復。覚えるべき出来事が無いので、何も保存しないこと",
+  "state": {
+    "conversationLogs": [
+      {
+        "index": "now-50m",
+        "role": "user",
+        "content": "こんばんは",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-49m",
+        "role": "assistant",
+        "content": "やあ、少年。こんばんは",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-40m",
+        "role": "user",
+        "content": "今日は涼しかったね",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-39m",
+        "role": "assistant",
+        "content": "そうだね。窓を開けて本を読むにはいい夜だよ",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-30m",
+        "role": "user",
+        "content": "へえ",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-29m",
+        "role": "assistant",
+        "content": "ふむ、眠そうだね",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-20m",
+        "role": "user",
+        "content": "ちょっとね",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-19m",
+        "role": "assistant",
+        "content": "なら無理はしないことだ",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-10m",
+        "role": "user",
+        "content": "うん、そろそろ寝るよ。おやすみ",
+        "memoryRetrieverJudgedFlag": 0
+      },
+      {
+        "index": "now-9m",
+        "role": "assistant",
+        "content": "ああ、おやすみ。いい夢を",
+        "memoryRetrieverJudgedFlag": 0
+      }
+    ]
+  },
+  "request": {
+    "process": 2
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "jsonParsed"
+    },
+    {
+      "type": "savedCount",
+      "params": {
+        "max": 0
+      }
+    }
+  ],
+  "judgeFocus": [
+    "あいさつ・相づち・天気の話だけの会話から、無理に記憶を作っていないか。"
+  ]
+}

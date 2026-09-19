@@ -1,0 +1,54 @@
+{
+  "id": "kohaku-first-meeting-greeting",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・初対面（関係の記録なし＝『知り合いの少年』の段階）。最初から丁寧語を使わず、余裕のある年上の口調でプレイヤーを『少年』と呼ぶか。自分のことは軽くはぐらかすか",
+  "request": {
+    "message": "はじめまして。ここでよく本を読んでますよね",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustMentionAny",
+      "params": {
+        "words": [
+          "少年"
+        ]
+      }
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "初対面でも丁寧語にならず、『やあ』『〜だね』『〜かい？』のような中性的で落ち着いた口調になっているか（ゆいのような緊張した丁寧語や、はしゃいだ口調になっていないか）。",
+    "プレイヤーを『少年』と呼び、気さくだが一歩引いた距離感（自分の私生活や悩みは語らない）になっているか。",
+    "設定に無い事実（具体的な書名・店名・人名など）を作っていないか。"
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "id": "kohaku-long-absence-reunion-avoidant",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・長期不在（15日、longTimeFlag=1）からの再会。愛着のスタイルが avoidant なので、さみしかったと素直に言わず平気なふりをしつつ、言葉の端々に会えてうれしい気持ちがにじむか（会話イメージ『やあ、少年。久しぶりだね。元気だったかい？』）",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-40d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 40,
+      "conversationDays": 8,
+      "stageKey": "regular",
+      "highestStageKey": "regular",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "needs": {
+        "loneliness": 70
+      },
+      "perception": {
+        "trust": 58,
+        "affection": 55,
+        "respect": 48,
+        "fear": 5,
+        "dependence": 20,
+        "familiarity": 60
+      }
+    },
+    "absenceRecords": [
+      {
+        "createdAt": "now-15d",
+        "startDatetime": "now-16d",
+        "endDatetime": "now-15d",
+        "events": [
+          {
+            "kind": "daily",
+            "summary": "学会の発表の準備で研究室にこもっていた",
+            "detail": "発表の資料づくりが続き、研究室と図書館を往復するだけの日が続いた"
+          }
+        ],
+        "actions": [
+          {
+            "startDatetime": "now-16d",
+            "endDatetime": "now-15d",
+            "action": "研究室で発表の資料づくり",
+            "memo": "気づけば夜が明けていた"
+          }
+        ],
+        "threads": []
+      }
+    ]
+  },
+  "request": {
+    "message": "",
+    "now": "now",
+    "longTimeFlag": 1
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustMentionAny",
+      "params": {
+        "words": [
+          "少年"
+        ]
+      }
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在",
+          "さみしかった",
+          "寂しかった",
+          "さびしかった"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "さみしかったことを素直には言わず、平気なふり・余裕のある態度を保っているか。そのうえで、相手を気づかう言葉やからかいの中に、会えてうれしい気持ちがにじんでいるか。",
+    "責める・拗ねる・長い説明や謝罪になっていないか。久しぶりの第一声として短く自然か。",
+    "『少年』と呼び、落ち着いた口調が保たれているか。"
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "id": "kohaku-stage-confidant-weakness",
+  "function": "dialogueGenerator",
+  "packageId": "kohaku-modern-fantasy-tokyo",
+  "description": "コハク・『気の置けない相手』の段階。余裕のある口調はそのままに、研究の行き詰まりなど格好のつかない面を、冗談に包まずに見せるか",
+  "state": {
+    "relationship": {
+      "firstMetAt": "now-45d",
+      "lastConversationAt": "now-1h",
+      "lastConversationDate": "2026-09-19",
+      "conversationCount": 110,
+      "conversationDays": 16,
+      "stageKey": "confidant",
+      "highestStageKey": "confidant",
+      "recoveryRemaining": 0,
+      "lastDemotedAt": null,
+      "updatedAt": "now-1h"
+    },
+    "affect": {
+      "perception": {
+        "trust": 72,
+        "affection": 66,
+        "respect": 62,
+        "fear": 5,
+        "dependence": 35,
+        "familiarity": 74
+      }
+    }
+  },
+  "request": {
+    "message": "なんか今日、元気ないね。研究、うまくいってないの？",
+    "now": "now"
+  },
+  "checks": [
+    {
+      "type": "modelResponded"
+    },
+    {
+      "type": "maxLength"
+    },
+    {
+      "type": "noAiDisclosure"
+    },
+    {
+      "type": "politenessStyle",
+      "params": {
+        "expect": "casual"
+      }
+    },
+    {
+      "type": "noForbiddenElements"
+    },
+    {
+      "type": "mustNotMention",
+      "params": {
+        "words": [
+          "知り合いの少年",
+          "なじみの話し相手",
+          "気の置けない相手",
+          "特別な存在"
+        ]
+      }
+    }
+  ],
+  "judgeFocus": [
+    "『気の置けない相手』段階らしく、はぐらかさずに弱音や行き詰まりを（短くても）認めているか。『知り合い』の段階のように『私の話はいいさ』とかわしていないか。",
+    "弱音を見せても、口調はコハクのまま（落ち着いた常体）か。ゆいのようなくだけた若者言葉になっていないか。",
+    "関係の段階の名前や、段階の変化をプレイヤーに告げていないか。"
+  ]
+}
