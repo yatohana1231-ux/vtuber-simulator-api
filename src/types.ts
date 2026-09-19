@@ -366,7 +366,7 @@ export interface DialogueGeneratorResponse {
 }
 
 // -------------------------------------------------------
-// debugCharacterState（デバッグ専用。.notes/debug-character-state-roadmap.md）
+// debugCharacterState（デバッグ専用。.notes/done/debug-character-state-roadmap.md）
 // -------------------------------------------------------
 
 /**

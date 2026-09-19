@@ -348,7 +348,7 @@ export class VtuberSimulatorStack extends cdk.Stack {
     // 新規: デバッグ専用 Lambda（POST /debug-character-state）
     //
     // mood/perception の値を直接指定して状態レコードを書き換える、デバッグ用の
-    // エンドポイント（.notes/debug-character-state-roadmap.md）。ステージごとに
+    // エンドポイント（.notes/done/debug-character-state-roadmap.md）。ステージごとに
     // 有効・無効を切り替える（context.enableDebugEndpoints[stageName] === true の
     // ときだけ作る。prod では作らない想定）。Bedrock の権限は持たせないため、
     // 全関数に Bedrock 権限を付与する ENDPOINTS のループには含めない

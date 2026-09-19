@@ -3,7 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { VtuberSimulatorStack } from "../lib/vtuber-simulator-stack";
 
-// .notes/debug-character-state-roadmap.md フェーズ1。
+// .notes/done/debug-character-state-roadmap.md フェーズ1。
 // context.enableDebugEndpoints[stageName] === true のときだけ、デバッグ専用の
 // Lambda（POST /debug-character-state）が作られること、Bedrock の権限を持たず
 // テーブルへの権限が最小限（characterMemoryTable は GetItem・PutItem、

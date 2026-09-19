@@ -3,7 +3,7 @@
 // デバッグ専用: mood/perception の値を直接指定して DynamoDB の状態レコード
 // （キャラクター記憶テーブルの index = "state"）を書き換える（POST /debug-character-state）。
 // Bedrock は呼ばない。stg などステージを限定して有効化する
-// （.notes/debug-character-state-roadmap.md）。
+// （.notes/done/debug-character-state-roadmap.md）。
 // -------------------------------------------------------
 
 import { getCharacterState, saveCharacterState } from "../lib/dynamo.js";

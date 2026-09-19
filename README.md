@@ -691,7 +691,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 ### `POST /debug-character-state`（デバッグ専用）
 
-2026-09-19 に追加（`.notes/debug-character-state-roadmap.md`、D-038）。状態レコード（キャラクター記憶テーブルの `index = "state"`）の `mood`・`perception` を直接読み書きする。ブラウザのデモ（`front-web`）のデバッグパネルの「状態」タブが使う。**`infra/cdk.json` の `context.enableDebugEndpoints.<stage>` が `true` のステージ（stg）にだけ作る。**専用の Lambda で、Bedrock の権限は持たない（キャラクター記憶テーブルの GetItem・PutItem と、持ち主の確認のテスターのキャラクターテーブルの GetItem だけ）。持ち主の確認は4つのエンドポイントと同じく共通処理（`src/lib/apiHandler.ts`）で行う。
+2026-09-19 に追加（`.notes/done/debug-character-state-roadmap.md`、D-038）。状態レコード（キャラクター記憶テーブルの `index = "state"`）の `mood`・`perception` を直接読み書きする。ブラウザのデモ（`front-web`）のデバッグパネルの「状態」タブが使う。**`infra/cdk.json` の `context.enableDebugEndpoints.<stage>` が `true` のステージ（stg）にだけ作る。**専用の Lambda で、Bedrock の権限は持たない（キャラクター記憶テーブルの GetItem・PutItem と、持ち主の確認のテスターのキャラクターテーブルの GetItem だけ）。持ち主の確認は4つのエンドポイントと同じく共通処理（`src/lib/apiHandler.ts`）で行う。
 
 **リクエスト**:
 ```json

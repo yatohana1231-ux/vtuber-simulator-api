@@ -26,7 +26,7 @@ const PERCEPTION_KEYS = [
 ] as const;
 
 /**
- * mood/perception の入力を検証する（.notes/debug-character-state-roadmap.md「方針3」）。
+ * mood/perception の入力を検証する（.notes/done/debug-character-state-roadmap.md「方針3」）。
  * - `undefined` → 指定なし（`undefined` を返す。もう片方の値をそのまま保存するために使う）
  * - それ以外（`null` を含む）でオブジェクトでない・配列である場合は `BadRequestError`
  * - 6項目ちょうどでない（不足・余分）場合は `BadRequestError`
