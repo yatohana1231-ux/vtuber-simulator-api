@@ -60,7 +60,7 @@ npm run test:ai -- --save-baseline                             # 今回の集計
 | `estimates.json` | 見積もりに使う、機能ごとと採点の1回あたりの想定トークン数 |
 | `scenarios/` | シナリオ（`<機能名>/<id>.json`。id は機能の中で一意）。下の「シナリオの一覧」を参照 |
 | `rubrics/` | LLM による採点の評価基準（`<機能名>.md`。書式は [`rubrics/README.md`](rubrics/README.md)） |
-| `baseline/` | 基準の集計（`--save-baseline` で作る。git に残す） |
+| `baseline/` | 基準の集計（`--save-baseline` で作る。git に残す。今の基準の説明は [`baseline/README.md`](baseline/README.md)） |
 | `results/` | 実行ごとの結果（git 管理外） |
 
 ## 判定の種類（シナリオの `checks` に `{ "type": ..., "params": ... }` で書く）

@@ -37,6 +37,7 @@ interface EndpointDef {
   id: string; // CDK construct id の接頭辞
   fileBaseName: string; // dist/<fileBaseName>.mjs（esbuild のエントリポイント名と一致）
   resourcePath: string; // API Gateway のパス（kebab-case）
+  bedrockModelId: string; // Lambda の環境変数 BEDROCK_MODEL_ID に設定するモデルID（D-024: 機能ごとにモデルを使い分ける）
   tables: {
     characterMemory?: TableAccess;
     conversationLogs?: TableAccess;
@@ -49,6 +50,8 @@ const ENDPOINTS: EndpointDef[] = [
     id: "AbsenceSimulator",
     fileBaseName: "absenceSimulator",
     resourcePath: "absence-simulator",
+    // D-024: 不在期間シミュレーションは Claude Haiku 4.5 を使用
+    bedrockModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
     tables: {
       // キャラクター記憶テーブル: 重要記憶の読み出し（getRelevantMemories、Query）、
       // 最新の不在期間の記録の読み出し（getLatestAbsenceRecord、GetItem）と
@@ -64,18 +67,24 @@ const ENDPOINTS: EndpointDef[] = [
     id: "EmotionUpdater",
     fileBaseName: "emotionUpdater",
     resourcePath: "emotion-updater",
+    // D-024: 感情更新は Amazon Nova Lite を使用
+    bedrockModelId: "apac.amazon.nova-lite-v1:0",
     tables: { characterMemory: "readwrite" },
   },
   {
     id: "MemoryRetriever",
     fileBaseName: "memoryRetriever",
     resourcePath: "memory-retriever",
+    // D-024: 記憶の重要度判定は Amazon Nova 2 Lite を使用
+    bedrockModelId: "jp.amazon.nova-2-lite-v1:0",
     tables: { characterMemory: "readwrite", conversationLogs: "readwrite" },
   },
   {
     id: "DialogueGenerator",
     fileBaseName: "dialogueGenerator",
     resourcePath: "dialogue-generator",
+    // D-024: 対話生成は Claude Haiku 4.5 を使用
+    bedrockModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
     tables: { characterMemory: "read", conversationLogs: "readwrite" },
   },
 ];
@@ -188,7 +197,7 @@ export class VtuberSimulatorStack extends cdk.Stack {
         timeout: cdk.Duration.seconds(120),
         memorySize: 512,
         environment: {
-          BEDROCK_MODEL_ID: "apac.amazon.nova-lite-v1:0",
+          BEDROCK_MODEL_ID: endpoint.bedrockModelId,
           CHARACTER_MEMORY_TABLE: characterMemoryTable.tableArn,
           CONVERSATION_LOGS_TABLE: conversationLogsTable.tableArn,
           EVENTS_TABLE: eventsTable.tableName,

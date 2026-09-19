@@ -12,7 +12,7 @@ VTuber キャラクターとのチャットインタラクションを提供す�
 | 言語 | TypeScript (ESM) |
 | ビルドツール | esbuild |
 | テスト | Vitest（単体テスト。`test/unit/`） |
-| LLM | Amazon Bedrock (Converse API) / `apac.amazon.nova-lite-v1:0` |
+| LLM | Amazon Bedrock (Converse API)。機能ごとにモデルを使い分ける（下の「LLM のモデル」） |
 | データベース | Amazon DynamoDB |
 | API ゲートウェイ | Amazon API Gateway (REST API) |
 | IaC | AWS CDK (TypeScript) |
@@ -107,6 +107,20 @@ api/
 - Bedrock の応答の使用量（入力・出力・キャッシュの読み出し/書き込みのトークン数）を `[bedrock] usage ...` としてログに出す。
 - 現行モデル（Nova Lite）のキャッシュの TTL は5分。区切りまでが最低トークン数（1K）に届かなくても、`absenceSimulator` の固定部（約850トークン）でキャッシュの読み出しを確認した（2026-09-19）。
 
+### LLM のモデル
+
+機能ごとにモデルを使い分けている（`.notes/decision-history.md` の D-024。2026-09-19 に AI 応答テストの比較をもとに決定）。モデルは CDK（`infra/lib/vtuber-simulator-stack.ts` の `ENDPOINTS[].bedrockModelId`）が Lambda ごとの環境変数 `BEDROCK_MODEL_ID` で渡し、`lib/bedrock.ts` が呼び出しのたびに読む。モデルによる呼び出し方の違い（Claude は `temperature` と `topP` を併用できない）は `lib/modelProfiles.ts` が吸収する。
+
+| 機能 | モデル（推論プロファイル） | 理由 |
+|---|---|---|
+| `absenceSimulator` | Claude Haiku 4.5（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`） | 行動と時間帯の整合・出来事の質が大きく上がる |
+| `dialogueGenerator` | Claude Haiku 4.5（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`） | キャラクターらしさの差が最も大きく、速さも保てる |
+| `emotionUpdater` | Amazon Nova Lite（`apac.amazon.nova-lite-v1:0`） | 比較で最高位かつ最安 |
+| `memoryRetriever` | Amazon Nova 2 Lite（`jp.amazon.nova-2-lite-v1:0`） | Claude Haiku 4.5 と同点で、料金は約4分の1 |
+
+- モデルやプロンプトを変えるときは、AI 応答テスト（`npm run test:ai`、[`test/ai-response/README.md`](test/ai-response/README.md)）で基準と比べてから変える。
+- Claude Haiku 4.5 はプロンプトがキャッシュの最低トークン数（4,096）に届かないため、プロンプトキャッシュが効かない。
+
 ### フロントが組み立てる呼び出しパターン
 
 以下はフロントが「どの状況でどのエンドポイントをどの順で呼ぶべきか」を判断する際の推奨パターン（詳細は後述の「API仕様」を参照）。
@@ -142,7 +156,7 @@ graph TB
             EVENTS[v-simu-events<br/>イベントテーブル<br/>不在期間の記録の履歴]
         end
         subgraph AILayer["AI Layer"]
-            BEDROCK[Amazon Bedrock<br/>Converse API<br/>apac.amazon.nova-lite-v1:0]
+            BEDROCK[Amazon Bedrock<br/>Converse API<br/>機能ごとのモデル]
         end
     end
 
