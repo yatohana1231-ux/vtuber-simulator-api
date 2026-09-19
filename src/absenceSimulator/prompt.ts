@@ -110,7 +110,7 @@ function formatRecentEventSummariesText(summaries: string[]): string {
   return summaries.map((summary) => `・${summary}`).join("\n");
 }
 
-/** 【重要な記憶】: 既存の eventResolver と同じ "・要約（キャラクターの解釈）" の形 */
+/** 【重要な記憶】: "・要約（キャラクターの解釈）" の形 */
 function formatMemoriesText(memories: CharacterMemoryItem[]): string {
   if (memories.length === 0) return "（なし）";
   return memories

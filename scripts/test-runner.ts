@@ -5,13 +5,12 @@
  *   npx tsx scripts/test-runner.ts <process> [options]
  *
  * プロセス:
- *   eventResolver      - イベント生成
- *   actionPlanner      - アクション生成（eventResolver の結果を内部で生成）
+ *   absenceSimulator   - 不在期間のシミュレーション（出来事・行動・続きの話題の生成）
  *   emotionUpdater     - 感情更新（プロセス1 or 2）
  *   memoryRetriever    - 重要記憶判定（プロセス1 or 2）
  *   dialogueGenerator  - 会話生成
  *   all                - プロセス1相当の全パイプライン
- *                        （eventResolver→actionPlanner→emotionUpdater→memoryRetriever→dialogueGenerator）
+ *                        （absenceSimulator→emotionUpdater→memoryRetriever→dialogueGenerator）
  *                        ※エンドポイント分割後、この呼び出し順序を決めるのはフロント側の責務になる。
  *                          このコマンドは各エンドポイント間で受け渡すデータの流れをテストするために、
  *                          その順序を関数直呼びで再現している。
@@ -21,7 +20,7 @@
  *   CONTENT_DIR（パッケージの読み込み先。既定は api/content/）
  *
  * 例:
- *   npx tsx scripts/test-runner.ts eventResolver
+ *   npx tsx scripts/test-runner.ts absenceSimulator
  *   npx tsx scripts/test-runner.ts emotionUpdater --process 2 --message "今日は調子どう？"
  *   npx tsx scripts/test-runner.ts dialogueGenerator --longTimeFlag 1
  *   npx tsx scripts/test-runner.ts dialogueGenerator --package yui-modern-tokyo --message "配信見たよ"
@@ -39,16 +38,12 @@ process.env.CONVERSATION_LOGS_TABLE ??= "vtuber-simu-conversation-log-stg";
 process.env.EVENTS_TABLE ??= "v-simu-events-stg";
 process.env.CONTENT_DIR ??= fileURLToPath(new URL("../content", import.meta.url));
 
-import { runEventResolver } from "../src/eventResolver/index.js";
-import { runActionPlanner } from "../src/actionPlanner/index.js";
+import { runAbsenceSimulator } from "../src/absenceSimulator/index.js";
 import { runEmotionUpdater } from "../src/emotionUpdater/index.js";
 import { runMemoryRetriever } from "../src/memoryRetriever/index.js";
 import { runDialogueGenerator } from "../src/dialogueGenerator/index.js";
 import { DEFAULT_PACKAGE_ID, loadPackage } from "../src/lib/packages.js";
-import type {
-  ActionPlannerRequest,
-  EventResolverRequest,
-} from "../src/types.js";
+import type { AbsenceSimulatorRequest, AbsenceSimulatorResult } from "../src/types.js";
 
 // -------------------------------------------------------
 // CLI 引数パース
@@ -75,8 +70,7 @@ if (!processName || values.help) {
 Usage: npx tsx scripts/test-runner.ts <process> [options]
 
 Processes:
-  eventResolver      イベント生成
-  actionPlanner      アクション生成（eventResolver の結果を内部で生成）
+  absenceSimulator   不在期間のシミュレーション（出来事・行動・続きの話題の生成）
   emotionUpdater     感情更新
   memoryRetriever    重要記憶判定
   dialogueGenerator  会話生成
@@ -110,24 +104,29 @@ if (!pkg) {
   console.error(`Unknown package: ${values.package}`);
   process.exit(1);
 }
-const { world, character } = pkg;
+const { world, character, lifestyle } = pkg;
 const nowIso = nowDate.toISOString();
 const lastLoginAtIso = lastLoginAtDate.toISOString();
 const elapsedHours = (nowDate.getTime() - lastLoginAtDate.getTime()) / (1000 * 60 * 60);
 
-function buildEventResolverRequest(): EventResolverRequest {
-  return { characterId, world, character, lastLoginAt: lastLoginAtIso, now: nowIso };
-}
-
-function buildActionPlannerRequest(events: string[]): ActionPlannerRequest {
+function buildAbsenceSimulatorRequest(): AbsenceSimulatorRequest {
   return {
     characterId,
     world,
     character,
+    lifestyle,
     lastLoginAt: lastLoginAtIso,
     now: nowIso,
-    events,
   };
+}
+
+/**
+ * absenceSimulator の結果（events: AbsenceEvent[]）を、emotionUpdater/memoryRetriever が
+ * まだ受け取る「events: string[]」形式につなぐ（summary と detail をつないだ文字列）。
+ * 次のフェーズで後段が最新の記録を DB から読むようになったら削除する。
+ */
+function toLegacyEventTexts(events: AbsenceSimulatorResult["events"]): string[] {
+  return events.map((e) => `${e.summary} ${e.detail}`);
 }
 
 // -------------------------------------------------------
@@ -144,19 +143,9 @@ async function main() {
   console.log("=".repeat(60));
 
   switch (processName) {
-    case "eventResolver": {
-      const result = await runEventResolver(buildEventResolverRequest());
-      console.log("\n[RESULT] eventResolver:");
-      console.log(JSON.stringify(result, null, 2));
-      break;
-    }
-
-    case "actionPlanner": {
-      console.log("[test-runner] running eventResolver first...");
-      const eventResult = await runEventResolver(buildEventResolverRequest());
-      console.log("[test-runner] eventResolver done, running actionPlanner...");
-      const result = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
-      console.log("\n[RESULT] actionPlanner:");
+    case "absenceSimulator": {
+      const result = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
+      console.log("\n[RESULT] absenceSimulator:");
       console.log(JSON.stringify(result, null, 2));
       break;
     }
@@ -164,16 +153,15 @@ async function main() {
     case "emotionUpdater": {
       const proc = parseInt(values.process!, 10) as 1 | 2;
       if (proc === 1) {
-        console.log("[test-runner] running eventResolver + actionPlanner first...");
-        const eventResult = await runEventResolver(buildEventResolverRequest());
-        const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
+        console.log("[test-runner] running absenceSimulator first...");
+        const absenceResult = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
         const result = await runEmotionUpdater({
           characterId,
           world,
           character,
           process: 1,
-          events: eventResult.events,
-          actions: actionResult.actions,
+          events: toLegacyEventTexts(absenceResult.events),
+          actions: absenceResult.actions,
         });
         console.log("\n[RESULT] emotionUpdater (process1):");
         console.log(JSON.stringify(result, null, 2));
@@ -195,16 +183,15 @@ async function main() {
     case "memoryRetriever": {
       const proc = parseInt(values.process!, 10) as 1 | 2;
       if (proc === 1) {
-        console.log("[test-runner] running eventResolver + actionPlanner first...");
-        const eventResult = await runEventResolver(buildEventResolverRequest());
-        const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
+        console.log("[test-runner] running absenceSimulator first...");
+        const absenceResult = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
         await runMemoryRetriever({
           characterId,
           world,
           character,
           process: 1,
-          events: eventResult.events,
-          actions: actionResult.actions,
+          events: toLegacyEventTexts(absenceResult.events),
+          actions: absenceResult.actions,
         });
         console.log("\n[RESULT] memoryRetriever (process1): done (check DynamoDB)");
       } else {
@@ -232,37 +219,34 @@ async function main() {
     }
 
     case "all": {
-      console.log("\n--- [1/5] eventResolver ---");
-      const eventResult = await runEventResolver(buildEventResolverRequest());
-      console.log(JSON.stringify(eventResult, null, 2));
+      console.log("\n--- [1/4] absenceSimulator ---");
+      const absenceResult = await runAbsenceSimulator(buildAbsenceSimulatorRequest());
+      console.log(JSON.stringify(absenceResult, null, 2));
+      const legacyEvents = toLegacyEventTexts(absenceResult.events);
 
-      console.log("\n--- [2/5] actionPlanner ---");
-      const actionResult = await runActionPlanner(buildActionPlannerRequest(eventResult.events));
-      console.log(JSON.stringify(actionResult, null, 2));
-
-      console.log("\n--- [3/5] emotionUpdater ---");
+      console.log("\n--- [2/4] emotionUpdater ---");
       const { mood, perception } = await runEmotionUpdater({
         characterId,
         world,
         character,
         process: 1,
-        events: eventResult.events,
-        actions: actionResult.actions,
+        events: legacyEvents,
+        actions: absenceResult.actions,
       });
       console.log(JSON.stringify({ mood, perception }, null, 2));
 
-      console.log("\n--- [4/5] memoryRetriever ---");
+      console.log("\n--- [3/4] memoryRetriever ---");
       await runMemoryRetriever({
         characterId,
         world,
         character,
         process: 1,
-        events: eventResult.events,
-        actions: actionResult.actions,
+        events: legacyEvents,
+        actions: absenceResult.actions,
       });
       console.log("done");
 
-      console.log("\n--- [5/5] dialogueGenerator ---");
+      console.log("\n--- [4/4] dialogueGenerator ---");
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const reply = await runDialogueGenerator({
         characterId,
@@ -272,8 +256,8 @@ async function main() {
         message: values.message!,
         mood,
         perception,
-        events: eventResult.events,
-        actions: actionResult.actions,
+        events: legacyEvents,
+        actions: absenceResult.actions,
         longTimeFlag,
       });
       console.log(reply);
@@ -286,7 +270,7 @@ async function main() {
 
     default:
       console.error(`Unknown process: ${processName}`);
-      console.error("Available: eventResolver, actionPlanner, emotionUpdater, memoryRetriever, dialogueGenerator, all");
+      console.error("Available: absenceSimulator, emotionUpdater, memoryRetriever, dialogueGenerator, all");
       process.exit(1);
   }
 }

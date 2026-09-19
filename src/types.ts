@@ -106,19 +106,7 @@ export interface CharacterState {
 }
 
 // -------------------------------------------------------
-// eventResolver
-// -------------------------------------------------------
-
-export interface EventResolverResult {
-  UUID: string;
-  startDatetime: string;
-  endDatetime: string;
-  elapsed: string;
-  events: string[];
-}
-
-// -------------------------------------------------------
-// actionPlanner
+// 不在期間中の行動（absenceSimulator が生成する）
 // -------------------------------------------------------
 
 export interface Action {
@@ -126,10 +114,6 @@ export interface Action {
   endDatetime: string;
   action: string;
   memo: string;
-}
-
-export interface ActionPlannerResult {
-  actions: Action[];
 }
 
 // -------------------------------------------------------
@@ -201,22 +185,13 @@ export interface LatestAbsenceRecordItem {
   updatedAt: string;
 }
 
-export interface EventItem {
-  event_id: string;
-  characterId: string;
-  startDatetime: string;
-  endDatetime: string;
-  elapsed: string;
-  events: string[];
-  createdAt: string;
-}
-
 // -------------------------------------------------------
-// 不在期間の記録（フェーズ1では型のみ。まだどこからも使わない）
+// 不在期間の記録
 //
-// eventResolver/actionPlanner を統合する absenceSimulator（フェーズ2以降）が
-// 既存のイベントテーブルに保存する記録の形。旧形式（EventItem、events: string[]）
-// の既存データは読み飛ばす想定。詳細は
+// eventResolver/actionPlanner を統合する absenceSimulator が
+// 既存のイベントテーブルに保存する記録の形。旧 eventResolver が保存していた形式
+// （event_id/characterId/startDatetime/endDatetime/elapsed/events: string[]/createdAt の
+// フラットな形）の既存データは読み飛ばす想定。詳細は
 // .notes/absence-simulation-roadmap.md の「データ構造案」を参照。
 // -------------------------------------------------------
 
@@ -269,23 +244,6 @@ export interface AbsenceSimulatorResult {
   endDatetime: string;
   events: Array<Pick<AbsenceEvent, "kind" | "summary" | "detail">>;
   actions: Action[];
-}
-
-export interface EventResolverRequest {
-  characterId: string;
-  world: World;
-  character: CharacterDefinition;
-  lastLoginAt: string; // ISO8601
-  now: string; // ISO8601
-}
-
-export interface ActionPlannerRequest {
-  characterId: string;
-  world: World;
-  character: CharacterDefinition;
-  lastLoginAt: string; // ISO8601
-  now: string; // ISO8601
-  events: string[]; // event-resolver エンドポイントの出力
 }
 
 export interface EmotionUpdaterRequestProcess1 {

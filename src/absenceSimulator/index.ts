@@ -52,7 +52,7 @@ export async function runAbsenceSimulator(
 
   const { characterId, world, character, lifestyle } = req;
   // サーバーの現在時刻。GSI のソートキー、新しい話題の openedAt、14日の自動クローズの
-  // 基準になる（旧 eventResolver の saveEvent の createdAt と同じ扱い）。
+  // 基準になる。
   const createdAt = new Date().toISOString();
 
   const skeleton = buildAbsenceSkeleton({

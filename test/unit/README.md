@@ -11,9 +11,7 @@ Vitest で実行する単体テストコード。テストの考え方・方針�
 | [`lib/`](lib/README.md) | `src/lib/` | `bedrock.ts` / `dynamo.ts` / `packages.ts` / `utils.ts` / `timezone.ts` / `random.ts` の単体テスト |
 | [`promptPartials/`](promptPartials/README.md) | `src/promptPartials/` | 共有パーシャル（`world.mustache` / `speechExamples.mustache`）と `buildPromptContext` の単体テスト |
 | [`absenceSimulator/`](absenceSimulator/README.md) | `src/absenceSimulator/` | 不在期間のシミュレーション（骨格の生成、プロンプトの組み立て、LLM の出力の突き合わせ、本体 `runAbsenceSimulator`）の単体テスト |
-| [`handlers/`](handlers/README.md) | `src/handlers/` | `absenceSimulator`（未公開） / `eventResolver` / `actionPlanner` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator` の6ハンドラーの単体テスト（`run*` はスタブ） |
-| [`eventResolver/`](eventResolver/README.md) | `src/eventResolver/` | `runEventResolver` の単体テスト（Bedrock / DynamoDB はスタブ） |
-| [`actionPlanner/`](actionPlanner/README.md) | `src/actionPlanner/` | `runActionPlanner` の単体テスト（Bedrock / DynamoDB はスタブ） |
+| [`handlers/`](handlers/README.md) | `src/handlers/` | `absenceSimulator` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator` の4ハンドラーの単体テスト（`run*` はスタブ） |
 | [`emotionUpdater/`](emotionUpdater/README.md) | `src/emotionUpdater/` | `runEmotionUpdater` の単体テスト（Bedrock / DynamoDB はスタブ） |
 | [`memoryRetriever/`](memoryRetriever/README.md) | `src/memoryRetriever/` | `runMemoryRetriever` の単体テスト（Bedrock / DynamoDB はスタブ） |
 | [`dialogueGenerator/`](dialogueGenerator/README.md) | `src/dialogueGenerator/` | `runDialogueGenerator` の単体テスト（Bedrock / DynamoDB はスタブ） |

@@ -15,7 +15,6 @@ import type {
   CharacterMemoryItem,
   CharacterStateItem,
   ConversationLogItem,
-  EventItem,
   LatestAbsenceRecordItem,
   Mood,
   Perception,
@@ -284,16 +283,6 @@ export async function getRelevantMemories(
 export async function saveMemory(item: CharacterMemoryItem): Promise<void> {
   await dynamo.send(new PutCommand({ TableName: CHARACTER_MEMORY_TABLE, Item: item }));
   console.log(`[saveMemory] saved memory_id=${item.memory_id} index=${item.index}`);
-}
-
-// -------------------------------------------------------
-// イベントテーブル
-// -------------------------------------------------------
-
-/** events テーブルにイベントを保存する */
-export async function saveEvent(item: EventItem): Promise<void> {
-  await dynamo.send(new PutCommand({ TableName: EVENTS_TABLE, Item: item }));
-  console.log(`[saveEvent] saved event_id=${item.event_id}`);
 }
 
 // -------------------------------------------------------

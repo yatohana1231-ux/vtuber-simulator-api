@@ -4,9 +4,7 @@ Lambda のエントリーポイント。1ファイル = 1 Lambda = 1 エンド�
 
 | ファイル | エンドポイント | 呼び出す関数 |
 |---|---|---|
-| `absenceSimulator.ts` | `POST /absence-simulator`（未公開。フェーズ5でビルド対象・CDK に追加し、下の2つと差し替える） | `runAbsenceSimulator` |
-| `eventResolver.ts` | `POST /event-resolver` | `runEventResolver` |
-| `actionPlanner.ts` | `POST /action-planner` | `runActionPlanner` |
+| `absenceSimulator.ts` | `POST /absence-simulator` | `runAbsenceSimulator` |
 | `emotionUpdater.ts` | `POST /emotion-updater` | `runEmotionUpdater` |
 | `memoryRetriever.ts` | `POST /memory-retriever` | `runMemoryRetriever` |
 | `dialogueGenerator.ts` | `POST /dialogue-generator` | `runDialogueGenerator` |
@@ -18,6 +16,6 @@ Lambda のエントリーポイント。1ファイル = 1 Lambda = 1 エンド�
 3. 各機能のリクエスト型（`world` / `character` を含む）に詰め替えて `run*` を呼ぶ
 4. `createResponse` でレスポンスを返す。例外は 500
 
-`absenceSimulator.ts` は、`now` が `lastLoginAt` より前なら 400（`lastLoginAt must not be later than now`）を返す（D-020。旧 `/event-resolver` は受け付けてしまう、F-020）。パッケージの生活様式（`lifestyle`）も `run*` に渡す。
+`absenceSimulator.ts` は、`now` が `lastLoginAt` より前なら 400（`lastLoginAt must not be later than now`）を返す（D-020。削除した旧 `/event-resolver` は受け付けてしまっていた、F-020）。パッケージの生活様式（`lifestyle`）も `run*` に渡す。
 
 ビジネスロジックは持たない。リクエスト仕様は [`../../README.md`](../../README.md) の「API 仕様」を参照。

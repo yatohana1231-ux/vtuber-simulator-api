@@ -18,15 +18,20 @@ export interface VtuberSimulatorStackProps extends cdk.StackProps {
 // -------------------------------------------------------
 // エンドポイント定義
 //
-// 機能（eventResolver/actionPlanner/emotionUpdater/memoryRetriever/
+// 機能（absenceSimulator/emotionUpdater/memoryRetriever/
 // dialogueGenerator）ごとに独立した Lambda + API Gateway リソースを持つ。
 // オーケストレーション（どの順で呼ぶか）はフロント側の責務になったため、
 // バックエンドは各機能を単独で呼び出せる薄いエンドポイント群になる。
-// 5関数とも esbuild が dist/ に出力する同一アセットを共有し、
+// 4関数とも esbuild が dist/ に出力する同一アセットを共有し、
 // handler プロパティだけを関数ごとに変える。
 // -------------------------------------------------------
 
-type TableAccess = "read" | "write" | "readwrite";
+// "read"/"write"/"readwrite" は grantReadData/grantWriteData/grantReadWriteData の
+// ショートハンド（DeleteItem・UpdateItem・BatchWriteItem・Scan なども含まれる）。
+// 実際に使う操作だけに絞りたい場合は { actions: [...] } で dynamodb:* のアクション名を
+// 直接指定する（table.grant(fn, ...actions) を使う。GSI を持つテーブルでは自動的に
+// `${tableArn}/index/*` もリソースに含まれる）。
+type TableAccess = "read" | "write" | "readwrite" | { actions: string[] };
 
 interface EndpointDef {
   id: string; // CDK construct id の接頭辞
@@ -41,16 +46,19 @@ interface EndpointDef {
 
 const ENDPOINTS: EndpointDef[] = [
   {
-    id: "EventResolver",
-    fileBaseName: "eventResolver",
-    resourcePath: "event-resolver",
-    tables: { characterMemory: "read", events: "write" },
-  },
-  {
-    id: "ActionPlanner",
-    fileBaseName: "actionPlanner",
-    resourcePath: "action-planner",
-    tables: { characterMemory: "read" },
+    id: "AbsenceSimulator",
+    fileBaseName: "absenceSimulator",
+    resourcePath: "absence-simulator",
+    tables: {
+      // キャラクター記憶テーブル: 重要記憶の読み出し（getRelevantMemories、Query）、
+      // 最新の不在期間の記録の読み出し（getLatestAbsenceRecord、GetItem）と
+      // 書き込み（saveAbsenceRecord の TransactWriteItems 内の Put、PutItem）。
+      characterMemory: { actions: ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"] },
+      // イベントテーブル: 記録の保存（saveAbsenceRecord の TransactWriteItems 内の Put、
+      // PutItem）と、GSI characterId-index での直近の記録の読み出し
+      // （getRecentAbsenceRecords、Query。D-019）。
+      events: { actions: ["dynamodb:PutItem", "dynamodb:Query"] },
+    },
   },
   {
     id: "EmotionUpdater",
@@ -77,9 +85,11 @@ function grantTableAccess(
   access: TableAccess | undefined,
   fn: lambda.Function
 ): void {
+  if (access === undefined) return;
   if (access === "read") table.grantReadData(fn);
   else if (access === "write") table.grantWriteData(fn);
   else if (access === "readwrite") table.grantReadWriteData(fn);
+  else table.grant(fn, ...access.actions);
 }
 
 // -------------------------------------------------------

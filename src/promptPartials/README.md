@@ -1,6 +1,6 @@
 # promptPartials
 
-5つの機能（`eventResolver` / `actionPlanner` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator`）のプロンプトテンプレートで共有する Mustache パーシャル。特定の世界観やキャラクターの文面をテンプレートに直書きしないために、`api/content/` のデータを描画する部分をここに集約している。
+各機能（`absenceSimulator` / `emotionUpdater` / `memoryRetriever` / `dialogueGenerator`）のプロンプトテンプレートで共有する Mustache パーシャル。特定の世界観やキャラクターの文面をテンプレートに直書きしないために、`api/content/` のデータを描画する部分をここに集約している。
 
 | ファイル | 内容 | 使っているテンプレート |
 |---|---|---|
