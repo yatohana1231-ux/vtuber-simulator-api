@@ -8,7 +8,8 @@
     "build:content": "node scripts/copy-content.mjs",
     "build:watch": "npm run build:content && npm run build:bundle -- --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:ai": "node test/ai-response/run.mjs"
   },
   "engines": {
     "node": ">=24"

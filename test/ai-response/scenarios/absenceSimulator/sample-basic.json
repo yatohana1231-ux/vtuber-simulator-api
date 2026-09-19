@@ -1,0 +1,9 @@
+{
+  "id": "sample-basic",
+  "function": "absenceSimulator",
+  "description": "動作確認用の最小シナリオ（30時間の不在。フェーズ4で本番のシナリオに置き換える）",
+  "request": {
+    "lastLoginAt": "now-30h",
+    "now": "now"
+  }
+}

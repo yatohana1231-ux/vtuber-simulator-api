@@ -23,7 +23,7 @@ export default defineConfig({
   plugins: [mustachePlugin()],
   test: {
     globals: false,
-    include: ["test/unit/**/*.test.ts"],
+    include: ["test/unit/**/*.test.ts", "test/ai-response/**/*.test.ts"],
     restoreMocks: true,
     unstubEnvs: true,
     env: {

@@ -1,0 +1,8 @@
+{
+  "nova-lite":        { "modelId": "apac.amazon.nova-lite-v1:0", "displayName": "Amazon Nova Lite（現行）" },
+  "nova-2-lite":      { "modelId": "jp.amazon.nova-2-lite-v1:0", "displayName": "Amazon Nova 2 Lite（jp）" },
+  "nova-pro":         { "modelId": "apac.amazon.nova-pro-v1:0", "displayName": "Amazon Nova Pro" },
+  "claude-haiku-4-5": { "modelId": "jp.anthropic.claude-haiku-4-5-20251001-v1:0", "displayName": "Claude Haiku 4.5（jp）" },
+  "claude-sonnet-4-6":{ "modelId": "jp.anthropic.claude-sonnet-4-6", "displayName": "Claude Sonnet 4.6（jp）" },
+  "claude-sonnet-5":  { "modelId": "global.anthropic.claude-sonnet-5", "displayName": "Claude Sonnet 5（global）" }
+}

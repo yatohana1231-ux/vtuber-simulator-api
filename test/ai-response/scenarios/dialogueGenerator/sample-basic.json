@@ -1,0 +1,9 @@
+{
+  "id": "sample-basic",
+  "function": "dialogueGenerator",
+  "description": "動作確認用の最小シナリオ（挨拶への返答。フェーズ4で本番のシナリオに置き換える）",
+  "request": {
+    "message": "こんにちは",
+    "now": "now"
+  }
+}

@@ -3,6 +3,7 @@ import {
   ConverseCommand,
   type SystemContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
+import { getModelProfile } from "./modelProfiles.js";
 
 // -------------------------------------------------------
 // クライアント
@@ -12,7 +13,17 @@ const bedrockClient = new BedrockRuntimeClient({
   region: process.env.AWS_REGION,
 });
 
-export const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? "apac.amazon.nova-lite-v1:0";
+export const DEFAULT_MODEL_ID = "apac.amazon.nova-lite-v1:0";
+
+/**
+ * 呼び出しごとに使うモデル ID を決める。
+ * 優先順位: 呼び出し元が渡した override（`InvokeModelOptions.modelId`）
+ * → 環境変数 `BEDROCK_MODEL_ID`（呼び出し時点の値を読む。モジュール読み込み時に固定しない）
+ * → 既定値 `DEFAULT_MODEL_ID`。
+ */
+export function resolveModelId(override?: string): string {
+  return override ?? process.env.BEDROCK_MODEL_ID ?? DEFAULT_MODEL_ID;
+}
 
 // Bedrock の明示のキャッシュ区切り（cachePoint）は1リクエストに最大4つまで（D-017）。
 const MAX_CACHE_POINTS = 4;
@@ -69,6 +80,14 @@ function logSystemPrompt(systemPrompt: string | string[]): void {
 // Converse API ラッパー
 // -------------------------------------------------------
 
+export interface InvokeModelOptions {
+  /**
+   * このリクエストだけで使うモデル ID。省略時は環境変数 `BEDROCK_MODEL_ID`、
+   * それも無ければ `DEFAULT_MODEL_ID`（`resolveModelId` 参照）。
+   */
+  modelId?: string;
+}
+
 /**
  * Bedrock Converse API を呼び出してテキストを返す汎用関数。
  * systemPrompt を system フィールドに、userMessage を messages に渡す。
@@ -77,19 +96,28 @@ function logSystemPrompt(systemPrompt: string | string[]): void {
  * 変わりにくいものから順に並べる）で渡せる。配列で渡した場合、層の境目に Bedrock のプロンプトキャッシュの
  * 区切り（cachePoint）を入れる（D-017）。区切りを入れるかどうかは環境変数 `PROMPT_CACHE_ENABLED`
  * （既定は有効、`"false"` で無効）で切り替えられる。
+ *
+ * モデル ID は呼び出しごとに `resolveModelId(options.modelId)` で決める
+ * （options.modelId → 環境変数 `BEDROCK_MODEL_ID` → `DEFAULT_MODEL_ID` の順）。
+ * `inferenceConfig` は `temperature: 0.8` を常に渡し、`topP: 0.9` はモデルが対応する場合
+ * （`getModelProfile` が `supportsTopP: true` を返す場合）だけ足す。
  */
 export async function invokeModel(
   systemPrompt: string | string[],
   userMessage: string,
-  maxTokens = 1000
+  maxTokens = 1000,
+  options: InvokeModelOptions = {}
 ): Promise<string> {
   logSystemPrompt(systemPrompt);
   console.log("[bedrock] === userMessage ===");
   console.log(userMessage);
   console.log("[bedrock] === end ===");
 
+  const modelId = resolveModelId(options.modelId);
+  const { supportsTopP } = getModelProfile(modelId);
+
   const command = new ConverseCommand({
-    modelId: MODEL_ID,
+    modelId,
     system: buildSystemBlocks(systemPrompt),
     messages: [
       {
@@ -100,7 +128,7 @@ export async function invokeModel(
     inferenceConfig: {
       maxTokens,
       temperature: 0.8,
-      topP: 0.9,
+      ...(supportsTopP ? { topP: 0.9 } : {}),
     },
   });
 
@@ -108,7 +136,7 @@ export async function invokeModel(
 
   const usage = result.usage;
   console.log(
-    `[bedrock] usage input=${usage?.inputTokens ?? 0} output=${usage?.outputTokens ?? 0} ` +
+    `[bedrock] usage model=${modelId} input=${usage?.inputTokens ?? 0} output=${usage?.outputTokens ?? 0} ` +
       `cacheRead=${usage?.cacheReadInputTokens ?? 0} cacheWrite=${usage?.cacheWriteInputTokens ?? 0}`
   );
 
@@ -126,15 +154,16 @@ export async function invokeModel(
  * モデル出力から最初の JSON ブロックをパースして返す。
  * パース失敗時は fallback を返す。
  *
- * systemPrompt は `invokeModel` と同様、文字列または層ごとの配列を渡せる。
+ * systemPrompt・options は `invokeModel` と同様（options.modelId でモデル ID を上書きできる）。
  */
 export async function invokeModelJson<T>(
   systemPrompt: string | string[],
   userMessage: string,
   fallback: T,
-  maxTokens = 2000
+  maxTokens = 2000,
+  options: InvokeModelOptions = {}
 ): Promise<T> {
-  const raw = await invokeModel(systemPrompt, userMessage, maxTokens);
+  const raw = await invokeModel(systemPrompt, userMessage, maxTokens, options);
 
   // ```json ... ``` または { ... } を抽出
   const jsonMatch = raw.match(/```json\s*([\s\S]*?)```/) ?? raw.match(/(\{[\s\S]*\})/);

@@ -53,10 +53,11 @@ api/
 │   ├── memoryRetriever/{index.ts, prompt.ts, prompts/}     # 重要記憶管理
 │   ├── dialogueGenerator/{index.ts, prompt.ts, prompts/}   # セリフ生成
 │   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 各テンプレート共有のパーシャル
-│   └── lib/{bedrock.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts, absenceRecordText.ts}
+│   └── lib/{bedrock.ts, modelProfiles.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts, absenceRecordText.ts}
 ├── test/
 │   ├── events/                         # Lambda コンソール用のテストイベント（廃止済み `/chat` 前提のまま古い）
-│   └── unit/                           # Vitest の単体テストコード（src/ と同じフォルダ構成）
+│   ├── unit/                           # Vitest の単体テストコード（src/ と同じフォルダ構成）
+│   └── ai-response/                    # AI 応答テスト（npm run test:ai。モデル・プロンプトの比較）
 ├── vitest.config.ts                    # Vitest 設定（.mustache 変換プラグイン、CONTENT_DIR 等）
 └── package.json
 ```
@@ -65,7 +66,7 @@ api/
 
 機能（`absenceSimulator`/`emotionUpdater`/`memoryRetriever`/`dialogueGenerator`）ごとに独立した Lambda + API エンドポイントを公開する構成。**「どの処理をどの順で呼ぶか」を決めるオーケストレーションはバックエンドではなくフロントエンド（Unity、未実装）の責務**であり、バックエンド側にはもうプロセス分岐ロジックは存在しない（旧 `processChat.ts`/単一 `POST /chat` は廃止済み）。各 Lambda は「リクエストを受け取り、対応する機能を実行し、結果を返す」だけの薄いエンドポイントになっている。
 
-ただし、エンドポイント間で受け渡すデータ（不在期間の出来事・行動）は DynamoDB に保存し、後段が読む。フロントは前段の出力を後段に中継しない（2026-09-19 から。経緯は [`.notes/absence-simulation-roadmap.md`](../.notes/absence-simulation-roadmap.md)）。
+ただし、エンドポイント間で受け渡すデータ（不在期間の出来事・行動）は DynamoDB に保存し、後段が読む。フロントは前段の出力を後段に中継しない（2026-09-19 から。経緯は [`.notes/done/absence-simulation-roadmap.md`](../.notes/done/absence-simulation-roadmap.md)）。
 
 ### 主要コンポーネント
 
@@ -661,6 +662,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 ```bash
 npm test                # vitest run（単体テストを1回実行）
 npm run test:watch      # vitest（ウォッチモード）
+npm run test:ai        # AI 応答テスト（実際の Bedrock を呼ぶ。test/ai-response/README.md）
 
 npm run build          # = npm run build:bundle && npm run build:content
 npm run build:bundle   # esbuild でバンドル（下記）

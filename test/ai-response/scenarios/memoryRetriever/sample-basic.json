@@ -1,0 +1,22 @@
+{
+  "id": "sample-basic",
+  "function": "memoryRetriever",
+  "description": "動作確認用の最小シナリオ（process=2、直近5往復の会話ログから判定。フェーズ4で本番のシナリオに置き換える）",
+  "state": {
+    "conversationLogs": [
+      { "index": "now-50m", "role": "user", "content": "今日学校でテストがあったんだ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-49m", "role": "assistant", "content": "テストどうだった？", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-40m", "role": "user", "content": "まあまあかな。次は数学がんばる", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-39m", "role": "assistant", "content": "数学、一緒にがんばろうね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-30m", "role": "user", "content": "そういえば来週の日曜、一緒に映画行く約束してたよね", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-29m", "role": "assistant", "content": "うん、楽しみにしてる！", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-20m", "role": "user", "content": "何の映画にするか迷ってて", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-19m", "role": "assistant", "content": "一緒に選ぼう", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-10m", "role": "user", "content": "今日はもう寝るね、おやすみ", "memoryRetrieverJudgedFlag": 0 },
+      { "index": "now-9m", "role": "assistant", "content": "おやすみ、また明日ね", "memoryRetrieverJudgedFlag": 0 }
+    ]
+  },
+  "request": {
+    "process": 2
+  }
+}

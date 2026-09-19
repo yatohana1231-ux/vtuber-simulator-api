@@ -1,6 +1,6 @@
 # absenceSimulator
 
-不在期間のシミュレーション。旧 `eventResolver`（出来事の生成）と `actionPlanner`（行動履歴の生成）を統合するモジュールで、骨格（生活リズム・出来事の種類・続きの話題）をサーバーが決め、内容を LLM が書く。方針は [`.notes/absence-simulation-roadmap.md`](../../../.notes/absence-simulation-roadmap.md)、骨格の生成規則は [`.notes/decision-history.md`](../../../.notes/decision-history.md) の D-018。
+不在期間のシミュレーション。旧 `eventResolver`（出来事の生成）と `actionPlanner`（行動履歴の生成）を統合するモジュールで、骨格（生活リズム・出来事の種類・続きの話題）をサーバーが決め、内容を LLM が書く。方針は [`.notes/done/absence-simulation-roadmap.md`](../../../.notes/done/absence-simulation-roadmap.md)、骨格の生成規則は [`.notes/decision-history.md`](../../../.notes/decision-history.md) の D-018。
 
 エンドポイントは `POST /absence-simulator`（ハンドラーは [`../handlers/absenceSimulator.ts`](../handlers/README.md)。2026-09-19 に旧 `/event-resolver`・`/action-planner` と差し替え）。後段（`emotionUpdater`・`memoryRetriever`・`dialogueGenerator`）が保存した記録を読むようにする変更は、ロードマップのフェーズ6で行う（それまでは後段は旧形式の `events`/`actions` をリクエストで受け取る）。記録の保存・読み出しは [`../lib/dynamo.ts`](../lib/README.md) にある。
 

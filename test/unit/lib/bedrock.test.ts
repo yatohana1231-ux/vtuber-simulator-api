@@ -3,7 +3,12 @@ import {
   BedrockRuntimeClient,
   ConverseCommand,
 } from "@aws-sdk/client-bedrock-runtime";
-import { invokeModel, invokeModelJson } from "../../../src/lib/bedrock.js";
+import {
+  invokeModel,
+  invokeModelJson,
+  resolveModelId,
+  DEFAULT_MODEL_ID,
+} from "../../../src/lib/bedrock.js";
 
 function mockSendResult(texts: string[] | undefined) {
   return {
@@ -54,6 +59,118 @@ describe("invokeModel", () => {
       { role: "user", content: [{ text: "user message" }] },
     ]);
     expect(command.input.inferenceConfig?.maxTokens).toBe(1234);
+  });
+});
+
+describe("resolveModelId", () => {
+  it("overrideを渡す → overrideを返す", () => {
+    expect(resolveModelId("some.model-id")).toBe("some.model-id");
+  });
+
+  it("overrideが無い → 環境変数BEDROCK_MODEL_IDを返す", () => {
+    vi.stubEnv("BEDROCK_MODEL_ID", "env.model-id");
+    expect(resolveModelId()).toBe("env.model-id");
+  });
+
+  it("overrideも環境変数も無い → DEFAULT_MODEL_IDを返す", () => {
+    vi.stubEnv("BEDROCK_MODEL_ID", undefined);
+    expect(resolveModelId()).toBe(DEFAULT_MODEL_ID);
+  });
+});
+
+describe("invokeModel（モデルIDの決定とinferenceConfig）", () => {
+  it("optionsのmodelIdがある → それがConverseCommandのmodelIdに使われる", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel("system", "user", 1000, {
+      modelId: "jp.anthropic.claude-sonnet-4-6",
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.modelId).toBe("jp.anthropic.claude-sonnet-4-6");
+  });
+
+  it("optionsのmodelIdが無い → 呼び出し時点の環境変数BEDROCK_MODEL_IDが使われる", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    vi.stubEnv("BEDROCK_MODEL_ID", "apac.amazon.nova-pro-v1:0");
+    await invokeModel("system", "user");
+    expect((sendSpy.mock.calls[0][0] as ConverseCommand).input.modelId).toBe(
+      "apac.amazon.nova-pro-v1:0"
+    );
+
+    // 途中で環境変数を変えても、モジュール読み込み時ではなく呼び出し時点の値が反映される
+    vi.stubEnv("BEDROCK_MODEL_ID", "jp.anthropic.claude-haiku-4-5-20251001-v1:0");
+    await invokeModel("system", "user");
+    expect((sendSpy.mock.calls[1][0] as ConverseCommand).input.modelId).toBe(
+      "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
+  });
+
+  it("optionsのmodelIdも環境変数も無い → 既定値が使われる", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+    vi.stubEnv("BEDROCK_MODEL_ID", undefined);
+
+    await invokeModel("system", "user");
+
+    expect((sendSpy.mock.calls[0][0] as ConverseCommand).input.modelId).toBe(
+      DEFAULT_MODEL_ID
+    );
+  });
+
+  it("Novaのモデル → inferenceConfigにtemperatureとtopPが入る", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel("system", "user", 1000, {
+      modelId: "apac.amazon.nova-lite-v1:0",
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.inferenceConfig).toEqual({
+      maxTokens: 1000,
+      temperature: 0.8,
+      topP: 0.9,
+    });
+  });
+
+  it("Claudeのモデル → inferenceConfigにtemperatureのみ入り、topPは入らない", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(["ok"]) as never);
+
+    await invokeModel("system", "user", 1000, {
+      modelId: "jp.anthropic.claude-sonnet-4-6",
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.inferenceConfig).toEqual({
+      maxTokens: 1000,
+      temperature: 0.8,
+    });
+    expect(command.input.inferenceConfig?.topP).toBeUndefined();
+  });
+});
+
+describe("invokeModelJson（options.modelIdの受け渡し）", () => {
+  it("optionsのmodelIdがinvokeModelに渡る", async () => {
+    const sendSpy = vi
+      .spyOn(BedrockRuntimeClient.prototype, "send")
+      .mockResolvedValue(mockSendResult(['{"ok": true}']) as never);
+
+    await invokeModelJson("system", "user", { ok: false }, 2000, {
+      modelId: "jp.anthropic.claude-sonnet-4-6",
+    });
+
+    const command = sendSpy.mock.calls[0][0] as ConverseCommand;
+    expect(command.input.modelId).toBe("jp.anthropic.claude-sonnet-4-6");
   });
 });
 
@@ -235,7 +352,7 @@ describe("invokeModel（usageのログ出力）", () => {
     await invokeModel("system", "user");
 
     expect(logSpy).toHaveBeenCalledWith(
-      "[bedrock] usage input=100 output=20 cacheRead=80 cacheWrite=15"
+      `[bedrock] usage model=${DEFAULT_MODEL_ID} input=100 output=20 cacheRead=80 cacheWrite=15`
     );
   });
 
@@ -248,7 +365,22 @@ describe("invokeModel（usageのログ出力）", () => {
     await expect(invokeModel("system", "user")).resolves.toBe("ok");
 
     expect(logSpy).toHaveBeenCalledWith(
-      "[bedrock] usage input=0 output=0 cacheRead=0 cacheWrite=0"
+      `[bedrock] usage model=${DEFAULT_MODEL_ID} input=0 output=0 cacheRead=0 cacheWrite=0`
+    );
+  });
+
+  it("modelIdを指定した呼び出し → usageのログにそのモデルIDが入る", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue(
+      mockSendResult(["ok"]) as never
+    );
+
+    await invokeModel("system", "user", 1000, {
+      modelId: "jp.anthropic.claude-sonnet-4-6",
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      "[bedrock] usage model=jp.anthropic.claude-sonnet-4-6 input=0 output=0 cacheRead=0 cacheWrite=0"
     );
   });
 });

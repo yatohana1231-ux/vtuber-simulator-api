@@ -1,0 +1,9 @@
+{
+  "id": "sample-basic",
+  "function": "emotionUpdater",
+  "description": "動作確認用の最小シナリオ（process=2、プレイヤーの優しい発言。フェーズ4で本番のシナリオに置き換える）",
+  "request": {
+    "process": 2,
+    "playerMessage": "今日もがんばったね、えらいよ"
+  }
+}

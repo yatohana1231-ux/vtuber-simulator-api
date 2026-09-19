@@ -9,3 +9,9 @@ dist/
 
 # CDK 出力
 infra/cdk.out/
+
+# AI 応答テストの実行結果（生の出力を含む。基準の要約は baseline/ に残す）
+test/ai-response/results/
+
+# esbuild でバンドルした AI 応答テストの実行成果物
+test/ai-response/.build/
