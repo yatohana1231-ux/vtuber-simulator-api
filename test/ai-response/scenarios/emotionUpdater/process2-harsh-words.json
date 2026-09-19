@@ -1,7 +1,7 @@
 {
   "id": "process2-harsh-words",
   "function": "emotionUpdater",
-  "description": "process=2。プレイヤーが配信をけなす心ない発言をしたとき、喜びが上がらず、不安が下がらないこと",
+  "description": "process=2。プレイヤーが配信をけなす心ない発言をしたとき、悲しみ・怒りの情動が起きて気分の快が下がること（関係値そのものは発言では動かない）",
   "request": {
     "process": 2,
     "playerMessage": "配信つまらなかった"
@@ -9,20 +9,13 @@
   "checks": [
     { "type": "modelResponded" },
     { "type": "jsonParsed" },
-    {
-      "type": "deltaDirection",
-      "params": {
-        "expect": {
-          "mood.joy": "notUp",
-          "mood.anxiety": "notDown"
-        }
-      }
-    },
-    { "type": "deltaWithin", "params": { "path": "perception", "max": 5 } }
+    { "type": "emotionTriggered", "params": { "anyOf": ["sadness", "anger"] } },
+    { "type": "moodDirection", "params": { "expect": { "pleasure": "down" } } },
+    { "type": "perceptionUnchanged" }
   ],
   "judgeFocus": [
-    "喜びが上がらず不安が下がらないなど、否定的な発言への反応の向きが妥当か。",
+    "悲しみ・怒りの情動が、否定的な発言に対して起きているか。",
     "初対面では少し緊張するという性格を踏まえて、落ち込み方が極端すぎたり無反応すぎたりしないか。",
-    "関係値（perception）の下がり方が、発言1回分として過剰でないか。"
+    "評価の原因（cause）がプレイヤーの発言によるものとして扱われているか。"
   ]
 }

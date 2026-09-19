@@ -186,6 +186,21 @@ describe("buildAbsenceSimulatorPromptLayers", () => {
 
       expect(variable).not.toContain("&#x2F;");
     });
+
+    it("affectTextを渡すと「不在に入ったときの気分」の節と文章が入る", () => {
+      const [, variable] = buildAbsenceSimulatorPromptLayers(
+        baseInput({ affectText: "・今の気分：とても、はつらつとして前向き" })
+      );
+
+      expect(variable).toContain("【不在に入ったときの気分】");
+      expect(variable).toContain("・今の気分：とても、はつらつとして前向き");
+    });
+
+    it("affectTextを渡さないと「不在に入ったときの気分」の節が出ない", () => {
+      const [, variable] = buildAbsenceSimulatorPromptLayers(baseInput());
+
+      expect(variable).not.toContain("【不在に入ったときの気分】");
+    });
   });
 
   describe("テンプレートに世界観・キャラクターに依存する語が直書きされていない", () => {

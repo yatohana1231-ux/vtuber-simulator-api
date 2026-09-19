@@ -28,6 +28,7 @@ export const handler = async (event: unknown) =>
       characterId,
       world: pkg.world,
       character: pkg.character,
+      lifestyle: pkg.lifestyle,
       now: nowDate.toISOString(),
       message: (body.message as string) ?? "",
       longTimeFlag: body.longTimeFlag as 0 | 1 | undefined,

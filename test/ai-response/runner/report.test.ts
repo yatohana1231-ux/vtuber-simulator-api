@@ -266,7 +266,9 @@ describe("renderReport", () => {
       function: "emotionUpdater",
       modelKey: "nova-lite",
       output: {
-        mood: { joy: 40, anxiety: 62, angry: 20, fatigue: 48, confidence: 30, loneliness: 10 },
+        emotions: { joy: 40, sadness: 0, hope: 0, anxiety: 0, relief: 0, disappointment: 0, pride: 0, shame: 0, gratitude: 0, admiration: 0, anger: 0, happyFor: 0, sympathy: 0 },
+        mood: { pleasure: 20, arousal: 10, dominance: 5 },
+        needs: { fatigue: 48, loneliness: 10 },
         perception: { trust: 72, affection: 55, respect: 80, fear: 12, dependence: 30, familiarity: 65 },
       },
     });

@@ -131,6 +131,10 @@ describe("executeRun", () => {
     expect(result.modelCalls[0].modelId).toBe("test-model-id");
     expect(result.writes.length).toBeGreaterThan(0);
     expect(result.checks).toEqual([]);
+    // absenceSimulator は状態レコードに書かないので postAffectState は無い。
+    // preAffectState は常に埋まる（state.affect が無いシナリオでも初期状態で埋める）
+    expect(result.preAffectState).toBeDefined();
+    expect(result.postAffectState).toBeUndefined();
   });
 
   it("dialogueGenerator: run* が動き、RunResultが埋まる", async () => {
@@ -175,6 +179,10 @@ describe("executeRun", () => {
     expect(result.modelCalls[0].modelId).toBe("test-model-id");
     expect(result.writes).toHaveLength(1);
     expect(result.writes[0].table).toBe("characterMemory");
+    // D-040 フェーズ16: emotionUpdater は状態レコード（stateVersion=2）を書くので
+    // postAffectState が埋まる（pendingSession を含む、偽の DynamoDB への最後の書き込み）
+    expect(result.preAffectState).toBeDefined();
+    expect(result.postAffectState).toBeDefined();
   });
 
   it("memoryRetriever: run* が動き、RunResultが埋まる", async () => {
@@ -221,6 +229,28 @@ describe("executeRun", () => {
     expect(result.modelCalls[0].error).toMatch(/boom/);
     // プレイヤー発言の保存と関係の記録の保存（D-033）は、Bedrock 呼び出し（例外）の前に完了している
     expect(result.writes).toHaveLength(2);
+  });
+
+  it("state.affect を投入したシナリオ: preAffectState に反映される（D-040 フェーズ16）", async () => {
+    const scenario = await loadSample("emotionUpdater");
+    const scenarioWithAffect = {
+      ...scenario,
+      state: { ...(scenario.state ?? {}), affect: { emotions: { joy: 42 }, needs: { loneliness: 20 } } },
+    };
+
+    const result = await executeModule.executeRun({
+      scenario: scenarioWithAffect,
+      modelKey: "test-model",
+      modelId: "test-model-id",
+      repeatIndex: 0,
+      fakeDynamo: fake,
+      modules,
+      pricing: {},
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.preAffectState.emotions.joy).toBe(42);
+    expect(result.preAffectState.needs.loneliness).toBe(20);
   });
 
   it("modelごとにcharacterIdが異なり、writesが混ざらない", async () => {

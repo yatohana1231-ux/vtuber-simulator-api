@@ -5,8 +5,11 @@
 //
 // D-022: リクエストの events/actions は廃止し、不在期間の出来事・行動は
 // 会話のたびに DynamoDB から最新の記録（getLatestAbsenceRecord）を読んで使う。
-// D-032: mood/perception もリクエストでは受け取らず、常に getCharacterState で
-// DynamoDB から読む（値はフロントが中継していたものと同じで、中継を無くしただけ）。
+// D-032: mood/perception もリクエストでは受け取らず、常に DynamoDB から読む
+// （値はフロントが中継していたものと同じで、中継を無くしただけ）。
+// D-040: 感情・関係値の状態は loadProjectedAffectState（affectStateStore.ts）で
+// now まで進めた値を読むだけで、dialogueGenerator は状態レコードに書かない
+// （書き手は emotionUpdater だけ。上書きの衝突を避けるため）。
 // D-033: 関係の記録（RelationshipRecord）を読み、advanceRelationship で
 // 「下がる → 履歴の更新 → 戻る → 上がる」の順に進めてから保存する（モデルを呼ぶ前）。
 // 段階が変わった節目（RelationshipMilestone）は、プレイヤーには伝えず、重要記憶
@@ -19,7 +22,6 @@ import { randomUUID } from "crypto";
 
 import { invokeModel } from "../lib/bedrock.js";
 import {
-  getCharacterState,
   getRelevantMemories,
   getRecentLogs,
   getLatestAbsenceRecord,
@@ -27,10 +29,9 @@ import {
   saveConversationLog,
   saveRelationshipRecord,
   saveMemory,
-  DEFAULT_MOOD,
-  DEFAULT_PERCEPTION,
   RELATIONSHIP_MILESTONE_MEMORY_TYPE,
 } from "../lib/dynamo.js";
+import { loadProjectedAffectState } from "../lib/affectStateStore.js";
 import { advanceRelationship } from "../lib/relationship.js";
 import { formatRelationshipHistoryForPrompt } from "../lib/relationshipText.js";
 import { buildDialogueGeneratorPromptLayers } from "./prompt.js";
@@ -62,9 +63,9 @@ export async function runDialogueGenerator(
 ): Promise<string> {
   console.log("[dialogueGenerator] start");
 
-  const { characterId, world, character } = req;
+  const { characterId, world, character, lifestyle } = req;
   const now = new Date(req.now);
-  const longTimeFlag = req.longTimeFlag ?? 0;
+  const isPlayerMessage = req.message !== "";
 
   // プレイヤーメッセージ（空欄の場合は代替テキスト）
   const playerMessage =
@@ -73,31 +74,47 @@ export async function runDialogueGenerator(
   // プレイヤー発言を会話ログに保存
   await saveConversationLog(characterId, "user", playerMessage, 0);
 
-  // 感情・関係値・直近会話・重要記憶・最新の不在期間の記録・関係の記録を並行して取得
-  const [state, recentLogs, memories, latestAbsenceRecord, relationshipRecord] = await Promise.all([
-    getCharacterState(characterId, character.initialPerception),
+  // 直近会話・最新の不在期間の記録・関係の記録を並行して取得
+  // （感情・関係値の状態は、段階の判定に使う「進める前の段階」が関係の記録から
+  // 決まったあとで読む。下の loadProjectedAffectState 参照。重要記憶は、気分一致の
+  // 記憶のために今の気分が要るので、状態のあとで読む。D-040）
+  const [recentLogs, latestAbsenceRecord, relationshipRecord] = await Promise.all([
     getRecentLogs(characterId, RECENT_LOG_LIMIT),
-    getRelevantMemories(characterId, {
-      queryText: req.message !== "" ? req.message : undefined,
-    }),
     getLatestAbsenceRecord(characterId),
     getRelationshipRecord(characterId),
   ]);
-  const mood = state.mood ?? { ...DEFAULT_MOOD };
-  const perception = state.perception ?? { ...DEFAULT_PERCEPTION };
 
-  // 関係の記録を「下がる → 履歴の更新 → 戻る → 上がる」の順に進める（D-033）
+  // 進める前の段階（関係の記録の stageKey。記録が無ければ最初の段階）で、
+  // 感情・関係値の状態を now まで進める（保存はしない。書き手は emotionUpdater だけ）
+  const preAdvanceStageKey = relationshipRecord?.stageKey ?? character.relationshipStages[0].key;
+  const { state: affectState } = await loadProjectedAffectState({
+    characterId,
+    world,
+    character,
+    lifestyle,
+    now,
+    stageKey: preAdvanceStageKey,
+  });
+
+  // 関係の記録を「下がる → 履歴の更新 → 戻る → 上がる」の順に進める（D-033）。
+  // 判定には、進めたあとの関係値（affectState.perception）を使う
   const { record: advancedRelationship, milestones } = advanceRelationship({
     record: relationshipRecord,
     stages: character.relationshipStages,
-    perception,
+    perception: affectState.perception,
     now,
     timeZone: world.timezone,
-    isPlayerMessage: req.message !== "",
+    isPlayerMessage,
   });
 
-  // 進めた関係の記録と、節目があれば重要記憶を、モデルを呼ぶ前に保存する
-  await Promise.all([
+  // 進めた関係の記録と、節目があれば重要記憶を、モデルを呼ぶ前に保存する。
+  // あわせて重要記憶を読む。今の気分の快・不快（moodPleasure）を渡し、気分と同じ向きの
+  // 感情の記憶を思い出しやすくする（気分一致の記憶。D-040。節目の記憶はもともと取得の対象外）
+  const [memories] = await Promise.all([
+    getRelevantMemories(characterId, {
+      queryText: req.message !== "" ? req.message : undefined,
+      moodPleasure: affectState.mood.pleasure,
+    }),
     saveRelationshipRecord(characterId, advancedRelationship),
     ...milestones.map((milestone) => saveMilestoneMemory(characterId, milestone, character.relationshipStages)),
   ]);
@@ -108,12 +125,14 @@ export async function runDialogueGenerator(
   // 直近会話の末尾は今保存した user ログなので除く
   const historyLogs = recentLogs.slice(0, -1);
 
-  // システムプロンプトを層ごとの配列 [固定部, セッション部, 可変部] で組み立てる
+  // システムプロンプトを層ごとの配列 [固定部, セッション部, 可変部] で組み立てる。
+  // プロンプトに使う感情・関係値は、段階の判定に使った affectState をそのまま使う
+  // （段階が変わった場合でも作り直さない。下端の作り直しは次に emotionUpdater が
+  // 保存するときに行われるので、プロンプト用の値としてはこれで十分）
   const systemPromptLayers = buildDialogueGeneratorPromptLayers({
     world,
     character,
-    mood,
-    perception,
+    affectState,
     memories,
     historyLogs: historyLogs.map((l) => ({
       role: l.role,
@@ -124,7 +143,7 @@ export async function runDialogueGenerator(
     currentStage,
     relationshipHistoryText,
     now,
-    longTimeFlag,
+    isPlayerMessage,
   });
 
   console.log("[dialogueGenerator] systemPrompt built");

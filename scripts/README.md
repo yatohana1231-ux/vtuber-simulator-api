@@ -5,7 +5,8 @@
 | ファイル | 内容 |
 |---|---|
 | `copy-content.mjs` | `content/` を `dist/content/` にコピーする（README は除く）。`npm run build`（`build:content`）から実行される |
-| `test-runner.ts` | 各機能の `run*` を実際の AWS（Bedrock＋stg の DynamoDB）に対して直接呼ぶ CLI。`--package <id>` でパッケージを指定する。`npx tsx scripts/test-runner.ts --help` |
+| `test-runner.ts` | 各機能の `run*` を実際の AWS（Bedrock＋stg の DynamoDB）に対して直接呼ぶ CLI。`--package <id>` でパッケージを指定する。`emotionUpdater` の結果は、気分・強い情動・欲求の文章と関係値で表示する（D-040）。`npx tsx scripts/test-runner.ts --help` |
+| `simulate-perception-growth.ts` | 関係値の伸び方の試算（`npm run simulate:perception -- [--package <id>] [--sessions-per-day 1] [--gain-scale 0.8] [--sigma 0.45]`）。毎日話したときに、各段階に何日目に上がるかを表で出す。AWS は呼ばない。計算は `src/lib/affect/perceptionGrowthSimulation.ts`（D-040）。関係値の設定値（`affectConfig.ts` の `perception`、キャラクターの `maxPerception`・`promoteWhen`）を変えたら実行して確かめる |
 | `clear-tables.mjs` | stg の DynamoDB テーブルを全削除する。会話ログも含めて消えるため注意 |
 | `manage-testers.ts` | API 専用 CloudFront（`.notes/done/api-access-control-roadmap.md`）が照合するテスターの資格情報を CloudFront KeyValueStore に登録・削除・一覧する CLI。`npm run testers:add` / `testers:remove` / `testers:list` から呼べる。既存の `characterId` をテスターに割り当てる・一覧する・外す（`testers:assign` / `testers:characters` / `testers:unassign`、`.notes/done/tester-character-ownership-roadmap.md` 検討事項1）も持つ。下の「`manage-testers.ts`」節を参照 |
 

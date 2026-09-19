@@ -15,3 +15,5 @@
 | `eventKindSelection.ts` | `countEvents(elapsedMs)` — 不在時間から出来事の件数（`1 + floor(時間 / 12)` を 1〜5 件、0以下なら0件）。`pickEventKinds(eventKinds, count)` — 生活様式の `eventKinds` から重み付きで count 件抽選する（重複あり） |
 
 時刻の変換は [`../lib/timezone.ts`](../lib/README.md)、重み付き抽選は [`../lib/random.ts`](../lib/README.md) を使う。乱数は `Math.random` で、テストでは `vi.spyOn(Math, "random")` で固定する。
+
+- **不在に入ったときの気分（D-040）**: 新しい形の状態レコード（`stateVersion: 2`）があるときだけ、`getStoredAffectState` で読んだ状態を不在期間の開始（`lastLoginAt`）まで進め（`lib/affect/affectProjection.ts`）、気分・強い情動・欲求の文章（`lib/affect/affectText.ts`）を③（可変部）に渡す。落ち込んでいた日・はりきっていた日で、過ごし方や出来事の受け止め方が変わるようにするため。状態レコードには書かない。関係の記録は読まず、段階は保存済みの `perceptionStageBase` から決める。①②は変わらない。

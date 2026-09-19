@@ -1,0 +1,19 @@
+{
+  "id": "process2-player-good-news",
+  "function": "emotionUpdater",
+  "description": "process=2。プレイヤーに良いことがあった報告を受けたとき、自分のことのように喜ぶ・共に喜ぶ情動が起き、気分の快が下がらないこと",
+  "request": {
+    "process": 2,
+    "playerMessage": "今日ね、ずっと頑張ってた資格試験に合格できたよ！ほんとに嬉しい！"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "emotionTriggered", "params": { "anyOf": ["happyFor", "joy"] } },
+    { "type": "moodDirection", "params": { "expect": { "pleasure": "notDown" } } }
+  ],
+  "judgeFocus": [
+    "プレイヤーに起きた嬉しい出来事として評価され、自分のことのように喜ぶ情動につながっているか。",
+    "報告の内容の大きさ（資格試験の合格）に対して、評価の点数が釣り合っているか。"
+  ]
+}

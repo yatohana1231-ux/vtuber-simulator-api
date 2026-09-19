@@ -55,7 +55,7 @@ api/
 │   ├── memoryRetriever/{index.ts, prompt.ts, prompts/}     # 重要記憶管理
 │   ├── dialogueGenerator/{index.ts, prompt.ts, prompts/}   # セリフ生成
 │   ├── testerCharacters/               # テスターのキャラクターの一覧・作成
-│   ├── debugCharacterState/index.ts    # mood/perception の読み取り・書き換え（デバッグ専用）
+│   ├── debugCharacterState/index.ts    # 感情・関係値の状態の読み取り・書き換え（デバッグ専用）
 │   ├── promptPartials/{index.ts, world.mustache, speechExamples.mustache}  # 各テンプレート共有のパーシャル
 │   └── lib/{bedrock.ts, modelProfiles.ts, dynamo.ts, packages.ts, utils.ts, timezone.ts, random.ts, absenceRecordText.ts}
 ├── test/
@@ -119,7 +119,7 @@ api/
 |---|---|---|
 | `absenceSimulator` | Claude Haiku 4.5（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`） | 行動と時間帯の整合・出来事の質が大きく上がる |
 | `dialogueGenerator` | Claude Haiku 4.5（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`） | キャラクターらしさの差が最も大きく、速さも保てる |
-| `emotionUpdater` | Amazon Nova Lite（`apac.amazon.nova-lite-v1:0`） | 比較で最高位かつ最安 |
+| `emotionUpdater` | Claude Haiku 4.5（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`） | 2026-09-19 に Nova Lite から変更（D-043）。D-040 で LLM の仕事が出来事の評価とやり取りの分類に変わり、比較でルールの判定の合格率が最も高かった（Nova Lite・Nova 2 Lite は、弱音を流された発言を「受け止めた」と逆に分類した）。1回あたり約 0.0035 USD（Nova Lite は約 0.0002 USD） |
 | `memoryRetriever` | Amazon Nova 2 Lite（`jp.amazon.nova-2-lite-v1:0`） | Claude Haiku 4.5 と同点で、料金は約4分の1 |
 
 - モデルやプロンプトを変えるときは、AI 応答テスト（`npm run test:ai`、[`test/ai-response/README.md`](test/ai-response/README.md)）で基準と比べてから変える。
@@ -132,7 +132,7 @@ api/
 | 状況 | 条件 | 呼び出し順 |
 |---------|------|---------|
 | ログイン時・通常不在 | `message=""` かつ 3h <= 経過 < 2週間 | `/absence-simulator` → `/emotion-updater`(process=1) → `/dialogue-generator` → セリフを表示 → `/memory-retriever`(process=1)（セリフの生成は `/memory-retriever` の結果を使わないので、表示の後に回して待ち時間を縮める。D-032） |
-| ログイン時・長期不在 | `message=""` かつ 経過 >= 2週間 | 同上 + `longTimeFlag=1` を `/dialogue-generator` に渡す（孤独感・喜び表現を追加） |
+| ログイン時・長期不在 | `message=""` かつ 経過 >= 2週間 | 同上（`longTimeFlag=1` を渡してもよいが、2026-09-19 からサーバーは使わない。再会のさみしさは、会えなかった時間から計算した孤独感と、キャラクターの愛着のスタイルで表す。D-040） |
 | ログイン時・短時間不在 | `message=""` かつ 経過 < 3h | どのAPIも呼ばない。固定挨拶をローカル表示 |
 | 会話メッセージ送信 | `message` に内容あり | `/dialogue-generator` → `/emotion-updater`(process=2) → `/memory-retriever`(process=2)（重要記憶判定は内部で5往復ごとにスキップ判定）。`/dialogue-generator` は毎回、最新の不在期間の記録を読むので、会話の途中でも不在中の出来事について話せる |
 
@@ -305,22 +305,22 @@ sequenceDiagram
     AS->>DB: saveAbsenceRecord(record)（イベントテーブル＋最新の記録をトランザクションで）
     AS-->>Front: { startDatetime, endDatetime, events, actions }
 
-    Front->>EU: POST { characterId, packageId, process:1 }
-    EU->>DB: getCharacterState / getLatestAbsenceRecord
+    Front->>EU: POST { characterId, packageId, process:1, now }
+    EU->>DB: getStoredAffectState / getRelationshipRecord / getLatestAbsenceRecord
     EU->>BK: invokeModelJson([固定部, 可変部], "感情値の差分を算出")
-    EU->>DB: saveCharacterState(updated)
-    EU-->>Front: { mood, perception }
+    EU->>DB: saveCharacterAffectState(updated)
+    EU-->>Front: { emotions, mood, needs, perception }
 
     Front->>DG: POST { characterId, packageId, now, message:"", longTimeFlag }
     DG->>DB: saveConversationLog(user, "（プレイヤーが来た）")
-    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories / getLatestAbsenceRecord / getRelationshipRecord（並行）
+    DG->>DB: getRecentLogs(10) / getLatestAbsenceRecord / getRelationshipRecord（並行）→ getStoredAffectState → getRelevantMemories(moodPleasure)
     Note over DG: 関係の段階を進める（advanceRelationship。D-033）
     DG->>DB: saveRelationshipRecord（段階が変わったら節目の記憶も saveMemory）
     DG->>BK: invokeModel([固定部, 今の関係＋最新の記録, 可変部], "（プレイヤーが来た）")
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
-    Note over Front: reply を表示する（mood/perception は /emotion-updater の応答を使う。events/actions は表示に使ってもよい）
+    Note over Front: reply を表示する（感情・関係値は /emotion-updater の応答を使う。events/actions は表示に使ってもよい）
 
     Front->>MR: POST { characterId, packageId, process:1 }
     MR->>DB: getLatestAbsenceRecord / getRelevantMemories(広め)
@@ -342,18 +342,18 @@ sequenceDiagram
 
     Front->>DG: POST { characterId, packageId, now, message }
     DG->>DB: saveConversationLog(user, message)
-    DG->>DB: getCharacterState / getRecentLogs(10) / getRelevantMemories(queryText=message) / getLatestAbsenceRecord / getRelationshipRecord（並行）
+    DG->>DB: getRecentLogs(10) / getLatestAbsenceRecord / getRelationshipRecord（並行）→ getStoredAffectState → getRelevantMemories(queryText=message, moodPleasure)
     Note over DG: 関係の段階を進める（advanceRelationship。D-033）
     DG->>DB: saveRelationshipRecord（段階が変わったら節目の記憶も saveMemory）
     DG->>BK: invokeModel([固定部, 今の関係＋最新の記録, 可変部], message)
     DG->>DB: saveConversationLog(assistant, reply)
     DG-->>Front: { reply }
 
-    Front->>EU: POST { characterId, packageId, process:2, playerMessage: message }
-    EU->>DB: getCharacterState(characterId)
+    Front->>EU: POST { characterId, packageId, process:2, now, playerMessage: message }
+    EU->>DB: getStoredAffectState / getRelationshipRecord / getRecentLogs(6)
     EU->>BK: invokeModelJson(prompt, "感情値の差分を算出")
-    EU->>DB: saveCharacterState(updated)
-    EU-->>Front: { mood, perception }
+    EU->>DB: saveCharacterAffectState(updated)
+    EU-->>Front: { emotions, mood, needs, perception }
 
     Front->>MR: POST { characterId, packageId, process:2 }
     MR->>DB: getLogsForMemoryJudge(characterId, 5)
@@ -367,7 +367,7 @@ sequenceDiagram
         MR-->>Front: { ok: true }
     end
 
-    Note over Front: { reply, mood, perception } を画面表示用に組み立てる
+    Note over Front: reply と /emotion-updater の応答を画面表示用に組み立てる
 ```
 
 ### absenceSimulator 内部処理フロー
@@ -389,23 +389,27 @@ flowchart TD
 
 ### emotionUpdater 内部処理フロー
 
+LLM には出来事の評価（分類）だけをさせ、数値はサーバーの純粋な関数（[`src/lib/affect/`](src/lib/affect/README.md)）で計算する（D-040）。
+
 ```mermaid
 flowchart TD
-    START([開始]) --> GET_STATE[DynamoDB から現在の<br/>mood / perception 取得]
-    GET_STATE --> BUILD_INPUT{process 判定}
+    START([開始]) --> LOAD[状態レコードと関係の記録を読み<br/>now まで時間を進める<br/>情動の減衰・気分の回帰・孤独感と疲労・<br/>終わったセッションの関係値への確定]
+    LOAD --> BUILD_INPUT{process 判定}
     BUILD_INPUT -->|process=1| GET_REC[DynamoDB から<br/>最新の不在期間の記録を取得]
     GET_REC --> HAS_REC{記録あり?}
-    HAS_REC -->|なし| SKIP([LLM を呼ばず<br/>現在の mood/perception を返却])
+    HAS_REC -->|なし| SKIP([LLM を呼ばず<br/>進めた状態を保存して返却])
     HAS_REC -->|あり| INPUT1[インプット:<br/>記録の出来事 + 行動]
-    BUILD_INPUT -->|process=2| INPUT2[インプット:<br/>プレイヤーの発言]
-    INPUT1 --> RULE1[制約: perception ±0~3]
-    INPUT2 --> RULE2[制約: perception ±1~5]
-    RULE1 --> PROMPT[固定部・可変部のテンプレートで<br/>システムプロンプトの層を構築]
-    RULE2 --> PROMPT
-    PROMPT --> BEDROCK[Bedrock 呼び出し<br/>moodDelta + perceptionDelta 取得]
-    BEDROCK --> APPLY[差分を適用<br/>有限の数値でない差分は 0 として扱う<br/>clamp 1~100]
-    APPLY --> SAVE[DynamoDB に保存]
-    SAVE --> END_([完了: updated mood/perception 返却])
+    BUILD_INPUT -->|process=2| INPUT2[インプット:<br/>プレイヤーの発言 +<br/>それより前の直近の会話]
+    INPUT1 --> PROMPT[固定部・可変部のテンプレートで<br/>システムプロンプトの層を構築<br/>固定部にキャラクターの目標]
+    INPUT2 --> PROMPT
+    PROMPT --> BEDROCK[Bedrock 呼び出し<br/>出来事の評価 appraisals と<br/>やり取りの分類 interaction を取得]
+    BEDROCK --> PARSE[検証<br/>不正な値は無視して警告をログに残す]
+    PARSE --> EMO[評価 → 情動への加算 OCC の表<br/>情動が気分を押し引きする]
+    EMO --> SESSION{process=2?}
+    SESSION -->|はい| PENDING[孤独感を減らす<br/>関係値の寄与をセッションの途中経過に足す<br/>関係値そのものは変えない]
+    SESSION -->|いいえ| SAVE
+    PENDING --> SAVE[DynamoDB に保存]
+    SAVE --> END_([完了: emotions / mood / needs / perception 返却])
 ```
 
 ### memoryRetriever 判定フロー
@@ -494,12 +498,12 @@ erDiagram
 
 | レコード種別 | `index` の値 | `memory_id` の値 | 用途 |
 |-------------|-------------|-----------------|------|
-| 状態レコード | `"state"` | characterId (UUID) | 感情値・関係値の現在値（`mood`, `perception`, `updatedAt`） |
+| 状態レコード | `"state"` | characterId (UUID) | 感情・関係値の状態（D-040。`stateVersion: 2`, `emotions`, `mood`, `needs`, `perception`, `perceptionStageBase`, `pendingSession`, `affectUpdatedAt`, `updatedAt`。下の「感情・関係値の状態」参照）。値は小数で持つ。書くのは `emotionUpdater` とデバッグ用のエンドポイントだけ。`stateVersion` の無い古い形（`mood` が6項目）のレコードは、読むときに関係値だけを引き継ぎ、感情は平常値から始める |
 | 記憶レコード | `{ISO8601}_{UUID8桁}` | characterId | 重要記憶（`eventSummary`, `characterInterpretation`, `tags`, `importance`, `memoryType`, `relationshipChanges`, `emotion`, `reason`, `updatedAt`） |
 | 最新の不在期間の記録 | `"absence-latest"` | characterId | 最新の不在期間の記録（`record`: イベントテーブルに保存した `AbsenceRecord` と同じ内容、`updatedAt`）。書き込み直後でも確実に読めるよう、強い整合性の GetItem で読む（`.notes/decision-history.md` の D-019）。`absenceSimulator`（続きの話題の引き継ぎ）と、後段の3機能（`dialogueGenerator` は会話のたびに、`emotionUpdater`・`memoryRetriever` は process=1 で）が読む |
 | 関係の記録 | `"relationship"` | characterId | 関係の段階と履歴（D-033）。`firstMetAt`・`lastConversationAt`・`lastConversationDate`・`conversationCount`・`conversationDays`・`stageKey`・`highestStageKey`・`recoveryRemaining`・`lastDemotedAt`・`updatedAt` を項目としてそのまま持つ。`dialogueGenerator` が毎回、強い整合性の GetItem で読み、段階を進めて PutItem で保存する。`emotionUpdater` が状態レコードを丸ごと書き換えるので、状態レコードとは分けている |
 
-アクセスパターン: `getCharacterState(characterId, initialPerception?)`（状態レコードが無ければ、キャラクターの `initialPerception` を初期値として返す。D-033）/ `getRelationshipRecord(characterId)` / `saveRelationshipRecord(characterId, record)` / `saveCharacterState(characterId, mood, perception)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)` / `getLatestAbsenceRecord(characterId)`（`saveAbsenceRecord` はイベントテーブルとこのテーブルにトランザクションで同時に書き込む）
+アクセスパターン: `getStoredAffectState(characterId)`（状態レコードを形を確かめて読む。時間を進めるところまで含めた読み込みは `src/lib/affectStateStore.ts` の `loadProjectedAffectState`）/ `saveCharacterAffectState(characterId, state)` / `getRelationshipRecord(characterId)` / `saveRelationshipRecord(characterId, record)` / `getRelevantMemories(characterId, { queryText?, topK?, minImportance? })` / `saveMemory(item)` / `getLatestAbsenceRecord(characterId)`（`saveAbsenceRecord` はイベントテーブルとこのテーブルにトランザクションで同時に書き込む）
 
 `getRelevantMemories()` は `memory_id` 配下の記憶を一旦全件取得し（`index = "state"` の状態レコード、`index = "absence-latest"` の最新の不在期間の記録、`index = "relationship"` の関係の記録、`memoryType = "relationship_milestone"` の節目の記憶は除外。節目の記憶は、関係の段階が変わったことの記録で、プレイヤーに伝えないためセリフの生成にも重要記憶の判定にも使わない。D-033）、Lambda内で「重要度 × 新しさ減衰（半減期14日）×（`queryText` 指定時は `tags` 一致数に応じたボーナス）」でスコアリングし、`minImportance`（既定20）未満を除外して上位 `topK`（既定8）件だけを返す。ベクトル検索は使っていない。呼び出し元ごとの指定値:
 
@@ -530,18 +534,22 @@ erDiagram
 - 管理用のコマンド: 既存の `characterId` の割り当て `npm run testers:assign -- <テスターID> <characterId>`、一覧 `testers:characters`、割り当ての解除 `testers:unassign`（`scripts/README.md`）。割り当てを外しても、キャラクターの会話ログ・記憶などのデータは消えない
 - 容量: PAY_PER_REQUEST、削除ポリシーは stg=DESTROY / prod=RETAIN
 
-### Mood（内面感情・6次元、1〜100）
+### 感情・関係値の状態（D-040）
 
-| パラメータ | 日本語名 | デフォルト値 |
-|-----------|---------|-------------|
-| `joy` | 喜び | 35 |
-| `anxiety` | 不安 | 62 |
-| `angry` | 怒り | 20 |
-| `fatigue` | 疲労 | 48 |
-| `confidence` | 自信 | 30 |
-| `loneliness` | 孤独感 | 10 |
+2026-09-19 に、ALMA（Gebhard 2005）を参考にした層の構造に作り直した（[`.notes/affect-model-redesign-roadmap.md`](../.notes/affect-model-redesign-roadmap.md)、計算は [`src/lib/affect/`](src/lib/affect/README.md)）。従来の `mood`（joy・anxiety・angry・fatigue・confidence・loneliness の6項目）は廃止した。
 
-### Perception（対プレイヤー関係値・6次元、1〜100）
+| 層 | 項目 | 目盛り | 動かすもの |
+|---|---|---|---|
+| 情動 `emotions`（短期） | `joy`・`sadness`・`hope`・`anxiety`・`relief`・`disappointment`・`pride`・`shame`・`gratitude`・`admiration`・`anger`・`happyFor`・`sympathy` | 0〜100（0 が平常） | 出来事の評価（LLM の分類 → OCC の表）。数時間の半減期で 0 に戻る |
+| 気分 `mood`（中期） | `pleasure`（快）・`arousal`（覚醒）・`dominance`（支配性。自信に相当） | −100〜+100 | 情動が押し引きする。1〜2日の半減期で平常値へ戻る。平常値は性格（`bigFive`）で決まり、欲求でずれる |
+| 欲求 `needs` | `fatigue`（疲労）・`loneliness`（孤独感） | 0〜100 | 疲労は生活様式（`fatigueChangePerHour`）と時刻から毎回計算。孤独感は会っていない時間 × 依存 × 段階 × 愛着のスタイルで増え、発言で減る |
+| 関係値 `perception` | 下の表の6軸 | 1〜100 | 下の「関係値の動かし方」 |
+| 性格（長期） | `bigFive`・`goals`・`attachmentStyle`・`affectTuning` | — | 状態レコードではなく [`content/characters/`](content/characters/README.md) に持つ |
+
+- 時間による変化は、定期実行ではなく、読むたびに保存時刻（`affectUpdatedAt`）からの経過時間で計算する。
+- プロンプトには、気分（8象限の名前 × 強さの3段階）、強い情動だけ、欲求を文章にして載せる（`src/lib/affect/affectText.ts`）。数値の設定値は `src/lib/affect/affectConfig.ts` に集めてある。
+
+### Perception（対プレイヤー関係値・6次元、1〜100。項目は D-040 でも維持）
 
 | パラメータ | 日本語名 | デフォルト値 |
 |-----------|---------|-------------|
@@ -554,7 +562,11 @@ erDiagram
 
 値の解釈: 1〜20 ほとんど感じない / 21〜40 低い / 41〜60 標準 / 61〜80 自覚している / 81〜100 強く感じる。
 
-更新ルール: Process 1（不在中）は mood 変化幅の制限なし・perception は ±0〜3。Process 2（会話中）は mood 制限なし・perception は ±1〜5。
+関係値の動かし方（D-040）:
+
+- **発言ごとには動かさない。** 発言1回ぶんの寄与（好感 = プレイヤーが原因の情動の正負、信頼 = キャラクターの自己開示への応答・前の話を覚えていた・感謝、尊敬 = 感心、依存 = 助けになった、親しみ = 発言とプレイヤーの自己開示、恐れ = プレイヤーが原因の強い怒り・悲しみ）を、セッションの途中経過（`pendingSession`）にためる。セッションが終わったあと（前の発言から30分以上）、軸ごとに「いちばん強かった寄与と最後の寄与の平均」を1回だけ反映する（ピーク・エンドの法則）。
+- **関係の段階ごとの上限**（`relationshipStages[].maxPerception`）で止まる。**上がる幅は一定ではなく、段階の範囲のはじめは上がりやすく、上限の手前では極めて上がりづらい**（釣り鐘の形の減衰）。段階が下がって上限を超えている値は削らない。負の寄与は重みを控えめにし、その段階の下端より下では鈍らせる。
+- 初期値はキャラクターの `initialPerception`（上の表の「デフォルト値」は、`initialPerception` を持たないキャラクター向けの既定値）。
 
 ## API 仕様
 
@@ -624,23 +636,29 @@ erDiagram
 `process` フィールドで process1（最新の不在期間の記録が入力）と process2（プレイヤー発言が入力）を切り替える判別ユニオン。
 
 ```json
-// process = 1（最新の不在期間の記録を DynamoDB から読む。記録が無ければ LLM を呼ばず、現在の値をそのまま返す）
-{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1 }
+// process = 1（最新の不在期間の記録を DynamoDB から読む。記録が無ければ LLM を呼ばず、時間を進めた状態だけを保存して返す）
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 1, "now": "2026-09-19T12:00:00.000Z" }
 
 // process = 2
-{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 2, "playerMessage": "今日の配信、すごく良かったよ！" }
+{ "characterId": "...", "packageId": "yui-modern-tokyo", "process": 2, "now": "2026-09-19T12:00:00.000Z", "playerMessage": "今日の配信、すごく良かったよ！" }
 ```
 
-**レスポンス**
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `now` | string (ISO8601) | No | 現在時刻（省略時はサーバーの現在時刻。不正な形式は 400）。時間による感情の変化と、セッションの終わりの判定に使う。`/dialogue-generator` と同じ値を渡す（2026-09-19 追加、D-040） |
+
+**レスポンス**（2026-09-19 に形を変えた。従来の6項目の `mood` とは互換性が無い。値は小数）
 
 ```json
 {
-  "mood": { "joy": 52, "anxiety": 45, "angry": 15, "fatigue": 38, "confidence": 35, "loneliness": 8 },
-  "perception": { "trust": 74, "affection": 58, "respect": 80, "fear": 10, "dependence": 32, "familiarity": 68 }
+  "emotions": { "joy": 23.0, "sadness": 0, "hope": 0, "anxiety": 0, "relief": 0, "disappointment": 0, "pride": 0, "shame": 0, "gratitude": 23.0, "admiration": 23.0, "anger": 0, "happyFor": 0, "sympathy": 0 },
+  "mood": { "pleasure": 41.2, "arousal": 40.1, "dominance": 18.9 },
+  "needs": { "fatigue": 62.5, "loneliness": 4.0 },
+  "perception": { "trust": 35, "affection": 35, "respect": 50, "fear": 15, "dependence": 10, "familiarity": 20 }
 }
 ```
 
-process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に抑えるようプロンプトで指示している（詳細は「データモデル」の更新ルール参照）。2026-09-19 以前の process1 はリクエストで `events`/`actions` を受け取っていたが、廃止した（送られても無視する）。
+`perception` は発言では変わらず、セッションが終わったあとの次の呼び出しで変わる（「データモデル」の「関係値の動かし方」参照）。process=2 は、プレイヤーの発言に加えて、それより前の直近の会話（キャラクターの直前のセリフを含む）を DynamoDB から読んで判定に使う（フロントの中継は不要）。2026-09-19 以前の process1 はリクエストで `events`/`actions` を受け取っていたが、廃止した（D-022）。
 
 ### `POST /memory-retriever`
 
@@ -675,7 +693,7 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 | フィールド | 型 | 必須 | 説明 |
 |-----------|------|------|------|
 | `message` | string | No | `""` の場合は「プレイヤーが来た」という代替テキストで生成（ログイン時のセリフ生成に使う） |
-| `longTimeFlag` | 0 or 1 | No | 省略時 0 |
+| `longTimeFlag` | 0 or 1 | No | 2026-09-19 から使わない（受け取るが無視する。D-040）。再会の説明は、孤独感が 40 以上で `message` が空のときに、サーバーがプロンプトに入れる |
 | `now` | string (ISO8601) | No | 現在日時（プロンプトの現在時刻）。省略時はサーバー現在時刻。関係の履歴（出会った日・話した日数など）もこの日時で数える |
 
 関係の段階（D-033）: 呼ばれるたびに関係の記録を読み、段階を進めて保存する。段階はキャラクターごとに `content/characters/*.json` の `relationshipStages` で決まり、今の段階の話し方・距離感と、関係の履歴がプロンプトに入る。`message` が空（ログイン時の挨拶）のときは、発言の回数・日数を数えない。段階が変わったこと（節目）は重要記憶とログにだけ残し、セリフではプレイヤーに伝えない。レスポンスには段階を含めない。
@@ -693,23 +711,36 @@ process1 では perception の変化幅は ±0〜3、process2 では ±1〜5 に
 
 ### `POST /debug-character-state`（デバッグ専用）
 
-2026-09-19 に追加（`.notes/done/debug-character-state-roadmap.md`、D-038）。状態レコード（キャラクター記憶テーブルの `index = "state"`）の `mood`・`perception` を直接読み書きする。ブラウザのデモ（`front-web`）のデバッグパネルの「状態」タブが使う。**`infra/cdk.json` の `context.enableDebugEndpoints.<stage>` が `true` のステージ（stg）にだけ作る。**専用の Lambda で、Bedrock の権限は持たない（キャラクター記憶テーブルの GetItem・PutItem と、持ち主の確認のテスターのキャラクターテーブルの GetItem だけ）。持ち主の確認は4つのエンドポイントと同じく共通処理（`src/lib/apiHandler.ts`）で行う。
+2026-09-19 に追加（`.notes/done/debug-character-state-roadmap.md`、D-038）。同日、感情・関係値の状態の新しい形（D-040）に合わせて契約を作り直した。状態レコード（キャラクター記憶テーブルの `index = "state"`）を直接読み書きする。ブラウザのデモ（`front-web`）のデバッグパネルの「状態」タブが使う。**`infra/cdk.json` の `context.enableDebugEndpoints.<stage>` が `true` のステージ（stg）にだけ作る。**専用の Lambda で、Bedrock の権限は持たない（キャラクター記憶テーブルの GetItem・PutItem と、持ち主の確認のための読み取りだけ）。
 
 **リクエスト**:
 ```json
 {
   "characterId": "c9f0...",
   "packageId": "yui-modern-tokyo",
-  "mood": { "joy": 80, "anxiety": 10, "angry": 5, "fatigue": 20, "confidence": 60, "loneliness": 15 },
+  "now": "2026-09-19T12:00:00.000Z",
+  "mood": { "pleasure": -40, "arousal": 30, "dominance": -20 },
+  "needs": { "loneliness": 70 },
   "perception": { "trust": 70, "affection": 75, "respect": 50, "fear": 5, "dependence": 30, "familiarity": 65 }
 }
 ```
 
-- `mood`・`perception` はどちらも省略可。指定するなら6項目すべてを 1〜100 の整数で指定する。項目の不足・余分・`null`・数値でない・整数でない・範囲外は 400（丸めない）。
-- 片方だけ指定したときは、もう片方は今の値（状態レコードが無ければ既定値。`perception` はキャラクターの `initialPerception`）のまま保存する。どちらも省略したときは保存せずに今の値を返す（読み取り）。
-- 関係の段階・会話ログ・重要記憶には触らない。ただし `perception` を上げると、次の `/dialogue-generator` で関係の段階が上がることがある（段階の条件は履歴と関係値の両方。D-033）。
+- `now` は省略可（省略時はサーバーの現在時刻。不正な形式は 400）。状態は `now` まで時間を進めてから読み書きする。
+- `emotions`（13項目すべて、0〜100）・`mood`（3軸すべて、−100〜+100）・`needs`（`loneliness` だけ、0〜100。`fatigue` は生活様式と時刻から毎回計算し直されるので、指定されても無視する）・`perception`（6軸すべて、1〜100）は、見出しごとに省略可。小数可。項目の不足・余分・`null`・数値でない・範囲外は 400（丸めない）。
+- 指定した見出しだけを置き換えて保存する。どれも省略したときは**保存せずに**、`now` まで進めた値を返す（読み取り。仮想時刻で時間による変化を確かめられる）。
+- `perception` は関係の段階の上限（`maxPerception`）を無視して書ける。関係の段階・会話ログ・重要記憶には触らない。ただし `perception` を上げると、次の `/dialogue-generator` で関係の段階が上がることがある（D-033）。
 
-**レスポンス**: `{ "mood": { ... }, "perception": { ... } }`（保存後の値。`/emotion-updater` と同じ形）
+**レスポンス**:
+```json
+{
+  "emotions": { "...": 0 }, "mood": { "...": 0 }, "needs": { "...": 0 }, "perception": { "...": 0 },
+  "pendingSession": { "startedAt": "...", "lastMessageAt": "...", "messageCount": 3, "peak": { "trust": 3 }, "last": { "trust": 0 } },
+  "stage": { "key": "first", "label": "はじめまして", "maxPerception": { "trust": 50 } },
+  "affectUpdatedAt": "2026-09-19T12:00:00.000Z"
+}
+```
+
+`pendingSession` は、まだ関係値に確定していないセッションの途中経過（無ければ `null`）。`stage` は今の関係の段階と、その段階での関係値の上限。
 
 ### アクセス制限
 

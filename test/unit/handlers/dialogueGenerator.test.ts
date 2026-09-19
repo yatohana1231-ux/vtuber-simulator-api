@@ -99,6 +99,13 @@ describe("run*への引数の詰め替え", () => {
     expect(req.character.key).toBe("yui");
   });
 
+  it("packageId省略 → 既定パッケージのlifestyleが渡る", async () => {
+    await handler(makeEvent({ characterId: "c1" }));
+
+    const req = mockedRun.mock.calls[0][0] as DialogueGeneratorRequest;
+    expect(req.lifestyle.key).toBe("tokyo-highschool-vtuber");
+  });
+
   it("nowを渡す → ISO8601文字列に正規化されて渡る", async () => {
     await handler(
       makeEvent({ characterId: "c1", now: "2026-08-11T14:30:00" })

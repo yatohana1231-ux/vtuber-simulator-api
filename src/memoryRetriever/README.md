@@ -10,3 +10,5 @@
 
 - 記憶は `memory_id = characterId` で保存する。
 - 重複保存を避けるため、判定時に既存の記憶を他の機能より広め（上位20件、重要度10以上）に取得してプロンプトに渡している。
+
+- **感情の向き `emotionValence`（D-040）**: 候補の出力に `emotionValence`（`positive`・`negative`・`neutral`）を足し、3つの値のどれかならそのまま保存する（省略・不正な値は項目を付けない）。`dialogueGenerator` が重要記憶を読むときに、今の気分の快・不快と同じ向きの記憶のスコアにボーナスをかける（気分一致の記憶。`lib/dynamo.ts` の `getRelevantMemories` の `moodPleasure`）。この項目が無い古い記憶にはボーナスがかからない。

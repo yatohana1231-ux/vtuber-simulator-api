@@ -14,8 +14,12 @@ import {
   getLatestAbsenceRecord,
   getRecentAbsenceRecords,
   getRelevantMemories,
+  getStoredAffectState,
   saveAbsenceRecord,
 } from "../lib/dynamo.js";
+import { resolveAffectProfile } from "../lib/affect/personality.js";
+import { projectAffectState } from "../lib/affect/affectProjection.js";
+import { formatAffectForPrompt } from "../lib/affect/affectText.js";
 import { buildAbsenceSkeleton } from "./skeleton.js";
 import { buildAbsenceSimulatorPromptLayers } from "./prompt.js";
 import {
@@ -24,7 +28,14 @@ import {
   selectOpenThreadsForPrompt,
   type AbsenceSimulatorModelOutput,
 } from "./modelOutput.js";
-import type { AbsenceSimulatorRequest, AbsenceSimulatorResult } from "../types.js";
+import type {
+  AbsenceSimulatorRequest,
+  AbsenceSimulatorResult,
+  CharacterAffectState,
+  CharacterDefinition,
+  Lifestyle,
+  World,
+} from "../types.js";
 
 // -------------------------------------------------------
 // 定数
@@ -40,6 +51,37 @@ export const RECENT_ABSENCE_RECORD_COUNT = 3;
 export const MAX_OUTPUT_TOKENS = 4000;
 
 const USER_MESSAGE = "不在期間中の出来事と行動を、指定のJSON形式で書いてください。";
+
+// -------------------------------------------------------
+// 内部ヘルパー
+// -------------------------------------------------------
+
+/**
+ * 不在に入ったとき（lastLoginAt）の気分・情動・欲求を、プロンプト用の文章にする（D-040 フェーズ13b）。
+ * 状態レコードが無い・古い形（stateVersion=2 でない）なら undefined（③に節を出さない）。
+ * 状態レコードには書かず、関係の記録（RelationshipRecord）も読まない（読み込みを増やさないため、
+ * 段階は保存済みの perceptionStageBase から決める）。
+ */
+function resolveAffectTextAtAbsenceStart(
+  state: CharacterAffectState | null,
+  character: CharacterDefinition,
+  world: World,
+  lifestyle: Lifestyle,
+  lastLoginAt: string
+): string | undefined {
+  if (state === null) return undefined;
+
+  const profile = resolveAffectProfile(character);
+  const stageKey = state.perceptionStageBase?.stageKey ?? character.relationshipStages[0].key;
+  const projected = projectAffectState(state, new Date(lastLoginAt), {
+    profile,
+    lifestyle,
+    timeZone: world.timezone,
+    stages: character.relationshipStages,
+    stageKey,
+  });
+  return formatAffectForPrompt(projected);
+}
 
 // -------------------------------------------------------
 // 公開関数
@@ -62,15 +104,23 @@ export async function runAbsenceSimulator(
     now: new Date(req.now),
   });
 
-  const [latest, recentRecords, memories] = await Promise.all([
+  const [latest, recentRecords, memories, storedAffect] = await Promise.all([
     getLatestAbsenceRecord(characterId),
     getRecentAbsenceRecords(characterId, RECENT_ABSENCE_RECORD_COUNT),
     getRelevantMemories(characterId),
+    getStoredAffectState(characterId),
   ]);
 
   const previousThreads = latest?.threads ?? [];
   const openThreads = selectOpenThreadsForPrompt(previousThreads, createdAt);
   const recentEventSummaries = recentRecords.flatMap((r) => r.events.map((e) => e.summary));
+  const affectText = resolveAffectTextAtAbsenceStart(
+    storedAffect.state,
+    character,
+    world,
+    lifestyle,
+    req.lastLoginAt
+  );
 
   const layers = buildAbsenceSimulatorPromptLayers({
     world,
@@ -79,6 +129,7 @@ export async function runAbsenceSimulator(
     openThreads,
     recentEventSummaries,
     memories,
+    affectText,
   });
 
   let modelOutput: AbsenceSimulatorModelOutput;

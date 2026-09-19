@@ -19,7 +19,6 @@ import type {
   DialogueGeneratorResponse,
   EmotionUpdaterResponse,
 } from "../../../src/types.js";
-import { DEFAULT_MOOD, DEFAULT_PERCEPTION } from "../../../src/lib/dynamo.js";
 import { getSavedAbsenceRecord } from "./checks/absenceSimulator.js";
 import { getSavedMemories } from "./checks/memoryRetriever.js";
 
@@ -364,19 +363,34 @@ function renderOutputPreview(result: RunResult): string {
       ].join("\n");
     }
     case "emotionUpdater": {
+      // D-040 フェーズ16: 差分は実行前の状態（result.preAffectState）との比較で出す
+      // （DEFAULT_MOOD/DEFAULT_PERCEPTION のような固定の既定値は使わない。
+      // mood は PAD の3軸、emotions・needs も差分として見せる）
       const output = result.output as EmotionUpdaterResponse | undefined;
       if (!output) return "  - (出力なし)";
+      const before = result.preAffectState;
+      const emotionsDeltas = formatDeltas(
+        output.emotions as unknown as Record<string, number>,
+        before.emotions as unknown as Record<string, number>
+      );
       const moodDeltas = formatDeltas(
         output.mood as unknown as Record<string, number>,
-        DEFAULT_MOOD as unknown as Record<string, number>
+        before.mood as unknown as Record<string, number>
+      );
+      const needsDeltas = formatDeltas(
+        output.needs as unknown as Record<string, number>,
+        before.needs as unknown as Record<string, number>
       );
       const perceptionDeltas = formatDeltas(
         output.perception as unknown as Record<string, number>,
-        DEFAULT_PERCEPTION as unknown as Record<string, number>
+        before.perception as unknown as Record<string, number>
       );
-      return [`  - mood の変化: ${moodDeltas}`, `  - perception の変化: ${perceptionDeltas}`].join(
-        "\n"
-      );
+      return [
+        `  - emotions の変化: ${emotionsDeltas}`,
+        `  - mood(PAD) の変化: ${moodDeltas}`,
+        `  - needs の変化: ${needsDeltas}`,
+        `  - perception の変化: ${perceptionDeltas}`,
+      ].join("\n");
     }
     case "memoryRetriever": {
       const saved = getSavedMemories(result);

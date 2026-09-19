@@ -7,6 +7,7 @@ import { loadPackage } from "../../../src/lib/packages.js";
 import type { DialogueGeneratorPromptInput } from "../../../src/dialogueGenerator/prompt.js";
 import type {
   AbsenceRecord,
+  CharacterAffectState,
   CharacterDefinition,
   CharacterMemoryItem,
   RelationshipStage,
@@ -85,19 +86,49 @@ function stageWithoutExamples(overrides: Partial<RelationshipStage> = {}): Relat
   };
 }
 
+/**
+ * 感情・関係値の状態（D-040）。既定は情動0・気分ふつう・欲求は疲労50/孤独感0・
+ * 関係値は6軸とも50（標準ラベルになる値）。
+ */
+function affectState(overrides: Partial<CharacterAffectState> = {}): CharacterAffectState {
+  return {
+    emotions: {
+      joy: 0,
+      sadness: 0,
+      hope: 0,
+      anxiety: 0,
+      relief: 0,
+      disappointment: 0,
+      pride: 0,
+      shame: 0,
+      gratitude: 0,
+      admiration: 0,
+      anger: 0,
+      happyFor: 0,
+      sympathy: 0,
+    },
+    mood: { pleasure: 0, arousal: 0, dominance: 0 },
+    needs: { fatigue: 50, loneliness: 0 },
+    perception: { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
+    perceptionStageBase: null,
+    pendingSession: null,
+    affectUpdatedAt: "2026-09-18T10:30:00.000Z",
+    ...overrides,
+  };
+}
+
 function baseInput(overrides: Partial<DialogueGeneratorPromptInput> = {}): DialogueGeneratorPromptInput {
   return {
     world,
     character,
-    mood: { joy: 50, anxiety: 50, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
-    perception: { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
+    affectState: affectState(),
     memories: [memory()],
     historyLogs: [{ role: "user", content: "こんにちは", index: "2026-09-18T10:00:00.000Z" }],
     latestAbsenceRecord: absenceRecord(),
     currentStage: stageWithOwnExamples(),
     relationshipHistoryText: "出会ってから23日目。話した日は15日、会話は120回。最後に話したのは3日前という関係の履歴マーカー。",
     now: new Date("2026-09-18T10:30:00.000Z"),
-    longTimeFlag: 0,
+    isPlayerMessage: true, // 既定はプレイヤーの発言がある会話（旧 longTimeFlag: 0 と同じ位置づけ）
     ...overrides,
   };
 }
@@ -113,19 +144,23 @@ describe("buildDialogueGeneratorPromptLayers", () => {
   });
 
   describe("固定部（① プロンプトキャッシュのための性質）", () => {
-    it("感情・記憶・会話・現在時刻・記録・長期不在フラグ・段階・関係の履歴が違う2つの入力で、固定部は完全に同じ文字列になる", () => {
+    it("感情・関係値・記憶・会話・現在時刻・記録・段階・関係の履歴・プレイヤー発言の有無が違う2つの入力で、固定部は完全に同じ文字列になる", () => {
       const [fixedA] = buildDialogueGeneratorPromptLayers(baseInput());
       const [fixedB] = buildDialogueGeneratorPromptLayers(
         baseInput({
-          mood: { joy: 1, anxiety: 2, angry: 3, fatigue: 4, confidence: 5, loneliness: 6 },
-          perception: { trust: 1, affection: 2, respect: 3, fear: 4, dependence: 5, familiarity: 6 },
+          affectState: affectState({
+            emotions: { ...affectState().emotions, joy: 90 },
+            mood: { pleasure: 80, arousal: 60, dominance: 40 },
+            needs: { fatigue: 90, loneliness: 90 },
+            perception: { trust: 1, affection: 2, respect: 3, fear: 4, dependence: 5, familiarity: 6 },
+          }),
           memories: [],
           historyLogs: [],
           latestAbsenceRecord: null,
           currentStage: stageWithoutExamples(),
           relationshipHistoryText: "今日はじめて会った、という別の関係の履歴マーカー。",
           now: new Date("2026-01-01T00:00:00.000Z"),
-          longTimeFlag: 1,
+          isPlayerMessage: false,
         })
       );
 
@@ -155,11 +190,11 @@ describe("buildDialogueGeneratorPromptLayers", () => {
   });
 
   describe("セッション部（② 今の関係の段階・最新の不在期間の記録）", () => {
-    it("段階・記録が同じなら now・mood・会話が違っても同じ文字列になる", () => {
+    it("段階・記録が同じなら now・感情の状態・会話が違っても同じ文字列になる", () => {
       const [, sessionA] = buildDialogueGeneratorPromptLayers(baseInput());
       const [, sessionB] = buildDialogueGeneratorPromptLayers(
         baseInput({
-          mood: { joy: 99, anxiety: 99, angry: 99, fatigue: 99, confidence: 99, loneliness: 99 },
+          affectState: affectState({ needs: { fatigue: 99, loneliness: 99 } }),
           now: new Date("2026-01-01T00:00:00.000Z"),
           historyLogs: [],
         })
@@ -279,11 +314,49 @@ describe("buildDialogueGeneratorPromptLayers", () => {
       expect(variable).toContain("2026/09/18(金) 19:30");
     });
 
-    it("感情のラベルが入る", () => {
+    it("【現在の感情状態】に気分・情動・欲求の文章が入る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          affectState: affectState({
+            mood: { pleasure: 60, arousal: 50, dominance: 40 }, // +P+A+D（exuberant）で距離が大きく「とても」になる値
+            emotions: { ...affectState().emotions, joy: 60 },
+          }),
+        })
+      );
+
+      expect(variable).toContain("【現在の感情状態】");
+      expect(variable).toContain(
+        "以下はあなた自身の内面の状態です。返答の口調・内容に反映させてください。"
+      );
+      expect(variable).toContain("今の気分：");
+      expect(variable).toContain("いま強く感じていること：喜び");
+      expect(variable).toContain("・疲労：");
+      expect(variable).toContain("・孤独感：");
+    });
+
+    it("情動が何も活動していなければ「特になし」と入る", () => {
       const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput());
 
-      expect(variable).toContain("喜び：50（標準）");
+      expect(variable).toContain("いま強く感じていること：特になし");
+    });
+
+    it("関係値のラベルが入る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput());
+
       expect(variable).toContain("信頼：50（標準）");
+    });
+
+    it("関係値が整数で入る（now まで進めた結果が小数のときは丸められる）", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          affectState: affectState({
+            perception: { trust: 60.6, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
+          }),
+        })
+      );
+
+      expect(variable).toContain("信頼：61（自覚している）");
+      expect(variable).not.toContain("60.6");
     });
 
     it("重要な記憶が入る", () => {
@@ -315,23 +388,96 @@ describe("buildDialogueGeneratorPromptLayers", () => {
       );
     });
 
-    it("長期不在フラグが1のとき備考が入る", () => {
-      const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput({ longTimeFlag: 1 }));
-
-      expect(variable).toContain("【備考】");
-      expect(variable).toContain("さみしさ");
-    });
-
-    it("長期不在フラグが0のとき備考が入らない", () => {
-      const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput({ longTimeFlag: 0 }));
-
-      expect(variable).not.toContain("【備考】");
-    });
-
     it("日付の「/」がHTMLエスケープされていない（&#x2F;を含まない）", () => {
       const [, , variable] = buildDialogueGeneratorPromptLayers(baseInput());
 
       expect(variable).not.toContain("&#x2F;");
+    });
+  });
+
+  describe("再会の【備考】（D-040: 孤独感がしきい値以上、かつプレイヤーの発言が無いときだけ出る）", () => {
+    it("孤独感40・発言が空 → 備考が出る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          affectState: affectState({ needs: { fatigue: 50, loneliness: 40 } }),
+          isPlayerMessage: false,
+        })
+      );
+
+      expect(variable).toContain("【備考】");
+      expect(variable).toContain("久しぶりに会えた。会えなかった間のさみしさを感じている。");
+    });
+
+    it("孤独感39・発言が空 → 備考は出ない", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          affectState: affectState({ needs: { fatigue: 50, loneliness: 39 } }),
+          isPlayerMessage: false,
+        })
+      );
+
+      expect(variable).not.toContain("【備考】");
+    });
+
+    it("孤独感が40以上でも、プレイヤーの発言があれば備考は出ない", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          affectState: affectState({ needs: { fatigue: 50, loneliness: 80 } }),
+          isPlayerMessage: true,
+        })
+      );
+
+      expect(variable).not.toContain("【備考】");
+    });
+
+    it("愛着のスタイルがsecure → secureのふるまいの文が入る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          character: { ...character, attachmentStyle: "secure" },
+          affectState: affectState({ needs: { fatigue: 50, loneliness: 60 } }),
+          isPlayerMessage: false,
+        })
+      );
+
+      expect(variable).toContain("久しぶりに会えたことを素直に喜び、さみしかった気持ちも自然に伝える。");
+    });
+
+    it("愛着のスタイルがanxious → anxiousのふるまいの文が入る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          character: { ...character, attachmentStyle: "anxious" },
+          affectState: affectState({ needs: { fatigue: 50, loneliness: 60 } }),
+          isPlayerMessage: false,
+        })
+      );
+
+      expect(variable).toContain(
+        "会えなかった間の不安やさみしさが強く出る。少し拗ねたり、また来てくれるかを確かめたくなったりする。"
+      );
+    });
+
+    it("愛着のスタイルがavoidant → avoidantのふるまいの文が入る", () => {
+      const [, , variable] = buildDialogueGeneratorPromptLayers(
+        baseInput({
+          character: { ...character, attachmentStyle: "avoidant" },
+          affectState: affectState({ needs: { fatigue: 50, loneliness: 60 } }),
+          isPlayerMessage: false,
+        })
+      );
+
+      expect(variable).toContain(
+        "さみしかったことを素直に言えず、平気なふりをする。ただし、言葉の端々に会えてうれしい気持ちがにじむ。"
+      );
+    });
+
+    it("longTimeFlagを渡しても文面が変わらない（D-040で使わなくなった。廃止した項目と同じく、受け取るが無視する）", () => {
+      const withoutFlag = buildDialogueGeneratorPromptLayers(baseInput());
+      const withFlag = buildDialogueGeneratorPromptLayers({
+        ...baseInput(),
+        longTimeFlag: 1,
+      } as unknown as DialogueGeneratorPromptInput);
+
+      expect(withFlag).toEqual(withoutFlag);
     });
   });
 

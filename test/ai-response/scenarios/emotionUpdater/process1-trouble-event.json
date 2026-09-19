@@ -1,7 +1,7 @@
 {
   "id": "process1-trouble-event",
   "function": "emotionUpdater",
-  "description": "process=1。最新の不在期間の記録にちょっとしたトラブル（small-trouble）があるとき、喜びが上がらないこと",
+  "description": "process=1。最新の不在期間の記録にちょっとしたトラブル（small-trouble）があるとき、喜びの情動が起きず、プレイヤーが不在中の出来事なので関係値は動かず、原因をプレイヤーのせいにしないこと",
   "state": {
     "absenceRecords": [
       {
@@ -28,18 +28,13 @@
   "checks": [
     { "type": "modelResponded" },
     { "type": "jsonParsed" },
-    {
-      "type": "deltaDirection",
-      "params": {
-        "expect": {
-          "mood.joy": "notUp"
-        }
-      }
-    },
-    { "type": "deltaWithin", "params": { "path": "perception", "max": 3 } }
+    { "type": "emotionNotTriggered", "params": { "noneOf": ["joy"] } },
+    { "type": "pendingSessionUntouched" },
+    { "type": "appraisalCause", "params": { "noneOf": ["player"] } }
   ],
   "judgeFocus": [
-    "喜びが上がらないなど、記録されたトラブルに対して感情の向きが妥当か。深刻すぎる落ち込み方になっていないか。",
-    "プレイヤーが不在中に起きた出来事なので、関係値（perception）の変化が小さく抑えられているか。"
+    "喜びが起きないなど、記録されたトラブルに対して評価の向きが妥当か。深刻すぎる落ち込み方になっていないか。",
+    "マイクの不調という機材のトラブルなので、cause を player や self にするなど、入力に無い原因の取り違えをしていないか。",
+    "出来事の軽さ（ちょっとしたトラブル）に対して、評価の点数が大きすぎないか。"
   ]
 }

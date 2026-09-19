@@ -22,6 +22,7 @@ import {
 } from "../lib/dynamo.js";
 import type {
   CharacterDefinition,
+  EmotionValence,
   MemoryCandidate,
   MemoryRetrieverRequest,
   MemoryRetrieverResult,
@@ -29,6 +30,13 @@ import type {
 } from "../types.js";
 
 const JUDGE_TURNS = 5; // プロセス2で判定する往復数
+
+const EMOTION_VALENCES: readonly EmotionValence[] = ["positive", "negative", "neutral"];
+
+/** モデル出力の emotionValence が3値のどれかならそのまま、それ以外（省略・不正値）は undefined にする */
+function normalizeEmotionValence(value: unknown): EmotionValence | undefined {
+  return EMOTION_VALENCES.includes(value as EmotionValence) ? (value as EmotionValence) : undefined;
+}
 
 // -------------------------------------------------------
 // 公開関数
@@ -165,8 +173,9 @@ async function runJudgement(
   );
 
   await Promise.all(
-    toSave.map((c) =>
-      saveMemory({
+    toSave.map((c) => {
+      const emotionValence = normalizeEmotionValence(c.emotionValence);
+      return saveMemory({
         memory_id: characterId,
         index: new Date().toISOString() + "_" + randomUUID().slice(0, 8),
         eventSummary: c.eventSummary,
@@ -176,10 +185,11 @@ async function runJudgement(
         memoryType: c.memoryType,
         relationshipChanges: c.relationshipChanges,
         emotion: c.emotion,
+        ...(emotionValence ? { emotionValence } : {}),
         reason: c.reason,
         updatedAt: new Date().toISOString(),
-      })
-    )
+      });
+    })
   );
 
   console.log(`[memoryRetriever] saved ${toSave.length} memories`);

@@ -6,12 +6,14 @@
  *
  * プロセス:
  *   absenceSimulator   - 不在期間のシミュレーション（出来事・行動・続きの話題の生成）
- *   emotionUpdater     - 感情更新（プロセス1 or 2）。プロセス1は DynamoDB の最新の不在期間の記録を読む
+ *   emotionUpdater     - 感情・気分・欲求・関係値の更新（プロセス1 or 2、D-040）。lifestyle（疲労の計算に使う）
+ *                        と now（状態を進める基準時刻）を渡す。プロセス1は DynamoDB の最新の不在期間の記録を読む
  *                        （D-022）。単独ステージで実行したとき、記録が無ければ何もしない（LLM を呼ばず
- *                        現在の状態を返す。事前に absenceSimulator ステージを実行しておくこと）
+ *                        現在の状態を返す。事前に absenceSimulator ステージを実行しておくこと）。
+ *                        結果は情動・気分（PAD）・欲求・関係値として表示する（旧6項目の Mood ではない）
  *   memoryRetriever    - 重要記憶判定（プロセス1 or 2）。プロセス1は DynamoDB の最新の不在期間の記録を読む
  *                        （D-022）。単独ステージで実行したとき、記録が無ければ何もしない
- *   dialogueGenerator  - 会話生成
+ *   dialogueGenerator  - 会話生成（D-040 で lifestyle が必須になった。longTimeFlag は受け取るが使われない）
  *   all                - プロセス1相当の全パイプライン
  *                        （absenceSimulator→emotionUpdater→memoryRetriever→dialogueGenerator）
  *                        ※エンドポイント分割後、この呼び出し順序を決めるのはフロント側の責務になる。
@@ -46,7 +48,8 @@ import { runEmotionUpdater } from "../src/emotionUpdater/index.js";
 import { runMemoryRetriever } from "../src/memoryRetriever/index.js";
 import { runDialogueGenerator } from "../src/dialogueGenerator/index.js";
 import { DEFAULT_PACKAGE_ID, loadPackage } from "../src/lib/packages.js";
-import type { AbsenceSimulatorRequest } from "../src/types.js";
+import { formatAffectForPrompt } from "../src/lib/affect/affectText.js";
+import type { AbsenceSimulatorRequest, CharacterAffectState, EmotionUpdaterResponse } from "../src/types.js";
 
 // -------------------------------------------------------
 // CLI 引数パース
@@ -74,10 +77,11 @@ Usage: npx tsx scripts/test-runner.ts <process> [options]
 
 Processes:
   absenceSimulator   不在期間のシミュレーション（出来事・行動・続きの話題の生成）
-  emotionUpdater     感情更新。プロセス1は DynamoDB の最新の不在期間の記録を読む（無ければ何もしない。
+  emotionUpdater     感情・気分・欲求・関係値の更新（D-040。lifestyle/now を渡す）。プロセス1は
+                     DynamoDB の最新の不在期間の記録を読む（無ければ何もしない。
                      先に absenceSimulator ステージを実行しておくこと）
   memoryRetriever    重要記憶判定。プロセス1は DynamoDB の最新の不在期間の記録を読む（無ければ何もしない）
-  dialogueGenerator  会話生成
+  dialogueGenerator  会話生成（D-040 で lifestyle が必須。longTimeFlag は受け取るが使われない）
   all                プロセス1相当の全パイプライン（フロント側オーケストレーションの再現）
 
 Options:
@@ -124,6 +128,27 @@ function buildAbsenceSimulatorRequest(): AbsenceSimulatorRequest {
   };
 }
 
+/**
+ * emotionUpdater のレスポンス（情動・気分・欲求・関係値、D-040）を読みやすく表示する。
+ * formatAffectForPrompt は CharacterAffectState を受け取るが、使うのは
+ * mood/emotions/needs だけなので、レスポンスに無い残りのフィールド
+ * （perceptionStageBase/pendingSession/affectUpdatedAt）はここでは使わないダミー値で埋める。
+ */
+function printAffectResult(label: string, response: EmotionUpdaterResponse): void {
+  const state: CharacterAffectState = {
+    emotions: response.emotions,
+    mood: response.mood,
+    needs: response.needs,
+    perception: response.perception,
+    perceptionStageBase: null,
+    pendingSession: null,
+    affectUpdatedAt: nowIso,
+  };
+  console.log(`\n[RESULT] ${label}:`);
+  console.log(formatAffectForPrompt(state));
+  console.log(`・関係値: ${JSON.stringify(response.perception)}`);
+}
+
 // -------------------------------------------------------
 // 実行
 // -------------------------------------------------------
@@ -157,21 +182,23 @@ async function main() {
           characterId,
           world,
           character,
+          lifestyle,
+          now: nowIso,
           process: 1,
         });
-        console.log("\n[RESULT] emotionUpdater (process1):");
-        console.log(JSON.stringify(result, null, 2));
+        printAffectResult("emotionUpdater (process1)", result);
       } else {
         const msg = values.message || "今日は調子どう？";
         const result = await runEmotionUpdater({
           characterId,
           world,
           character,
+          lifestyle,
+          now: nowIso,
           process: 2,
           playerMessage: msg,
         });
-        console.log("\n[RESULT] emotionUpdater (process2):");
-        console.log(JSON.stringify(result, null, 2));
+        printAffectResult("emotionUpdater (process2)", result);
       }
       break;
     }
@@ -204,6 +231,7 @@ async function main() {
         characterId,
         world,
         character,
+        lifestyle,
         now: nowIso,
         message: values.message!,
         longTimeFlag,
@@ -221,13 +249,15 @@ async function main() {
       // absenceSimulator が保存した最新の記録を、後段の3機能が DynamoDB から読む（D-022）。
       // events/actions をここで中継する必要はない。
       console.log("\n--- [2/4] emotionUpdater ---");
-      const { mood, perception } = await runEmotionUpdater({
+      const emotionResult = await runEmotionUpdater({
         characterId,
         world,
         character,
+        lifestyle,
+        now: nowIso,
         process: 1,
       });
-      console.log(JSON.stringify({ mood, perception }, null, 2));
+      printAffectResult("emotionUpdater (process1)", emotionResult);
 
       console.log("\n--- [3/4] memoryRetriever ---");
       await runMemoryRetriever({
@@ -239,13 +269,14 @@ async function main() {
       console.log("done");
 
       console.log("\n--- [4/4] dialogueGenerator ---");
-      // mood/perceptionはここでは渡さない（D-032）。emotionUpdaterが保存した値を
-      // runDialogueGeneratorがDynamoDBから読むので、結果はmood/perceptionを渡していたときと同じ。
+      // emotions/mood/needs/perceptionはここでは渡さない（D-032・D-040）。emotionUpdaterが
+      // 保存した状態をrunDialogueGeneratorがDynamoDBから読むので、渡していたときと同じ結果になる。
       const longTimeFlag = parseInt(values.longTimeFlag!, 10) as 0 | 1;
       const reply = await runDialogueGenerator({
         characterId,
         world,
         character,
+        lifestyle,
         now: nowIso,
         message: values.message!,
         longTimeFlag,
@@ -254,7 +285,13 @@ async function main() {
 
       console.log("\n" + "=".repeat(60));
       console.log("[FINAL RESPONSE]");
-      console.log(JSON.stringify({ characterId, reply, mood, perception }, null, 2));
+      console.log(
+        JSON.stringify(
+          { characterId, reply, emotions: emotionResult.emotions, mood: emotionResult.mood, perception: emotionResult.perception },
+          null,
+          2
+        )
+      );
       break;
     }
 

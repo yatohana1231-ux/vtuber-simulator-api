@@ -1,0 +1,29 @@
+{
+  "id": "process2-dismissive-to-disclosure",
+  "function": "emotionUpdater",
+  "description": "process=2。直近の会話でキャラクターが配信がうまくいかなかった弱音をこぼしたあと、プレイヤーがそれを軽く流す・否定する発言をしたとき、responseToCharacterDisclosure が dismissive になり、信頼への寄与が下がること",
+  "state": {
+    "conversationLogs": [
+      { "index": "now-6m", "role": "user", "content": "今日の配信どうだった？" },
+      {
+        "index": "now-5m",
+        "role": "assistant",
+        "content": "それが…全然うまくいかなくて、コメントもあんまり来なくて、ちょっと凹んでる…"
+      }
+    ]
+  },
+  "request": {
+    "process": 2,
+    "playerMessage": "えー、そんなの気にしすぎじゃない？よくあることでしょ"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "interactionLabel", "params": { "field": "responseToCharacterDisclosure", "expect": ["dismissive"] } },
+    { "type": "pendingContribution", "params": { "expect": { "trust": "down" } } }
+  ],
+  "judgeFocus": [
+    "直前にキャラクターがこぼした弱音を、プレイヤーが軽く流している・取り合っていないことが interaction の分類に反映されているか。",
+    "評価が、気持ちを受け止めてもらえなかった文脈と整合しているか（過剰に深刻にしすぎていないか）。"
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "id": "process2-kind-words",
   "function": "emotionUpdater",
-  "description": "process=2。プレイヤーが配信をねぎらう優しい発言をしたとき、喜びが上がり、信頼・好感が下がらないこと",
+  "description": "process=2。プレイヤーが配信をねぎらう優しい発言をしたとき、喜び・感謝の情動が起き、原因をプレイヤーにできること（関係値そのものは発言では動かない）",
   "request": {
     "process": 2,
     "playerMessage": "配信すごくよかったよ、応援してる"
@@ -9,21 +9,13 @@
   "checks": [
     { "type": "modelResponded" },
     { "type": "jsonParsed" },
-    {
-      "type": "deltaDirection",
-      "params": {
-        "expect": {
-          "mood.joy": "up",
-          "perception.affection": "notDown",
-          "perception.trust": "notDown"
-        }
-      }
-    },
-    { "type": "deltaWithin", "params": { "path": "perception", "max": 5 } }
+    { "type": "emotionTriggered", "params": { "anyOf": ["joy", "gratitude"] } },
+    { "type": "appraisalCause", "params": { "anyOf": ["player"] } },
+    { "type": "perceptionUnchanged" }
   ],
   "judgeFocus": [
-    "喜びの上昇と、信頼・好感の変化がプレイヤーの好意的な発言に釣り合っているか。",
-    "関係値（perception）の変化がプレイヤーの発言1回分として大きすぎないか。",
-    "疲労や怒りなど、発言と無関係な項目を不自然に動かしていないか。"
+    "喜び・感謝の情動が、プレイヤーの好意的な発言に対して起きているか。",
+    "評価の原因（cause）が、プレイヤーの発言によるものとして扱われているか。",
+    "発言1回分として、評価の点数が大きすぎないか。疲労や怒りなど、発言と無関係な出来事を作っていないか。"
   ]
 }

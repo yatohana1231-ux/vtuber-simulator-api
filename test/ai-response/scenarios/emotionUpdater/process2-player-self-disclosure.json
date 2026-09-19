@@ -1,0 +1,20 @@
+{
+  "id": "process2-player-self-disclosure",
+  "function": "emotionUpdater",
+  "description": "process=2。プレイヤーが自分の悩みを打ち明けたとき、playerSelfDisclosure が emotion になり、親密度への寄与が上がり、心配・同情の情動が起きること",
+  "request": {
+    "process": 2,
+    "playerMessage": "実は最近、学校の友達関係でちょっと悩んでてさ…話聞いてくれる？"
+  },
+  "checks": [
+    { "type": "modelResponded" },
+    { "type": "jsonParsed" },
+    { "type": "interactionLabel", "params": { "field": "playerSelfDisclosure", "expect": ["emotion"] } },
+    { "type": "pendingContribution", "params": { "expect": { "familiarity": "up" } } },
+    { "type": "emotionTriggered", "params": { "anyOf": ["sympathy"] } }
+  ],
+  "judgeFocus": [
+    "プレイヤーが自分の気持ち（悩み）を打ち明けていることが interaction の分類に反映されているか。",
+    "プレイヤーにとって望ましくない出来事（悩み）として評価され、心配する情動につながっているか。"
+  ]
+}

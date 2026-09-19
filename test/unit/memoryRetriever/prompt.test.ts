@@ -63,6 +63,29 @@ describe("buildMemoryRetrieverPromptLayers", () => {
       expect(fixed).toContain("candidates");
     });
 
+    it("emotionValenceの出力形式と説明が入る（D-040 フェーズ13a）", () => {
+      const [fixed] = buildMemoryRetrieverPromptLayers(baseInput());
+
+      expect(fixed).toContain('"emotionValence": "positive | negative | neutral"');
+      expect(fixed).toContain("emotionValence");
+      expect(fixed).toContain("positive");
+      expect(fixed).toContain("negative");
+      expect(fixed).toContain("neutral");
+    });
+
+    it("入力が違っても固定部のemotionValenceの説明は完全に同じ文字列になる", () => {
+      const [fixedA] = buildMemoryRetrieverPromptLayers(baseInput());
+      const [fixedB] = buildMemoryRetrieverPromptLayers(
+        baseInput({
+          existingMemoriesText: "（なし）",
+          inputText: "【直近の会話（5往復）】\nプレイヤー: 配信見たよ\nテストキャラ: ありがとう",
+        })
+      );
+
+      expect(fixedA).toBe(fixedB);
+      expect(fixedA).toContain('"emotionValence": "positive | negative | neutral"');
+    });
+
     it("既存の重要記憶・判定対象の出来事が入らない", () => {
       const [fixed] = buildMemoryRetrieverPromptLayers(baseInput());
 

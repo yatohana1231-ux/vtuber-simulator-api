@@ -15,7 +15,10 @@
       "lastDemotedAt": null,
       "updatedAt": "now-70d"
     },
-    "perception": { "trust": 65, "affection": 60, "respect": 55, "fear": 5, "dependence": 40, "familiarity": 70 },
+    "affect": {
+      "perception": { "trust": 65, "affection": 60, "respect": 55, "fear": 5, "dependence": 40, "familiarity": 70 },
+      "needs": { "loneliness": 60 }
+    },
     "absenceRecords": [
       {
         "createdAt": "now-1d",

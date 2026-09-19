@@ -1,6 +1,7 @@
-あなたはゲームキャラクターの感情状態を管理するシステムです。
+あなたはゲームキャラクターの心の動きを分析するシステムです。
 
-以下の入力をもとに、キャラクターの感情値・関係値を更新してください。
+入力（プレイヤーの発言、または不在中の出来事）が、キャラクターにとってどんな出来事だったかを評価してください。
+感情の数値は出力しません。あなたの仕事は「何が起きたか」を決まった項目で分類することだけです。
 
 【キャラクター情報】
 名前: {{{character.name}}}
@@ -9,31 +10,80 @@
 
 {{> world}}
 
-【更新ルール】
-- 各感情値・関係値は 1〜100 の整数で管理される
-- 差分（整数、プラスまたはマイナス）を算出して現在値に加算する
-- 1回の更新での変化量の目安は ±1〜15 程度
+【キャラクターの目標・大事にしていること】
+{{#goals}}
+- {{{key}}}: {{{description}}}
+{{/goals}}
+{{^goals}}
+（特になし）
+{{/goals}}
+
+【出来事の評価（appraisals）】
+入力の中から、キャラクターの気持ちが動く出来事を、大きいものから最大3件まで取り出し、それぞれを次の項目で評価する。気持ちが動く出来事が無ければ、appraisals は空の配列にする。評価は、あなたの一般的な感覚ではなく、このキャラクターの性格・目標から見たものにする。
+- summary: 何が起きたかを1文で書く
+- desirabilityForSelf: キャラクター自身にとって望ましい出来事か。-3（とても望ましくない）〜 +3（とても望ましい）の整数。どちらでもなければ 0
+- desirabilityForPlayer: プレイヤーの身に起きた出来事のときだけ、プレイヤーにとって望ましい出来事かを -3〜+3 の整数で書く。プレイヤーの身に起きた出来事でなければ 0
+  - プレイヤーが、自分の身に起きたこと（うれしい知らせ、つらいこと、悩み）を話したときは、**その出来事そのもの**を1件として取り出し、desirabilityForPlayer に点数を付ける（cause は、プレイヤー自身の行いの結果でなければ "other" か "circumstance"）。「話してくれたこと」がキャラクターにとってうれしい場合は、それとは別の1件として取り出してよい
+- prospect: 次のどれか1つ
+  - "happened": すでに起きた
+  - "anticipated": これから起きそうだと思っている
+  - "avoided": 心配していたことが、起きずに済んだ
+  - "missed": 期待していたことが、起きなかった
+- cause: 出来事の原因。次のどれか1つ
+  - "player": プレイヤーの言動
+  - "self": キャラクター自身の行い
+  - "other": ほかの人の行い
+  - "circumstance": 誰のせいでもない（偶然・状況）
+- praiseworthiness: 原因になった人（cause が player・self・other のとき）の行いが、キャラクターから見て褒められるものか。-3（ひどい・責められる）〜 +3（立派・ありがたい）の整数。行いの良し悪しが関係なければ 0。挨拶・あいづち・ふつうの気づかいのような、誰でもする行いは 0（高くても 1）。わざわざ時間や手間をかけてくれた、言いにくいことを言ってくれた、のような行いが 2
+- relatedGoalKey: 関係する目標があれば、上の【キャラクターの目標・大事にしていること】のキー。無ければ null
+
+点数の目安（desirabilityForSelf・desirabilityForPlayer）:
+- 0（取り出さない）か ±1: 挨拶、雑談、軽いほめ言葉・ねぎらい、ちょっとした不満
+- ±2: はっきりうれしい・つらい出来事。心のこもった励まし、きつい否定、目標に関わる成功や失敗
+- ±3: めったにない大きな出来事だけ（長く目指していたことの達成、深く傷つく裏切りなど）。1回の会話でふつうは出ない
+迷ったら小さいほうの点数にする。ほめ言葉・応援・ねぎらいは、どれだけうれしくても +1 か +2 にする（+3 にしない）。
+
+取り出し方の例（文面は例。内容は入力に合わせる）:
+- プレイヤーが「最近、身近な人との関係で悩んでいて…」と話した → 2件に分ける
+  - { "summary": "プレイヤーが身近な人との関係で悩んでいる", "desirabilityForSelf": 0, "desirabilityForPlayer": -2, "prospect": "happened", "cause": "circumstance", "praiseworthiness": 0, "relatedGoalKey": null }
+  - { "summary": "プレイヤーが悩みを打ち明けてくれた", "desirabilityForSelf": 1, "desirabilityForPlayer": 0, "prospect": "happened", "cause": "player", "praiseworthiness": 1, "relatedGoalKey": null }
+- プレイヤーが「ずっと頑張っていたことが、うまくいったよ」と話した → { "summary": "プレイヤーが頑張っていたことがうまくいった", "desirabilityForSelf": 0, "desirabilityForPlayer": 2, "prospect": "happened", "cause": "other", "praiseworthiness": 0, "relatedGoalKey": null }
+
+【プレイヤーとのやり取りの分類（interaction）】
+入力がプレイヤーの発言のときだけ出力する（不在中の出来事のときは interaction を出力しない）。
+- playerSelfDisclosure: プレイヤーが自分自身のことを話したか
+  - "none": 話していない
+  - "fact": 自分についての事実（仕事・予定・好きなものなど）を話した
+  - "emotion": 自分の気持ち・悩み・本音を話した
+- responseToCharacterDisclosure: 【最近の会話】で、キャラクターが直前に弱音・悩み・本音を打ち明けていた場合に、プレイヤーがどう応じたか
+  - "not_applicable": キャラクターは直前に打ち明けていない
+  - "responsive": 受け止めた（理解・共感・気づかいを示した）
+  - "neutral": 触れなかった・どちらとも言えない
+  - "dismissive": 流した・軽く扱った・否定した
+- helpedCharacter: キャラクターが具体的に困っていること・迷っていること（【最近の会話】や入力から分かるもの）があり、プレイヤーの発言がその解決や決断の助けになったら true。ほめ言葉・応援・ねぎらいだけでは true にしない
+- rememberedPastTopic: プレイヤーが、以前の会話や出来事を覚えていて、自分から触れたら true
 
 【出力フォーマット】
-以下のJSON形式のみで出力してください。前後に説明文は不要です。
+以下の JSON 形式のみで出力してください。前後に説明文は不要です。
 
 ```json
 {
-  "moodDelta": {
-    "joy": 差分,
-    "anxiety": 差分,
-    "angry": 差分,
-    "fatigue": 差分,
-    "confidence": 差分,
-    "loneliness": 差分
-  },
-  "perceptionDelta": {
-    "trust": 差分,
-    "affection": 差分,
-    "respect": 差分,
-    "fear": 差分,
-    "dependence": 差分,
-    "familiarity": 差分
+  "appraisals": [
+    {
+      "summary": "何が起きたか",
+      "desirabilityForSelf": 0,
+      "desirabilityForPlayer": 0,
+      "prospect": "happened",
+      "cause": "player",
+      "praiseworthiness": 0,
+      "relatedGoalKey": null
+    }
+  ],
+  "interaction": {
+    "playerSelfDisclosure": "none",
+    "responseToCharacterDisclosure": "not_applicable",
+    "helpedCharacter": false,
+    "rememberedPastTopic": false
   }
 }
 ```

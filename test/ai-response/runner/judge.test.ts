@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { buildJudgeSystemPrompt, buildJudgeUserMessage, shouldJudge, type JudgeRunArgs } from "./judge.js";
-import { makeCharacter, makeContext, makeModelCall, makeRunResult, makeScenario } from "./checks/fixtures.js";
+import { makeAffectState, makeCharacter, makeContext, makeModelCall, makeRunResult, makeScenario } from "./checks/fixtures.js";
 import type { ModelPrice, RubricCriterion } from "./types.js";
 
 // judgeRun は src/lib/bedrock.ts 経由で BedrockRuntimeClient.prototype.send を呼び、
@@ -262,30 +262,73 @@ describe("buildJudgeUserMessage", () => {
     expect(message).toContain("散歩した");
   });
 
-  it("emotionUpdater: 更新前後の値と差分が入る", () => {
+  it("emotionUpdater: LLM の評価（appraisals・interaction）・情動の差分・pendingSession.last が入る（D-040 フェーズ16b）", () => {
     const scenario = makeScenario({
       function: "emotionUpdater",
       description: "やさしい発言",
       request: { process: 2, playerMessage: "いつもありがとう" },
-      state: {
-        mood: { joy: 50, anxiety: 50, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
-        perception: { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
-      },
     });
     const context = makeContext({ resolvedScenario: scenario });
+    const before = makeAffectState({
+      perception: { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
+    });
+    const after = makeAffectState({
+      emotions: { ...before.emotions, joy: 60 },
+      perception: { trust: 50, affection: 50, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
+      pendingSession: { startedAt: "2026-01-01T00:00:00.000Z", lastMessageAt: "2026-01-01T00:00:00.000Z", messageCount: 1, peak: { trust: 5 }, last: { trust: 5 } },
+    });
+    const responseText = JSON.stringify({
+      appraisals: [
+        {
+          summary: "いつも感謝してくれる",
+          desirabilityForSelf: 2,
+          desirabilityForPlayer: 0,
+          prospect: "happened",
+          cause: "player",
+          praiseworthiness: 1,
+        },
+      ],
+      interaction: {
+        playerSelfDisclosure: "none",
+        responseToCharacterDisclosure: "not_applicable",
+        helpedCharacter: false,
+        rememberedPastTopic: false,
+      },
+    });
     const result = makeRunResult({
       function: "emotionUpdater",
-      output: {
-        mood: { joy: 60, anxiety: 50, angry: 50, fatigue: 50, confidence: 50, loneliness: 50 },
-        perception: { trust: 55, affection: 55, respect: 50, fear: 50, dependence: 50, familiarity: 50 },
-      },
+      preAffectState: before,
+      postAffectState: after,
+      modelCalls: [makeModelCall({ responseText })],
+      output: { emotions: after.emotions, mood: after.mood, needs: after.needs, perception: after.perception },
     });
 
     const message = buildJudgeUserMessage(scenario, result, context);
 
     expect(message).toContain("いつもありがとう");
-    expect(message).toContain("joy:+10");
-    expect(message).toContain("trust:+5");
+    // LLM が出した評価（appraisals）が入る
+    expect(message).toContain("いつも感謝してくれる");
+    expect(message).toContain("cause=player");
+    // サーバーが加えた情動の変化（数値の差分）が入る
+    expect(message).toContain("joy:+60.0");
+    // 情動（喜び=joy）は formatAffectForPrompt の日本語の文章でも示す
+    expect(message).toContain("喜び");
+    // 今回の発言の関係値への寄与（pendingSession.last）が入る
+    expect(message).toContain("trust:+5.00");
+  });
+
+  it("emotionUpdater: postAffectState が無い（run* が例外を投げたなど） → 出力に「出力なし」と書く", () => {
+    const scenario = makeScenario({
+      function: "emotionUpdater",
+      description: "例外",
+      request: { process: 2, playerMessage: "x" },
+    });
+    const context = makeContext({ resolvedScenario: scenario });
+    const result = makeRunResult({ function: "emotionUpdater", postAffectState: undefined });
+
+    const message = buildJudgeUserMessage(scenario, result, context);
+
+    expect(message).toContain("（出力なし）");
   });
 
   it("memoryRetriever: 保存が0件なら「保存無し」と書く", () => {

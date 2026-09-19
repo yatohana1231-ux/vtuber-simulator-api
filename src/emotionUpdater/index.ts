@@ -1,141 +1,175 @@
 // -------------------------------------------------------
-// emotionUpdater
+// emotionUpdater（D-040）
+//
+// LLM には出来事の評価（分類）だけをさせ、感情・気分・欲求・関係値の数値は
+// サーバーの純粋な関数（lib/affect/）で計算する。関係値は発言ごとには動かさず、
+// セッションの途中経過（pendingSession）にため、セッションが終わったときに
+// projectAffectState（lib/affectStateStore.ts 経由）の中で1回だけ反映する。
+//
 // process=1 は最新の不在期間の記録（DynamoDB から読む。D-022）、
-// process=2 はプレイヤー発言をインプットとしてキャラクターの感情値・関係値を更新する。
+// process=2 はプレイヤー発言を入力にする。
 // -------------------------------------------------------
 
 import { buildEmotionUpdaterPromptLayers } from "./prompt.js";
 import { invokeModelJson } from "../lib/bedrock.js";
 import { formatAbsenceRecordAsInputText } from "../lib/absenceRecordText.js";
-import {
-  getCharacterState,
-  getLatestAbsenceRecord,
-  saveCharacterState,
-  DEFAULT_MOOD,
-  DEFAULT_PERCEPTION,
-} from "../lib/dynamo.js";
-import { clamp } from "../lib/utils.js";
-import type {
-  EmotionUpdaterRequest,
-  EmotionUpdaterResponse,
-  Mood,
-  Perception,
-} from "../types.js";
+import { loadProjectedAffectState } from "../lib/affectStateStore.js";
+import { getLatestAbsenceRecord, getRecentLogs, saveCharacterAffectState } from "../lib/dynamo.js";
+import { appraisalsToEmotionImpulses, parseEmotionUpdaterModelOutput } from "../lib/affect/appraisal.js";
+import { applyEmotionImpulses, getActiveEmotions } from "../lib/affect/emotionDynamics.js";
+import { applyPullPush, describeMood } from "../lib/affect/moodDynamics.js";
+import { relieveLonelinessByMessage } from "../lib/affect/needs.js";
+import { computeMessageContribution } from "../lib/affect/perceptionDynamics.js";
+import { addMessageToSession } from "../lib/affect/sessionAccumulator.js";
+import { formatAffectForPrompt } from "../lib/affect/affectText.js";
+import type { CharacterAffectState, ConversationLogItem, EmotionUpdaterRequest, EmotionUpdaterResponse } from "../types.js";
+
+// process=2 で直近の会話を読む件数（/dialogue-generator が先に呼ばれているため、
+// 末尾は「今回のプレイヤーの発言」と「それへのキャラクターの返事」になっている）
+const RECENT_LOG_LIMIT = 6;
 
 // -------------------------------------------------------
 // 公開関数
 // -------------------------------------------------------
 
-export async function runEmotionUpdater(
-  req: EmotionUpdaterRequest
-): Promise<EmotionUpdaterResponse> {
-  console.log(`[emotionUpdater] start process=${req.process}`);
+export async function runEmotionUpdater(req: EmotionUpdaterRequest): Promise<EmotionUpdaterResponse> {
+  console.log(`[emotionUpdater] start process=${req.process} characterId=${req.characterId}`);
 
-  const { characterId, world, character } = req;
-  const { mood: currentMood, perception: currentPerception } = await getCharacterState(
+  const { characterId, world, character, lifestyle } = req;
+  const now = new Date(req.now);
+
+  const { state: projectedState, profile, stage, stageIndex } = await loadProjectedAffectState({
     characterId,
-    character.initialPerception
-  );
+    world,
+    character,
+    lifestyle,
+    now,
+  });
 
   let inputText: string;
+  let recentConversationText = "";
 
   if (req.process === 1) {
-    // process=1: 最新の不在期間の記録を読む（D-022）。記録が無ければ LLM を呼ばず現在の状態を返す
+    // process=1: 最新の不在期間の記録を読む（D-022）。記録が無ければ LLM を呼ばず、
+    // 時間の変化とセッションの確定を残すため、進めた状態だけ保存して返す。
     const record = await getLatestAbsenceRecord(characterId);
     if (!record) {
-      console.log(`[emotionUpdater] no absence record for characterId=${characterId}, skip`);
-      return { mood: currentMood, perception: currentPerception };
+      console.log(`[emotionUpdater] no absence record for characterId=${characterId}, skip LLM`);
+      await saveCharacterAffectState(characterId, projectedState);
+      logUpdatedState(projectedState);
+      return responseFromState(projectedState);
     }
-
     inputText = formatAbsenceRecordAsInputText(record, world.timezone);
   } else {
-    // process=2: プレイヤー発言がインプット
+    // process=2: プレイヤー発言がインプット。直近の会話のうち、今回の発言より前だけを
+    // 【最近の会話】に入れる（/dialogue-generator がすでに今回のやり取りをログに残している）
     inputText = `【プレイヤーの発言】\n${req.playerMessage}`;
+    const recentLogs = await getRecentLogs(characterId, RECENT_LOG_LIMIT);
+    recentConversationText = formatPriorConversation(recentLogs, req.playerMessage, character.name);
   }
 
   const systemPrompt = buildEmotionUpdaterPromptLayers({
     world,
     character,
     process: req.process,
-    currentMood,
-    currentPerception,
+    affectText: formatAffectForPrompt(projectedState),
+    stageDescription: stage.description,
+    recentConversationText,
     inputText,
   });
 
-  // invokeModelJson は Bedrock の JSON 出力をそのまま返すだけで実行時の型チェックは行わないため、
-  // ここでは unknown として受け取り、applyDelta 側で1項目ずつ検証する（F-019）。
-  const fallback: unknown = { moodDelta: {}, perceptionDelta: {} };
-  const delta = await invokeModelJson<unknown>(
-    systemPrompt,
-    "感情値・関係値の差分を算出してください。",
-    fallback
-  );
+  const fallback: unknown = { appraisals: [] };
+  const raw = await invokeModelJson<unknown>(systemPrompt, "出来事を評価してください。", fallback);
+  const { appraisals, interaction, warnings } = parseEmotionUpdaterModelOutput(raw, profile.goals, req.process);
+  for (const warning of warnings) {
+    console.warn(`[emotionUpdater] ${warning}`);
+  }
 
-  // delta 自体、または moodDelta/perceptionDelta がプレーンなオブジェクトでない場合は
-  // 差分なし（{}）として扱う（モデルの応答全体が null・配列・文字列などのケースに対応）
-  const deltaObj = isPlainObject(delta) ? delta : {};
+  const impulses = appraisalsToEmotionImpulses(appraisals, profile);
+  const emotions = applyEmotionImpulses(projectedState.emotions, impulses);
+  const mood = applyPullPush(projectedState.mood, emotions);
 
-  // 差分を適用して 1〜100 にクランプ
-  const updatedMood = applyDelta(currentMood, deltaObj.moodDelta, DEFAULT_MOOD, "moodDelta");
-  const updatedPerception = applyDelta(
-    currentPerception,
-    deltaObj.perceptionDelta,
-    DEFAULT_PERCEPTION,
-    "perceptionDelta"
-  );
+  let needs = projectedState.needs;
+  let pendingSession = projectedState.pendingSession;
 
-  // DynamoDB に保存
-  await saveCharacterState(characterId, updatedMood, updatedPerception);
+  if (req.process === 2) {
+    needs = { ...needs, loneliness: relieveLonelinessByMessage(needs.loneliness) };
 
-  console.log("[emotionUpdater] updated mood:", JSON.stringify(updatedMood));
-  console.log("[emotionUpdater] updated perception:", JSON.stringify(updatedPerception));
+    const contribution = computeMessageContribution({
+      impulses,
+      interaction,
+      stageIndex,
+      stageCount: character.relationshipStages.length,
+    });
+    pendingSession = addMessageToSession(pendingSession, contribution, now);
+  }
 
-  return { mood: updatedMood, perception: updatedPerception };
+  const updatedState: CharacterAffectState = {
+    ...projectedState,
+    emotions,
+    mood,
+    needs,
+    pendingSession,
+  };
+
+  await saveCharacterAffectState(characterId, updatedState);
+  logAppraisalSummary(appraisals, impulses);
+  logUpdatedState(updatedState);
+
+  return responseFromState(updatedState);
 }
 
 // -------------------------------------------------------
 // ヘルパー
 // -------------------------------------------------------
 
-/** value がプレーンなオブジェクト（null・配列・プリミティブではない）かどうか */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function responseFromState(state: CharacterAffectState): EmotionUpdaterResponse {
+  return {
+    emotions: state.emotions,
+    mood: state.mood,
+    needs: state.needs,
+    perception: state.perception,
+  };
 }
 
 /**
- * moodDelta/perceptionDelta を current に適用して 1〜100 にクランプする（F-019）。
- * delta はモデルの応答をそのまま渡すため、実行時に型の保証が無い（unknown）。
- * - キーごとに `typeof v === "number" && Number.isFinite(v)` を満たす値だけを差分として採用する。
- *   数字の文字列（"5"）・null・NaN・Infinity・オブジェクト等はすべて 0（変化なし）として扱う。
- * - delta 自体がプレーンなオブジェクトでない場合（null・配列・文字列など）は {} と同じ扱いにする。
- * - キーが無い（undefined）はモデルが「変化なし」として省略した正常なケースなので警告しないが、
- *   それ以外の不正な値はログに残す（項目名と値）。
- * - キーの集合・順序は defaults（DEFAULT_MOOD/DEFAULT_PERCEPTION）から取り、Mood/Perception と揃える。
- * - current 側の `?? DEFAULT` のフォールバック（値が欠けているときの既定値）は従来どおり維持する。
+ * 直近の会話ログ（古い順）から、今回のプレイヤーの発言より前の会話だけを
+ * 「プレイヤー: …」「{キャラクター名}: …」の行にして返す。
+ * 末尾から見て、今回の発言と同じ content の user ログを探し、それ以降（そのログを含む）を除く。
+ * 見つからなければ全部を入れる。
  */
-function applyDelta<T extends Mood | Perception>(
-  current: T,
-  delta: unknown,
-  defaults: T,
-  label: string
-): T {
-  const deltaObj = isPlainObject(delta) ? delta : {};
-  const currentRecord = current as unknown as Record<string, number>;
-  const defaultsRecord = defaults as unknown as Record<string, number>;
-  const result: Record<string, number> = {};
-
-  for (const key of Object.keys(defaultsRecord)) {
-    const rawValue = deltaObj[key];
-    let appliedDelta = 0;
-
-    if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
-      appliedDelta = rawValue;
-    } else if (rawValue !== undefined) {
-      console.warn(`[emotionUpdater] ${label}.${key} が不正な値のため無視します（変化なしとして扱う）:`, rawValue);
+function formatPriorConversation(
+  logs: ConversationLogItem[],
+  playerMessage: string,
+  characterName: string
+): string {
+  let cutIndex = logs.length;
+  for (let i = logs.length - 1; i >= 0; i--) {
+    if (logs[i].role === "user" && logs[i].content === playerMessage) {
+      cutIndex = i;
+      break;
     }
-
-    result[key] = clamp((currentRecord[key] ?? defaultsRecord[key]) + appliedDelta);
   }
 
-  return result as unknown as T;
+  const prior = logs.slice(0, cutIndex);
+  return prior.map((log) => `${log.role === "user" ? "プレイヤー" : characterName}: ${log.content}`).join("\n");
+}
+
+/** 評価の要約（summary・情動・強さ）をログに出す。characterId 以外の個人情報・機密は出さない */
+function logAppraisalSummary(
+  appraisals: { summary: string }[],
+  impulses: { emotion: string; intensity: number }[]
+): void {
+  const appraisalSummaries = appraisals.map((a) => a.summary).filter((s) => s.length > 0);
+  const impulseSummaries = impulses.map((i) => `${i.emotion}+${Math.round(i.intensity)}`);
+  console.log(
+    `[emotionUpdater] appraisals=${JSON.stringify(appraisalSummaries)} impulses=${JSON.stringify(impulseSummaries)}`
+  );
+}
+
+/** 更新後の気分・活動中の情動をログに出す */
+function logUpdatedState(state: CharacterAffectState): void {
+  const { octant, strength } = describeMood(state.mood);
+  const active = getActiveEmotions(state.emotions).map((e) => `${e.emotion}:${Math.round(e.intensity)}`);
+  console.log(`[emotionUpdater] updated mood=${octant}(${strength}) activeEmotions=${JSON.stringify(active)}`);
 }

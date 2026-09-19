@@ -17,9 +17,10 @@ import { randomUUID } from "node:crypto";
 import * as bedrockRecorder from "./bedrockRecorder.js";
 import { calculateRunCost } from "./cost.js";
 import { selectWritesForCharacter, type FakeDynamo } from "./fakeDynamo.js";
-import type { ModelCallRecord, ModelPrice, RunResult, Scenario, ScenarioRequest } from "./types.js";
+import { buildScenarioAffectState } from "./scenarioAffect.js";
+import type { DynamoWriteRecord, ModelCallRecord, ModelPrice, RunResult, Scenario, ScenarioRequest } from "./types.js";
 
-import type { CharacterPackage } from "../../../src/types.js";
+import type { CharacterAffectState, CharacterAffectStateItem, CharacterPackage } from "../../../src/types.js";
 
 // -------------------------------------------------------
 // 本番コード（動的 import 済みのもの）
@@ -65,12 +66,17 @@ function formatError(e: unknown): string {
   return `${err?.name ?? "Error"}: ${err?.message ?? String(e)}`;
 }
 
-/** ハンドラー（src/handlers/*.ts）と同じ形でリクエストを組み立て、対象の run* を呼ぶ */
+/**
+ * ハンドラー（src/handlers/*.ts）と同じ形でリクエストを組み立て、対象の run* を呼ぶ。
+ * `executionNow` は、シナリオの request.now（dialogueGenerator・emotionUpdater とも省略可。
+ * D-040）を省略したときの既定値（実行開始時刻）に使う。
+ */
 async function callRunFunction(
   scenario: Scenario,
   characterId: string,
   pkg: CharacterPackage,
-  modules: ProductionModules
+  modules: ProductionModules,
+  executionNow: Date
 ): Promise<unknown> {
   const { world, character, lifestyle } = pkg;
 
@@ -92,20 +98,24 @@ async function callRunFunction(
         characterId,
         world,
         character,
-        now: req.now ?? new Date().toISOString(),
+        lifestyle,
+        now: req.now ?? executionNow.toISOString(),
         message: req.message,
         longTimeFlag: req.longTimeFlag,
       });
     }
     case "emotionUpdater": {
-      const req = scenario.request as { process: 1 | 2; playerMessage?: string };
+      const req = scenario.request as { process: 1 | 2; playerMessage?: string; now?: string };
+      const now = req.now ?? executionNow.toISOString();
       if (req.process === 1) {
-        return modules.runEmotionUpdater({ characterId, world, character, process: 1 });
+        return modules.runEmotionUpdater({ characterId, world, character, lifestyle, now, process: 1 });
       }
       return modules.runEmotionUpdater({
         characterId,
         world,
         character,
+        lifestyle,
+        now,
         process: 2,
         playerMessage: req.playerMessage ?? "",
       });
@@ -125,6 +135,33 @@ async function callRunFunction(
 }
 
 /**
+ * writes（1回の実行ぶんに絞り込み済み）から、感情・関係値の状態レコード（stateVersion=2）への
+ * 最後の書き込みを取り出す（D-040 フェーズ16。emotionUpdater だけが書く。saveCharacterAffectState
+ * は常に PutCommand なので operation は "put" のみ）。
+ */
+function extractPostAffectState(
+  writes: DynamoWriteRecord[],
+  stateIndexKey: string
+): CharacterAffectState | undefined {
+  const stateWrites = writes.filter(
+    (w) => w.table === "characterMemory" && w.item.index === stateIndexKey && w.item.stateVersion === 2
+  );
+  const last = stateWrites[stateWrites.length - 1];
+  if (!last) return undefined;
+
+  const item = last.item as unknown as CharacterAffectStateItem;
+  return {
+    emotions: item.emotions,
+    mood: item.mood,
+    needs: item.needs,
+    perception: item.perception,
+    perceptionStageBase: item.perceptionStageBase,
+    pendingSession: item.pendingSession,
+    affectUpdatedAt: item.affectUpdatedAt,
+  };
+}
+
+/**
  * 1回の実行（シナリオ × モデル × 繰り返しの1回）を行い、RunResult を返す
  * （checks は空配列のまま。判定は runner/checks/index.ts の runChecks が別途行う）。
  */
@@ -132,13 +169,19 @@ export async function executeRun(args: ExecuteRunArgs): Promise<RunResult> {
   const { scenario, modelKey, modelId, repeatIndex, fakeDynamo, modules, pricing } = args;
 
   const characterId = `ai-test-${randomUUID()}`;
+  // シナリオの request.now・state.affect.affectUpdatedAt を省略したときの既定値（実行開始時刻）。
+  // 投入する状態（preAffectState）にも、run* を呼ぶときの now の既定値にも同じ値を使う。
+  const executionNow = new Date();
 
   const pkg = await modules.loadPackage(scenario.packageId ?? modules.DEFAULT_PACKAGE_ID);
   if (!pkg) {
     throw new Error(`execute: unknown packageId: ${JSON.stringify(scenario.packageId)}`);
   }
 
-  fakeDynamo.seed(characterId, scenario.state ?? {});
+  // 実行前の状態（時間を進める前の、投入した状態）。state.affect が無いシナリオでも、
+  // キャラクターの初期状態で埋めた値になる（本番の初期状態と同じ）
+  const preAffectState = buildScenarioAffectState(pkg.character, scenario.state?.affect, executionNow);
+  fakeDynamo.seed(characterId, scenario.state ?? {}, pkg.character, executionNow);
 
   // bedrock.ts は呼び出し時点の環境変数を読むため、run* を呼ぶ直前に設定する。
   process.env.BEDROCK_MODEL_ID = modelId;
@@ -149,7 +192,7 @@ export async function executeRun(args: ExecuteRunArgs): Promise<RunResult> {
   let output: unknown;
   let error: string | undefined;
   try {
-    output = await callRunFunction(scenario, characterId, pkg, modules);
+    output = await callRunFunction(scenario, characterId, pkg, modules, executionNow);
   } catch (e) {
     error = formatError(e);
   }
@@ -158,6 +201,7 @@ export async function executeRun(args: ExecuteRunArgs): Promise<RunResult> {
   const modelCalls = bedrockRecorder.stop();
   const writes = selectWritesForCharacter(fakeDynamo.writes, characterId);
   const usage = sumUsage(modelCalls);
+  const postAffectState = extractPostAffectState(writes, modules.dynamo.STATE_INDEX_KEY);
 
   return {
     scenarioId: scenario.id,
@@ -170,6 +214,8 @@ export async function executeRun(args: ExecuteRunArgs): Promise<RunResult> {
     modelCalls,
     writes,
     checks: [],
+    preAffectState,
+    postAffectState,
     metrics: {
       totalLatencyMs,
       inputTokens: usage.inputTokens,

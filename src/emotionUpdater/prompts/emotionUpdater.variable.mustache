@@ -1,13 +1,17 @@
-【現在の感情状態】
-{{{moodText}}}
+【キャラクターの今の状態】
+{{{affectText}}}
 
-【プレイヤーへの関係値】
-{{{perceptionText}}}
+【プレイヤーとの関係】
+{{{stageDescription}}}
 
-【更新のインプット】
+{{#hasRecentConversation}}
+【最近の会話】
+{{{recentConversationText}}}
+
+{{/hasRecentConversation}}
+【評価する入力】
 {{{inputText}}}
 
-【追加の更新ルール】
-{{{perceptionRule}}}
+{{{processRule}}}
 
 以上をもとに、【出力フォーマット】の JSON だけを出力してください。

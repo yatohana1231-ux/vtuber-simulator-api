@@ -3,10 +3,13 @@
 // vitest の対象パターン（*.test.ts）に含まれないよう、ファイル名に .test を付けない。
 // -------------------------------------------------------
 
-import type {
-  CharacterDefinition,
-  Lifestyle,
-  World,
+import {
+  EMOTION_KEYS,
+  type CharacterAffectState,
+  type CharacterDefinition,
+  type Emotions,
+  type Lifestyle,
+  type World,
 } from "../../../../src/types.js";
 import type { CheckContext } from "./types.js";
 import type { ModelCallRecord, RunResult, Scenario, TargetFunction } from "../types.js";
@@ -98,6 +101,28 @@ export function makeContext(overrides: Partial<CheckContext> = {}): CheckContext
   };
 }
 
+/**
+ * テスト用の CharacterAffectState（D-040）。emotions は全項目0で初期化し、overrides で上書きする。
+ * RunResult.preAffectState/postAffectState の既定値づくりに使う。
+ */
+export function makeAffectState(overrides: Partial<CharacterAffectState> = {}): CharacterAffectState {
+  const emotions = EMOTION_KEYS.reduce((acc, key) => {
+    acc[key] = 0;
+    return acc;
+  }, {} as Emotions);
+
+  return {
+    emotions,
+    mood: { pleasure: 0, arousal: 0, dominance: 0 },
+    needs: { fatigue: 30, loneliness: 0 },
+    perception: { trust: 50, affection: 50, respect: 50, fear: 10, dependence: 10, familiarity: 50 },
+    perceptionStageBase: null,
+    pendingSession: null,
+    affectUpdatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 export function makeModelCall(overrides: Partial<ModelCallRecord> = {}): ModelCallRecord {
   return {
     modelId: "test-model",
@@ -123,6 +148,8 @@ export function makeRunResult(overrides: Partial<RunResult> = {}): RunResult {
     modelCalls: [],
     writes: [],
     checks: [],
+    preAffectState: makeAffectState(),
+    postAffectState: undefined,
     metrics: {
       totalLatencyMs: 0,
       inputTokens: 0,

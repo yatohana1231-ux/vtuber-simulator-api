@@ -25,7 +25,18 @@ import {
   noForbiddenElements,
   politenessStyle,
 } from "./dialogueGenerator.js";
-import { deltaDirection, deltaWithin } from "./emotionUpdater.js";
+import {
+  appraisalCause,
+  appraisalCount,
+  emotionNotTriggered,
+  emotionTriggered,
+  interactionLabel,
+  moodDirection,
+  pendingContribution,
+  pendingSessionUntouched,
+  perceptionSettled,
+  perceptionUnchanged,
+} from "./emotionUpdater.js";
 import { savedCount, savedMustMentionAny, savedMustNotMention } from "./memoryRetriever.js";
 
 export type { CheckContext } from "./types.js";
@@ -50,8 +61,16 @@ const REGISTRY: Record<string, CheckFn> = {
   noDuplicateThreads,
   threadContinued,
   // emotionUpdater
-  deltaDirection,
-  deltaWithin,
+  emotionTriggered,
+  emotionNotTriggered,
+  moodDirection,
+  appraisalCount,
+  appraisalCause,
+  interactionLabel,
+  pendingContribution,
+  pendingSessionUntouched,
+  perceptionUnchanged,
+  perceptionSettled,
   // memoryRetriever
   savedCount,
   savedMustMentionAny,

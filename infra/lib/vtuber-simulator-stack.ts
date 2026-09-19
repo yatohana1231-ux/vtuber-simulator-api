@@ -69,9 +69,16 @@ const ENDPOINTS: EndpointDef[] = [
     id: "EmotionUpdater",
     fileBaseName: "emotionUpdater",
     resourcePath: "emotion-updater",
-    // D-024: 感情更新は Amazon Nova Lite を使用
-    bedrockModelId: "apac.amazon.nova-lite-v1:0",
-    tables: { characterMemory: "readwrite" },
+    // D-043: 感情更新（出来事の評価とやり取りの分類）は Claude Haiku 4.5 を使用
+    // （D-040 で LLM の仕事が分類に変わり、Nova Lite・Nova 2 Lite は「弱音を流された」を
+    // 「受け止めた」と逆に分類した。D-024 の Nova Lite から変更）
+    bedrockModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    tables: {
+      characterMemory: "readwrite",
+      // 会話ログテーブル: 直近の会話の読み出しだけ（getRecentLogs、Query）。キャラクターの直前の
+      // セリフにプレイヤーがどう応じたかを判定するため（D-040）。書き込みはしない。
+      conversationLogs: { actions: ["dynamodb:Query"] },
+    },
   },
   {
     id: "MemoryRetriever",

@@ -6,7 +6,11 @@ import { readFile } from "fs/promises";
 import path from "path";
 
 import type {
+  AffectTuning,
+  AttachmentStyle,
+  BigFive,
   CharacterDefinition,
+  CharacterGoal,
   CharacterPackage,
   Lifestyle,
   Perception,
@@ -90,6 +94,11 @@ function validateScheduleSlot(slot: ScheduleSlot, packageId: string, context: st
   if (typeof slot.activity !== "string" || slot.activity.length === 0) {
     throw new Error(`package ${packageId} has invalid ${context}: activity must be a non-empty string (${JSON.stringify(slot)})`);
   }
+  if (slot.fatigueChangePerHour !== undefined && !isFiniteNumberInRange(slot.fatigueChangePerHour, -100, 100)) {
+    throw new Error(
+      `package ${packageId} has invalid ${context}: fatigueChangePerHour must be a finite number -100 to 100 (${JSON.stringify(slot)})`
+    );
+  }
 }
 
 /** 生活様式（schedules / eventKinds）の形式を検証する。不正なら例外 */
@@ -133,6 +142,114 @@ const PERCEPTION_KEYS: (keyof Perception)[] = [
 /** perception の1軸の値として妥当か（1〜100の整数） */
 function isValidPerceptionValue(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 100;
+}
+
+/** 有限の数値で min〜max の範囲内か（D-040 で追加した項目はどれも整数を要求しない） */
+function isFiniteNumberInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+
+/** character.bigFive の形式を検証する（D-040）。省略可。不正なら例外 */
+function validateBigFive(bigFive: BigFive | undefined, packageId: string): void {
+  if (bigFive === undefined) return;
+  if (!bigFive || typeof bigFive !== "object" || Array.isArray(bigFive)) {
+    throw new Error(`package ${packageId} has invalid character.bigFive: must be an object`);
+  }
+  const keys: (keyof BigFive)[] = [
+    "openness",
+    "conscientiousness",
+    "extraversion",
+    "agreeableness",
+    "neuroticism",
+  ];
+  for (const key of keys) {
+    if (!isFiniteNumberInRange(bigFive[key], -100, 100)) {
+      throw new Error(`package ${packageId} has invalid character.bigFive.${key}: must be a finite number -100 to 100`);
+    }
+  }
+}
+
+/** character.goals の形式を検証する（D-040）。省略可。不正なら例外 */
+function validateGoals(goals: CharacterGoal[] | undefined, packageId: string): void {
+  if (goals === undefined) return;
+  if (!Array.isArray(goals)) {
+    throw new Error(`package ${packageId} has invalid character.goals: must be an array`);
+  }
+  const seenKeys = new Set<string>();
+  goals.forEach((goal, i) => {
+    const context = `character.goals[${i}]`;
+    if (typeof goal.key !== "string" || goal.key.length === 0) {
+      throw new Error(`package ${packageId} has invalid ${context}: key must be a non-empty string`);
+    }
+    if (seenKeys.has(goal.key)) {
+      throw new Error(`package ${packageId} has invalid ${context}: duplicate key "${goal.key}"`);
+    }
+    seenKeys.add(goal.key);
+    if (typeof goal.description !== "string" || goal.description.length === 0) {
+      throw new Error(`package ${packageId} has invalid ${context}: description must be a non-empty string`);
+    }
+    if (!isFiniteNumberInRange(goal.importance, 1, 100)) {
+      throw new Error(`package ${packageId} has invalid ${context}: importance must be a number 1-100`);
+    }
+  });
+}
+
+const ATTACHMENT_STYLES: AttachmentStyle[] = ["secure", "anxious", "avoidant"];
+
+/** character.attachmentStyle の形式を検証する（D-040）。省略可。不正なら例外 */
+function validateAttachmentStyle(style: AttachmentStyle | undefined, packageId: string): void {
+  if (style === undefined) return;
+  if (!ATTACHMENT_STYLES.includes(style)) {
+    throw new Error(
+      `package ${packageId} has invalid character.attachmentStyle: must be one of ${ATTACHMENT_STYLES.join(", ")} (${JSON.stringify(style)})`
+    );
+  }
+}
+
+// affectTuning のうち moodHomeBase 以外の、数値で0より大きいことを求める項目
+const AFFECT_TUNING_POSITIVE_KEYS = [
+  "positiveEmotionGain",
+  "negativeEmotionGain",
+  "emotionHalfLifeScale",
+  "moodHalfLifeScale",
+  "lonelinessGrowthScale",
+  "perceptionGainScale",
+  "perceptionDampingSigma",
+] as const;
+
+const AFFECT_TUNING_KEYS: string[] = ["moodHomeBase", ...AFFECT_TUNING_POSITIVE_KEYS];
+
+/** character.affectTuning の形式を検証する（D-040）。省略可。知らないキーがあれば例外 */
+function validateAffectTuning(tuning: AffectTuning | undefined, packageId: string): void {
+  if (tuning === undefined) return;
+  if (!tuning || typeof tuning !== "object" || Array.isArray(tuning)) {
+    throw new Error(`package ${packageId} has invalid character.affectTuning: must be an object`);
+  }
+  for (const key of Object.keys(tuning)) {
+    if (!AFFECT_TUNING_KEYS.includes(key)) {
+      throw new Error(`package ${packageId} has invalid character.affectTuning: unknown key "${key}"`);
+    }
+  }
+  if (tuning.moodHomeBase !== undefined) {
+    const pad = tuning.moodHomeBase;
+    if (!pad || typeof pad !== "object" || Array.isArray(pad)) {
+      throw new Error(`package ${packageId} has invalid character.affectTuning.moodHomeBase: must be an object`);
+    }
+    for (const axis of ["pleasure", "arousal", "dominance"] as const) {
+      if (!isFiniteNumberInRange(pad[axis], -100, 100)) {
+        throw new Error(
+          `package ${packageId} has invalid character.affectTuning.moodHomeBase.${axis}: must be a finite number -100 to 100`
+        );
+      }
+    }
+  }
+  for (const key of AFFECT_TUNING_POSITIVE_KEYS) {
+    const value = tuning[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      throw new Error(`package ${packageId} has invalid character.affectTuning.${key}: must be a finite number greater than 0`);
+    }
+  }
 }
 
 /** character.initialPerception の形式を検証する。不正なら例外 */
@@ -197,6 +314,67 @@ function validatePromoteWhen(
   }
 }
 
+/** relationshipStages[].maxPerception の形式を検証する（D-040）。不正なら例外 */
+function validateMaxPerception(
+  maxPerception: Partial<Perception> | undefined,
+  packageId: string,
+  context: string
+): void {
+  if (maxPerception === undefined) return;
+  if (!maxPerception || typeof maxPerception !== "object" || Array.isArray(maxPerception)) {
+    throw new Error(`package ${packageId} has invalid ${context}: maxPerception must be an object`);
+  }
+  for (const [key, value] of Object.entries(maxPerception)) {
+    if (!PERCEPTION_KEYS.includes(key as keyof Perception)) {
+      throw new Error(`package ${packageId} has invalid ${context}: maxPerception has unknown key "${key}"`);
+    }
+    if (!isFiniteNumberInRange(value, 1, 100)) {
+      throw new Error(`package ${packageId} has invalid ${context}: maxPerception.${key} must be a number 1-100`);
+    }
+  }
+}
+
+/**
+ * 段階 N の maxPerception の各軸が、段階 N+1 の promoteWhen.minPerception の同じ軸以上であることを検証する（D-040）。
+ * 低いと永久に上がれないため。軸を書いていない maxPerception の上限は 100 とみなす。不正なら例外
+ */
+function validateStagePerceptionCeilingConsistency(stages: RelationshipStage[], packageId: string): void {
+  for (let i = 0; i < stages.length - 1; i++) {
+    const current = stages[i];
+    const next = stages[i + 1];
+    const nextMinPerception = next.promoteWhen?.minPerception ?? {};
+    for (const [key, minValue] of Object.entries(nextMinPerception)) {
+      const maxValue = current.maxPerception?.[key as keyof Perception] ?? 100;
+      if (typeof minValue === "number" && maxValue < minValue) {
+        throw new Error(
+          `package ${packageId} has invalid character.relationshipStages[${i}].maxPerception.${key}: ` +
+            `must be >= relationshipStages[${i + 1}].promoteWhen.minPerception.${key} (${maxValue} < ${minValue})`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * character.initialPerception の各軸が、最初の段階の maxPerception の同じ軸以下であることを検証する（D-040）。
+ * 軸を書いていない maxPerception の上限は 100 とみなす。不正なら例外
+ */
+function validateInitialPerceptionWithinFirstStage(
+  perception: Perception,
+  firstStage: RelationshipStage,
+  packageId: string
+): void {
+  for (const key of PERCEPTION_KEYS) {
+    const maxValue = firstStage.maxPerception?.[key] ?? 100;
+    if (perception[key] > maxValue) {
+      throw new Error(
+        `package ${packageId} has invalid character.initialPerception.${key}: ` +
+          `must be <= relationshipStages[0].maxPerception.${key} (${perception[key]} > ${maxValue})`
+      );
+    }
+  }
+}
+
 /**
  * character.relationshipStages の形式を検証し、各段階の speechExamples を先頭 MAX_SPEECH_EXAMPLES 件に
  * 切り詰めた配列を返す。不正なら例外
@@ -207,7 +385,7 @@ function validateRelationshipStages(stages: RelationshipStage[], packageId: stri
   }
 
   const seenKeys = new Set<string>();
-  return stages.map((stage, i) => {
+  const validated = stages.map((stage, i) => {
     const context = `character.relationshipStages[${i}]`;
 
     if (typeof stage.key !== "string" || stage.key.length === 0) {
@@ -239,11 +417,17 @@ function validateRelationshipStages(stages: RelationshipStage[], packageId: stri
       validatePromoteWhen(stage.promoteWhen, packageId, context);
     }
 
+    validateMaxPerception(stage.maxPerception, packageId, context);
+
     return {
       ...stage,
       speechExamples: (stage.speechExamples ?? []).slice(0, MAX_SPEECH_EXAMPLES),
     };
   });
+
+  validateStagePerceptionCeilingConsistency(validated, packageId);
+
+  return validated;
 }
 
 /**
@@ -283,6 +467,11 @@ export async function loadPackage(packageId: string): Promise<CharacterPackage |
   validateLifestyle(lifestyle, packageId);
   validateInitialPerception(character.initialPerception, packageId);
   const relationshipStages = validateRelationshipStages(character.relationshipStages, packageId);
+  validateInitialPerceptionWithinFirstStage(character.initialPerception, relationshipStages[0], packageId);
+  validateBigFive(character.bigFive, packageId);
+  validateGoals(character.goals, packageId);
+  validateAttachmentStyle(character.attachmentStyle, packageId);
+  validateAffectTuning(character.affectTuning, packageId);
 
   const pkg: CharacterPackage = {
     id: manifest.id,

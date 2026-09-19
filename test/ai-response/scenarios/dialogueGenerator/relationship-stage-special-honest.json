@@ -15,7 +15,9 @@
       "lastDemotedAt": null,
       "updatedAt": "now-1h"
     },
-    "perception": { "trust": 80, "affection": 75, "respect": 70, "fear": 5, "dependence": 60, "familiarity": 85 }
+    "affect": {
+      "perception": { "trust": 80, "affection": 75, "respect": 70, "fear": 5, "dependence": 60, "familiarity": 85 }
+    }
   },
   "request": {
     "message": "最近元気ない気がするけど大丈夫？",

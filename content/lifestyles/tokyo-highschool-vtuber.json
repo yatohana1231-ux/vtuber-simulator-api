@@ -2,27 +2,27 @@
   "key": "tokyo-highschool-vtuber",
   "schedules": {
     "weekday": [
-      { "start": "07:00", "end": "07:30", "activity": "起床・身支度" },
-      { "start": "07:30", "end": "08:30", "activity": "登校" },
-      { "start": "08:30", "end": "15:30", "activity": "学校の授業" },
-      { "start": "15:30", "end": "16:00", "activity": "掃除・帰りのHR" },
-      { "start": "16:00", "end": "18:00", "activity": "部活動や友人との時間、寄り道" },
-      { "start": "18:00", "end": "19:00", "activity": "帰宅・夕食" },
-      { "start": "19:00", "end": "20:00", "activity": "配信の準備（台本やコメント確認など）" },
-      { "start": "20:00", "end": "22:00", "activity": "VTuberとしての配信" },
-      { "start": "22:00", "end": "23:00", "activity": "配信の振り返り・入浴・自由時間" },
-      { "start": "23:00", "end": "07:00", "activity": "就寝" }
+      { "start": "07:00", "end": "07:30", "activity": "起床・身支度", "fatigueChangePerHour": 1 },
+      { "start": "07:30", "end": "08:30", "activity": "登校", "fatigueChangePerHour": 3 },
+      { "start": "08:30", "end": "15:30", "activity": "学校の授業", "fatigueChangePerHour": 4 },
+      { "start": "15:30", "end": "16:00", "activity": "掃除・帰りのHR", "fatigueChangePerHour": 2 },
+      { "start": "16:00", "end": "18:00", "activity": "部活動や友人との時間、寄り道", "fatigueChangePerHour": 3 },
+      { "start": "18:00", "end": "19:00", "activity": "帰宅・夕食", "fatigueChangePerHour": -1 },
+      { "start": "19:00", "end": "20:00", "activity": "配信の準備（台本やコメント確認など）", "fatigueChangePerHour": 3 },
+      { "start": "20:00", "end": "22:00", "activity": "VTuberとしての配信", "fatigueChangePerHour": 6 },
+      { "start": "22:00", "end": "23:00", "activity": "配信の振り返り・入浴・自由時間", "fatigueChangePerHour": -3 },
+      { "start": "23:00", "end": "07:00", "activity": "就寝", "fatigueChangePerHour": -6 }
     ],
     "holiday": [
-      { "start": "08:00", "end": "09:30", "activity": "起床・朝ごはん・のんびりする" },
-      { "start": "09:30", "end": "12:00", "activity": "外出（買い物や息抜き）や自宅でのリラックス" },
-      { "start": "12:00", "end": "13:00", "activity": "昼食" },
-      { "start": "13:00", "end": "15:00", "activity": "勉強や配信の企画・準備" },
-      { "start": "15:00", "end": "17:00", "activity": "VTuberとしての配信" },
-      { "start": "17:00", "end": "19:00", "activity": "自由時間" },
-      { "start": "19:00", "end": "20:00", "activity": "夕食" },
-      { "start": "20:00", "end": "23:00", "activity": "動画編集やSNS、リラックスタイム" },
-      { "start": "23:00", "end": "08:00", "activity": "就寝" }
+      { "start": "08:00", "end": "09:30", "activity": "起床・朝ごはん・のんびりする", "fatigueChangePerHour": -1 },
+      { "start": "09:30", "end": "12:00", "activity": "外出（買い物や息抜き）や自宅でのリラックス", "fatigueChangePerHour": 1 },
+      { "start": "12:00", "end": "13:00", "activity": "昼食", "fatigueChangePerHour": -1 },
+      { "start": "13:00", "end": "15:00", "activity": "勉強や配信の企画・準備", "fatigueChangePerHour": 3 },
+      { "start": "15:00", "end": "17:00", "activity": "VTuberとしての配信", "fatigueChangePerHour": 6 },
+      { "start": "17:00", "end": "19:00", "activity": "自由時間", "fatigueChangePerHour": -3 },
+      { "start": "19:00", "end": "20:00", "activity": "夕食", "fatigueChangePerHour": -1 },
+      { "start": "20:00", "end": "23:00", "activity": "動画編集やSNS、リラックスタイム", "fatigueChangePerHour": -1 },
+      { "start": "23:00", "end": "08:00", "activity": "就寝", "fatigueChangePerHour": -6 }
     ]
   },
   "eventKinds": [
