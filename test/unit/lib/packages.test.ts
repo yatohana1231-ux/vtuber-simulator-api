@@ -177,6 +177,97 @@ describe("loadPackage（本物のapi/content/を読む）", () => {
   });
 });
 
+describe("loadPackage（本物のapi/content/のkohaku-modern-fantasy-tokyoを読む）", () => {
+  const PACKAGE_ID = "kohaku-modern-fantasy-tokyo";
+
+  it("world/character/lifestyleが解決される", async () => {
+    const pkg = await loadPackage(PACKAGE_ID);
+
+    expect(pkg).not.toBeNull();
+    expect(pkg?.world.key).toBe("modern-fantasy-tokyo");
+    expect(pkg?.character.key).toBe("kohaku");
+    expect(pkg?.character.name).toBe("コハク");
+    expect(pkg?.lifestyle.key).toBe("tokyo-grad-student-researcher");
+    expect(pkg?.world.timezone).toBe("Asia/Tokyo");
+  });
+
+  it("loadRequestedPackageでも読み込める", async () => {
+    const pkg = await loadRequestedPackage(PACKAGE_ID);
+
+    expect(pkg).not.toBeNull();
+    expect(pkg?.id).toBe(PACKAGE_ID);
+  });
+
+  it("character.relationshipStagesが4段階あり、key の並びが acquaintance/regular/confidant/special", async () => {
+    const pkg = await loadPackage(PACKAGE_ID);
+    const stages = pkg?.character.relationshipStages;
+
+    expect(stages).toHaveLength(4);
+    expect(stages?.map((stage) => stage.key)).toEqual([
+      "acquaintance",
+      "regular",
+      "confidant",
+      "special",
+    ]);
+    expect(stages?.[0].promoteWhen).toBeNull();
+    for (const stage of (stages ?? []).slice(1)) {
+      expect(stage.promoteWhen).not.toBeNull();
+    }
+  });
+
+  it("initialPerceptionの各軸が、先頭の段階のmaxPerception（書いてある軸）以下", async () => {
+    const pkg = await loadPackage(PACKAGE_ID);
+    const initialPerception = pkg?.character.initialPerception;
+    const maxPerception = pkg?.character.relationshipStages[0].maxPerception;
+
+    expect(maxPerception).toBeDefined();
+    for (const [key, max] of Object.entries(maxPerception ?? {})) {
+      expect(initialPerception?.[key as keyof typeof initialPerception]).toBeLessThanOrEqual(max as number);
+    }
+  });
+
+  it("character.attachmentStyleがavoidant、bigFiveの5項目が-100〜100の有限の数値、goalsが3件", async () => {
+    const pkg = await loadPackage(PACKAGE_ID);
+
+    expect(pkg?.character.attachmentStyle).toBe("avoidant");
+
+    const bigFive = pkg?.character.bigFive;
+    expect(bigFive).toBeDefined();
+    for (const key of [
+      "openness",
+      "conscientiousness",
+      "extraversion",
+      "agreeableness",
+      "neuroticism",
+    ] as const) {
+      expect(Number.isFinite(bigFive?.[key])).toBe(true);
+      expect(bigFive?.[key]).toBeGreaterThanOrEqual(-100);
+      expect(bigFive?.[key]).toBeLessThanOrEqual(100);
+    }
+
+    expect(pkg?.character.goals).toHaveLength(3);
+  });
+
+  it("lifestyle.schedulesのweekday/holidayが1件以上あり、全枠がHH:MM形式でfatigueChangePerHourが有限の数値", async () => {
+    const pkg = await loadPackage(PACKAGE_ID);
+    const { weekday, holiday } = pkg!.lifestyle.schedules;
+
+    expect(weekday.length).toBeGreaterThan(0);
+    expect(holiday.length).toBeGreaterThan(0);
+    for (const slot of [...weekday, ...holiday]) {
+      expect(slot.start).toMatch(HHMM_PATTERN);
+      expect(slot.end).toMatch(HHMM_PATTERN);
+      expect(Number.isFinite(slot.fatigueChangePerHour)).toBe(true);
+    }
+  });
+
+  it("world.forbiddenElementsに「魔法」が含まれない（この世界観では魔法が存在するため）", async () => {
+    const pkg = await loadPackage(PACKAGE_ID);
+
+    expect(pkg?.world.forbiddenElements).not.toContain("魔法");
+  });
+});
+
 describe("isValidPackageId", () => {
   it("英小文字・数字・ハイフンのみ → true", () => {
     expect(isValidPackageId("yui-modern-tokyo")).toBe(true);

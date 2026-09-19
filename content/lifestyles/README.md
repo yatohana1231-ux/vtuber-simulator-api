@@ -9,6 +9,7 @@
 | ファイル | 内容 |
 |---|---|
 | `tokyo-highschool-vtuber.json` | 東京都内の高校2年生・最近VTuberデビューした生活様式（`yui-modern-tokyo` パッケージ用） |
+| `tokyo-grad-student-researcher.json` | 東京都内の大学院（博士課程）で文献研究をしている一人暮らしの、夜型の生活様式（就寝は 01:30。日をまたぐ枠は平日・休日とも 00:30 で区切り、曜日の種類が変わっても重ならないようにしている。`kohaku-modern-fantasy-tokyo` パッケージ用） |
 
 ## フィールド
 
